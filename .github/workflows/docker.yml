@@ -37,8 +37,8 @@ jobs:
       - name: Get package version tag
         id: package-version
         run: |
-          if [ -f package.json ]; then
-            VERSION=$(node -p "require('./package.json').version")
+          if [ -f release.json ]; then
+            VERSION=$(node -p "require('./release.json').software_version")
             if [ -n "$VERSION" ] && [ "$VERSION" != "undefined" ]; then
               echo "tag=type=raw,value=${VERSION}" >> "$GITHUB_OUTPUT"
             fi
