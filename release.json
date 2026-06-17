@@ -1,0 +1,8 @@
+{
+  "software_version": "0.1.2",
+  "protocol_version": "1",
+  "capabilities": [
+    "sync_v1",
+    "relay_v1"
+  ]
+}

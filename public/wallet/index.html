@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Address · Sikka</title>
+  <meta name="description" content="Address explorer view for a Sikka node.">
+  <meta name="theme-color" content="#020617">
+  <script src="/public/tailwind.browser.js"></script>
+  <script src="/public/vue.global.prod.js"></script>
+  <script src="/public/wallet-common.js"></script>
+  <style>
+    .maturity-badge {
+      display: inline-flex;
+      align-items: center;
+      border-radius: 9999px;
+      border-width: 1px;
+      padding: 0.125rem 0.625rem;
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+      white-space: nowrap;
+    }
+    .maturity-badge-mature {
+      border-color: rgba(110, 231, 183, 0.25);
+      background: rgba(16, 185, 129, 0.12);
+      color: #a7f3d0;
+    }
+    .maturity-badge-immature {
+      border-color: rgba(251, 191, 36, 0.25);
+      background: rgba(245, 158, 11, 0.12);
+      color: #fcd34d;
+    }
+  </style>
+</head>
+<body class="min-h-screen overflow-x-hidden bg-slate-950 text-slate-100 antialiased">
+  <div id="app" class="relative isolate min-h-screen">
+    <div class="pointer-events-none absolute inset-0 overflow-hidden">
+      <div class="absolute -left-24 top-0 h-72 w-72 rounded-full bg-sky-400/20 blur-3xl"></div>
+      <div class="absolute right-0 top-8 h-80 w-80 rounded-full bg-cyan-300/10 blur-3xl"></div>
+      <div class="absolute bottom-0 left-1/3 h-64 w-64 rounded-full bg-indigo-500/10 blur-3xl"></div>
+      <div class="absolute inset-x-0 top-0 h-[28rem] bg-gradient-to-b from-slate-900 via-slate-950 to-slate-950"></div>
+    </div>
+
+    <main class="relative mx-auto flex min-h-screen w-full max-w-5xl flex-col px-4 py-6 sm:px-6 sm:py-8 lg:px-8 lg:py-12">
+      <a href="/" class="inline-flex items-center gap-2 text-sm font-semibold text-sky-200 transition hover:text-white">
+        <span aria-hidden="true">&larr;</span>
+        Sikka Node
+      </a>
+
+      <section class="mt-4 rounded-[2rem] border border-white/10 bg-slate-950/65 p-5 shadow-2xl shadow-slate-950/60 backdrop-blur-2xl sm:p-7 lg:p-8">
+        <div class="flex flex-col items-start gap-4 sm:flex-row sm:flex-wrap sm:justify-between">
+          <div class="min-w-0 flex-1">
+            <p class="text-xs font-black uppercase tracking-[0.32em] text-sky-200/70">Address</p>
+            <h1 class="mt-3 break-all font-mono text-lg font-black tracking-tight text-white sm:text-2xl lg:text-3xl">{{ pageTitle }}</h1>
+          </div>
+          <div v-if="address && !loading && !errorMessage" class="rounded-full border border-sky-300/20 bg-sky-300/10 px-4 py-2 text-xs font-bold uppercase tracking-[0.24em] text-sky-100">
+            Balance View
+          </div>
+        </div>
+
+        <div v-if="loading" class="mt-8 rounded-[1.5rem] border border-dashed border-white/10 bg-white/[0.03] px-5 py-6 text-sm text-slate-400">
+          Loading address…
+        </div>
+
+        <div v-else-if="errorMessage" class="mt-8 rounded-[1.5rem] border border-rose-300/20 bg-rose-300/10 px-5 py-6 text-sm text-rose-200">
+          <p>{{ errorMessage }}</p>
+          <a href="/" class="mt-3 inline-flex text-sky-200 transition hover:text-white">Return to the node overview</a>
+        </div>
+
+        <div v-else class="mt-8">
+          <section class="grid gap-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-5">
+            <article v-for="card in summaryCards" :key="card.label" class="rounded-[1.35rem] border border-white/10 bg-white/[0.035] px-4 py-4 shadow-lg shadow-slate-950/20 ring-1 ring-white/5">
+              <p class="text-[11px] font-black uppercase tracking-[0.28em] text-sky-200/65">{{ card.label }}</p>
+              <p class="mt-3 break-all text-sm font-semibold text-white" :class="card.mono ? 'font-mono text-xs sm:text-sm' : ''">{{ card.value }}</p>
+            </article>
+          </section>
+
+          <section v-if="utxos.length" class="mt-8">
+            <div class="flex flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <h2 class="text-xs font-black uppercase tracking-[0.32em] text-sky-200/70">Unspent Outputs</h2>
+              <span class="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 text-xs font-semibold text-slate-300">{{ matureUtxoCount }} spendable · {{ immatureUtxoCount }} maturing</span>
+            </div>
+            <div class="mt-4 grid gap-3">
+              <a v-for="(utxo, index) in utxos" :key="utxo.txid + ':' + utxo.index + ':' + index" :href="'/tx/' + encodeURIComponent(utxo.txid)" class="block rounded-[1.25rem] border border-white/10 bg-white/[0.03] px-4 py-4 ring-1 ring-white/5 transition hover:border-sky-200/35 hover:bg-sky-200/5">
+                <div class="flex flex-wrap items-center gap-3">
+                  <p class="font-mono text-xs text-sky-200 sm:text-sm">{{ utxo.txid }}</p>
+                  <span class="rounded-full border border-cyan-300/20 bg-cyan-300/10 px-3 py-1 text-xs font-bold uppercase tracking-[0.2em] text-cyan-200">{{ formatSikka(utxo.value) }} SIKKA</span>
+                  <span :class="utxoMaturityBadgeClass(utxo)" :title="utxoMaturityDetail(utxo)">{{ utxoMaturityLabel(utxo) }}</span>
+                </div>
+                <div class="mt-3 flex flex-wrap gap-x-4 gap-y-2 text-xs text-slate-400 sm:text-sm">
+                  <span>Index: {{ utxo.index ?? '—' }}</span>
+                  <span>Depth: {{ utxo.dag_depth ?? '—' }}</span>
+                  <span>Created: {{ formatTimestamp(utxo.created_at) }}</span>
+                  <span>{{ utxoMaturityDetail(utxo) }}</span>
+                </div>
+              </a>
+            </div>
+          </section>
+
+          <div v-else class="mt-8 rounded-[1.5rem] border border-dashed border-white/10 bg-white/[0.03] px-5 py-6 text-sm text-slate-400">
+            No spendable outputs available for this address.
+          </div>
+
+          <details class="mt-8 overflow-hidden rounded-[1.5rem] border border-white/10 bg-white/[0.03]">
+            <summary class="cursor-pointer px-5 py-4 text-sm font-semibold text-slate-300 transition hover:text-white">View raw JSON</summary>
+            <pre class="overflow-x-auto border-t border-white/10 bg-slate-900/70 px-5 py-5 font-mono text-xs leading-6 text-slate-300">{{ rawJson }}</pre>
+          </details>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script>
+    const { createApp } = Vue;
+    const {
+      formatSikka,
+      normalizeUTXO,
+      utxoMaturityInfo,
+      utxoMaturityBadgeClass
+    } = window;
+
+    createApp({
+      data() {
+        return {
+          address: '',
+          balance: null,
+          utxos: [],
+          genesisTxId: '',
+          rawJson: '',
+          loading: true,
+          errorMessage: ''
+        };
+      },
+      computed: {
+        pageTitle() {
+          if (this.address) {
+            return this.address;
+          }
+          return this.loading ? 'Loading…' : 'No address';
+        },
+        matureUtxos() {
+          return this.utxos.filter(utxo => this.isUtxoMature(utxo));
+        },
+        immatureUtxos() {
+          return this.utxos.filter(utxo => !this.isUtxoMature(utxo));
+        },
+        matureUtxoCount() {
+          return this.matureUtxos.length;
+        },
+        immatureUtxoCount() {
+          return this.immatureUtxos.length;
+        },
+        matureBalanceChillar() {
+          return this.matureUtxos.reduce((sum, utxo) => sum + utxo.value, 0n);
+        },
+        immatureBalanceChillar() {
+          return this.immatureUtxos.reduce((sum, utxo) => sum + utxo.value, 0n);
+        },
+        summaryCards() {
+          return [
+            { label: 'Address', value: this.address || '—', mono: true },
+            { label: 'Balance', value: this.balance != null ? this.formatSikka(this.balance) + ' SIKKA' : '—' },
+            { label: 'Spendable Now', value: this.formatSikka(this.matureBalanceChillar) + ' SIKKA' },
+            { label: 'Maturing', value: this.immatureUtxoCount ? this.formatSikka(this.immatureBalanceChillar) + ' SIKKA (' + this.immatureUtxoCount + ')' : '—' },
+            { label: 'Outputs', value: this.utxos.length }
+          ];
+        }
+      },
+      mounted() {
+        this.address = this.extractPathValue('wallet');
+        if (!this.address) {
+          this.loading = false;
+          this.errorMessage = 'No address found in the URL.';
+          document.title = 'Address · Sikka';
+          return;
+        }
+        document.title = this.address + ' · Sikka';
+        this.loadAddress();
+      },
+      methods: {
+        extractPathValue(prefix) {
+          const segments = window.location.pathname.replace(/^\/+/, '').split('/');
+          if (segments[0] !== prefix) {
+            return '';
+          }
+          return segments.slice(1).map(segment => decodeURIComponent(segment)).join('/').trim();
+        },
+        async loadAddress() {
+          this.loading = true;
+          this.errorMessage = '';
+          try {
+            const statusRes = await this.apiFetch('/v1/status');
+            if (statusRes.ok && statusRes.data && statusRes.data.genesis_tx_id) {
+              this.genesisTxId = String(statusRes.data.genesis_tx_id);
+            } else {
+              this.genesisTxId = '';
+            }
+
+            const utxos = [];
+            let balanceData = null;
+            let afterTxid = '';
+            let afterIndex = -1;
+            for (;;) {
+              let path = '/v1/address/' + encodeURIComponent(this.address) + '?limit=500';
+              if (afterTxid) {
+                path += '&after_outpoint_txid=' + encodeURIComponent(afterTxid);
+                path += '&after_outpoint_index=' + encodeURIComponent(String(afterIndex));
+              }
+              const response = await this.apiFetch(path);
+              if (!response.ok) {
+                this.rawJson = response.raw;
+                this.errorMessage = 'Address not found (HTTP ' + response.status + ').';
+                this.balance = null;
+                this.utxos = [];
+                return;
+              }
+              const payload = response.data || {};
+              balanceData = payload;
+              const pageItems = Array.isArray(payload.items) ? payload.items.map(normalizeUTXO) : [];
+              utxos.push(...pageItems);
+              if (!payload.page || !payload.page.has_more) {
+                break;
+              }
+              const next = payload.page.next && payload.page.next.after_outpoint;
+              if (!next || !next.txid) {
+                break;
+              }
+              afterTxid = String(next.txid);
+              afterIndex = Number(next.index || 0);
+            }
+
+            const meta = balanceData && balanceData.meta && typeof balanceData.meta === 'object' ? balanceData.meta : {};
+            this.balance = meta.balance ?? balanceData.balance;
+            this.utxos = utxos;
+            this.rawJson = this.prettyJSON(balanceData);
+          } catch (error) {
+            this.errorMessage = 'Failed to load address: ' + String(error.message || error);
+            this.balance = null;
+            this.utxos = [];
+            this.rawJson = '';
+          } finally {
+            this.loading = false;
+          }
+        },
+        async apiFetch(path) {
+          const response = await fetch(window.location.origin + path);
+          const text = await response.text();
+          let data;
+          try {
+            data = JSON.parse(text);
+          } catch {
+            data = text;
+          }
+          let raw;
+          try {
+            raw = JSON.stringify(JSON.parse(text), null, 2);
+          } catch {
+            raw = text;
+          }
+          return { ok: response.ok, status: response.status, data, raw };
+        },
+        formatSikka(chillar) {
+          // precise BigInt version from wallet-common.js
+          return formatSikka(chillar);
+        },
+        formatTimestamp(unix) {
+          if (!unix) {
+            return '—';
+          }
+          const date = new Date(Number(unix) * 1000);
+          return Number.isNaN(date.getTime()) ? '—' : date.toLocaleString();
+        },
+        utxoMaturityState(utxo) {
+          return utxoMaturityInfo(utxo, { genesisTxId: this.genesisTxId });
+        },
+        isUtxoMature(utxo) {
+          return this.utxoMaturityState(utxo).mature;
+        },
+        utxoMaturityLabel(utxo) {
+          return this.utxoMaturityState(utxo).label;
+        },
+        utxoMaturityDetail(utxo) {
+          return this.utxoMaturityState(utxo).detail;
+        },
+        utxoMaturityBadgeClass(utxo) {
+          return utxoMaturityBadgeClass(this.utxoMaturityState(utxo));
+        },
+        prettyJSON(value) {
+          return JSON.stringify(value, null, 2);
+        }
+      }
+    }).mount('#app');
+  </script>
+</body>
+</html>

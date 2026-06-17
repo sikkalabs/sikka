@@ -1,0 +1,14 @@
+# Changelog
+
+## 0.1.2
+
+- changed default port to 74552
+
+## 0.1.1
+
+- New Sync Algo
+- FIX- pagination cursor bug and the premature dag_size exit
+
+## 0.1.0
+
+- Mainnet 
