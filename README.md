@@ -8,7 +8,6 @@ A next-generation digital currency built for humans, autonomous agents, and mach
   <img src="https://img.shields.io/badge/Fees-0-brightgreen?style=flat-square" />
   <img src="https://img.shields.io/badge/Consensus-DAG-blue?style=flat-square" />
   <img src="https://img.shields.io/badge/Security-ML--DSA--87-purple?style=flat-square" />
-  <a href="https://hub.docker.com/r/besoeasy/sikka"><img src="https://img.shields.io/docker/pulls/besoeasy/sikka?style=flat-square&logo=docker" /></a>
   <a href="https://discord.gg/HxsRdB2zjb"><img src="https://img.shields.io/badge/Discord-Join%20Us-5865F2?style=flat-square&logo=discord&logoColor=white" /></a>
 </p>
 
@@ -19,7 +18,7 @@ Sikka is lightweight and efficient. The production Docker image is only **17 M
 **Run a node:**
 
 ```bash
-docker run -d --restart unless-stopped -p 64552:64552 besoeasy/sikka:latest
+docker run -d --restart unless-stopped -p 64552:64552 ghcr.io/sikkalabs/sikka
 ```
 
 **Run with options** (persistent data, stable onion identity, and a public label):
@@ -31,7 +30,7 @@ docker run -d --restart unless-stopped \
   -e nodeprivatekey=your-custom-key \
   -e nodeaddress=sikka1p4ktc4mcwzekfauhw2eeqfx5edeffaqtmcv3qaautjkrh55slgrmswvkjvf \
   -e nodemessage="SIKKA relay node v0.0.31" \
-  besoeasy/sikka:latest
+  ghcr.io/sikkalabs/sikka
 ```
 
 ### Environment variables
