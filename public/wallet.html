@@ -296,6 +296,124 @@
       border-radius: 1.5rem;
     }
 
+    .node-operator-section {
+      position: relative;
+      overflow: hidden;
+      border-radius: 1.25rem;
+      border: 1px solid rgba(56, 189, 248, 0.2);
+      background:
+        radial-gradient(ellipse 80% 120% at 0% 0%, rgba(56, 189, 248, 0.14), transparent 55%),
+        linear-gradient(145deg, rgba(15, 23, 42, 0.98) 0%, rgba(8, 47, 73, 0.55) 100%);
+      box-shadow: var(--shadow-md), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+    }
+
+    .node-operator-section::before {
+      content: '';
+      position: absolute;
+      inset: 0 auto auto 0;
+      width: 100%;
+      height: 1px;
+      background: linear-gradient(90deg, transparent, rgba(125, 211, 252, 0.45), transparent);
+      pointer-events: none;
+    }
+
+    .node-operator-section__inner {
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
+      padding: 1.125rem 1.25rem;
+    }
+
+    @media (min-width: 640px) {
+      .node-operator-section__inner {
+        flex-direction: row;
+        align-items: center;
+        gap: 1.25rem;
+        padding: 1.25rem 1.5rem;
+      }
+    }
+
+    .node-operator-section__icon {
+      display: flex;
+      height: 2.75rem;
+      width: 2.75rem;
+      flex-shrink: 0;
+      align-items: center;
+      justify-content: center;
+      border-radius: 0.875rem;
+      background: rgba(56, 189, 248, 0.12);
+      color: #7dd3fc;
+      box-shadow: inset 0 0 0 1px rgba(125, 211, 252, 0.2);
+    }
+
+    .node-operator-section__body {
+      min-width: 0;
+      flex: 1 1 auto;
+    }
+
+    .node-operator-section__eyebrow {
+      margin: 0;
+      font-size: 0.6875rem;
+      font-weight: 600;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: #7dd3fc;
+    }
+
+    .node-operator-section__title {
+      margin: 0.25rem 0 0;
+      font-size: 1.0625rem;
+      font-weight: 600;
+      letter-spacing: -0.02em;
+      color: #f8fafc;
+    }
+
+    .node-operator-section__message {
+      margin: 0.5rem 0 0;
+      max-width: 42rem;
+      font-size: 0.875rem;
+      line-height: 1.55;
+      color: #cbd5e1;
+    }
+
+    .node-operator-section__address {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      margin-top: 0.75rem;
+      max-width: 100%;
+    }
+
+    .node-operator-section__address-chip {
+      min-width: 0;
+      flex: 1 1 auto;
+      overflow: hidden;
+      border-radius: 0.75rem;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      background: rgba(2, 6, 23, 0.45);
+      padding: 0.5rem 0.75rem;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      font-size: 0.75rem;
+      color: #bae6fd;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .node-operator-section__action {
+      flex-shrink: 0;
+    }
+
+    .node-operator-section__action .btn-send {
+      width: 100%;
+    }
+
+    @media (min-width: 640px) {
+      .node-operator-section__action .btn-send {
+        width: auto;
+        min-width: 8.5rem;
+      }
+    }
+
     .field-input {
       width: 100%;
       border: 1px solid rgba(255, 255, 255, 0.1);
@@ -460,26 +578,40 @@
     </div>
 
     <main class="relative z-10 mx-auto max-w-6xl px-4 pb-10 pt-2 sm:px-6 sm:pt-4">
+      <section v-if="showNodeOperatorPanel" class="node-operator-section mb-5" aria-label="Tip node operator">
+        <div class="node-operator-section__inner">
+          <div class="node-operator-section__icon" aria-hidden="true">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" class="h-5 w-5"><path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z"/></svg>
+          </div>
+          <div class="node-operator-section__body">
+            <p class="node-operator-section__eyebrow">Node operator</p>
+            <h2 class="node-operator-section__title">{{ hasCustomNodeMessage ? 'Support this node' : 'Tip node operator' }}</h2>
+            <p v-if="hasCustomNodeMessage" class="node-operator-section__message">{{ nodeOperatorMessage }}</p>
+            <div v-if="hasCustomNodeAddress" class="node-operator-section__address">
+              <span class="node-operator-section__address-chip" :title="nodeOperatorAddress">{{ nodeOperatorAddressShort }}</span>
+              <button
+                type="button"
+                @click="copyText(nodeOperatorAddress, 'Copied operator address.')"
+                class="btn-secondary shrink-0 !px-3 !py-2 text-xs"
+              >
+                Copy
+              </button>
+            </div>
+          </div>
+          <div v-if="hasCustomNodeAddress" class="node-operator-section__action">
+            <button
+              type="button"
+              @click="walletLoaded && cryptoReady ? tipNodeOperator() : openTipSetup()"
+              class="btn-send"
+            >
+              {{ walletLoaded && cryptoReady ? 'Send tip' : 'Set up wallet' }}
+            </button>
+          </div>
+        </div>
+      </section>
+
       <div v-if="!cryptoReady" class="mb-5 rounded-2xl bg-amber-500/10 px-4 py-3 text-sm text-amber-200 ring-1 ring-amber-400/30">
         {{ cryptoMessage }}
-      </div>
-
-      <div
-        v-if="showNodeOperatorPanel && !walletLoaded"
-        class="mb-5 flex flex-col gap-3 rounded-2xl border border-sky-400/20 bg-sky-950/40 px-4 py-4 sm:flex-row sm:items-center sm:justify-between"
-      >
-        <div class="min-w-0">
-          <p v-if="hasCustomNodeMessage" class="text-sm font-medium leading-relaxed text-sky-100">{{ nodeOperatorMessage }}</p>
-          <p v-if="hasCustomNodeAddress" class="mt-1 font-mono text-xs text-sky-200/80 break-all">{{ nodeOperatorAddress }}</p>
-        </div>
-        <button
-          v-if="hasCustomNodeAddress"
-          type="button"
-          @click="activeSection = 'setup'"
-          class="btn-send shrink-0 self-start sm:self-center"
-        >
-          Tip node operator
-        </button>
       </div>
 
       <section v-if="walletLoaded" class="surface surface-hero mb-6 overflow-hidden p-6 sm:p-8">
@@ -489,25 +621,6 @@
           {{ matureBalanceDisplay }} spendable now · {{ immatureBalanceDisplay }} maturing ({{ immatureUtxoCount }} coin{{ immatureUtxoCount === 1 ? '' : 's' }})
         </p>
         <p class="mt-3 max-w-lg text-sm leading-relaxed text-[var(--text-muted)]">{{ heroCaption }}</p>
-        <div
-          v-if="showNodeOperatorPanel"
-          class="mt-5 flex flex-col gap-3 rounded-xl border border-sky-400/20 bg-sky-950/40 px-4 py-4 sm:flex-row sm:items-center sm:justify-between"
-        >
-          <div class="min-w-0">
-            <p v-if="hasCustomNodeMessage" class="text-sm font-medium leading-relaxed text-sky-100">{{ nodeOperatorMessage }}</p>
-            <p v-if="hasCustomNodeAddress" class="mt-1 font-mono text-xs text-sky-200/80 break-all">{{ nodeOperatorAddress }}</p>
-          </div>
-          <button
-            v-if="hasCustomNodeAddress"
-            type="button"
-            @click="tipNodeOperator"
-            :disabled="!walletLoaded || !cryptoReady"
-            class="btn-send shrink-0 self-start sm:self-center"
-            :title="walletLoaded ? 'Open Send with the node operator address' : 'Load a wallet to tip the node operator'"
-          >
-            Tip node operator
-          </button>
-        </div>
         <nav class="segmented -mx-1 mt-5 sm:-mx-2" aria-label="Wallet sections">
           <button
             v-for="section in sections"
@@ -952,19 +1065,6 @@
             </div>
           </div>
           <p class="mt-3 text-xs leading-relaxed text-[var(--text-muted)]">{{ nodeCaption }}</p>
-          <div v-if="showNodeOperatorPanel" class="mt-4 rounded-lg border border-sky-400/20 bg-sky-950/30 px-3 py-3">
-            <p v-if="hasCustomNodeMessage" class="text-sm leading-relaxed text-sky-100">{{ nodeOperatorMessage }}</p>
-            <p v-if="hasCustomNodeAddress" class="mt-1 font-mono text-[11px] text-sky-200/80 break-all">{{ nodeOperatorAddress }}</p>
-            <button
-              v-if="hasCustomNodeAddress"
-              type="button"
-              @click="tipNodeOperator(true)"
-              :disabled="!walletLoaded || !cryptoReady"
-              class="btn-send mt-3 w-full sm:w-auto"
-            >
-              Tip node operator
-            </button>
-          </div>
         </div>
 
         <div class="mt-5">
@@ -1411,6 +1511,16 @@
         showNodeOperatorPanel() {
           return this.nodeOnline && (this.hasCustomNodeAddress || this.hasCustomNodeMessage);
         },
+        nodeOperatorAddressShort() {
+          const address = this.nodeOperatorAddress;
+          if (!address) {
+            return '';
+          }
+          if (address.length <= 24) {
+            return address;
+          }
+          return address.slice(0, 14) + '…' + address.slice(-10);
+        },
         powToneLabel() {
           const quote = this.currentPowQuote;
           const tone = currentPowTone(quote && quote.requiredBits);
@@ -1510,12 +1620,16 @@
             this.statusMessage = 'Initialization failed: ' + String(error.message || error);
           }
         },
+        openTipSetup() {
+          this.activeSection = 'setup';
+          this.addStatus('Create or restore a wallet to send a tip.');
+        },
         tipNodeOperator(closeNodeModal) {
           if (!this.hasCustomNodeAddress) {
             return;
           }
           if (!this.ensureWalletLoaded()) {
-            this.addStatus('Load a wallet before tipping the node operator.');
+            this.openTipSetup();
             return;
           }
           if (!this.ensureCryptoReady('sending')) {
