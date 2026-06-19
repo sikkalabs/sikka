@@ -71,6 +71,9 @@ docker run -d --restart unless-stopped \
 
 ```bash
 docker build -t sikka:local . && docker run --rm -p 64552:64552 sikka:local
+
+docker build -t sikka:local . && docker run --rm -p 64552:64552 -e nodeaddress=sikka1pq42uhxrgdfpzwf3dan04sarlrsu6w2ducuwgdldlhyjkm9asus6sfa4d4l -e nodemessage="SIKKA TEST" sikka:local
+
 ```
 
 ---
