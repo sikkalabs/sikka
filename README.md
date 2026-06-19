@@ -11,6 +11,18 @@ A next-generation digital currency built for humans, autonomous agents, and mach
   <a href="https://discord.gg/HxsRdB2zjb"><img src="https://img.shields.io/badge/Discord-Join%20Us-5865F2?style=flat-square&logo=discord&logoColor=white" /></a>
 </p>
 
+## 🔄 Backup Repository
+
+The canonical development repository is GitHub:
+
+- https://github.com/sikkalabs/sikka
+
+A secondary mirror is maintained on GitWorkshop:
+
+- https://gitworkshop.dev/npub1x6au4qgw9t403yushl34tgngmgcaqv9yna7ywf8e6x4xf686ln7qc7y6wq/sikka
+
+The GitWorkshop repository is synchronized at stable checkpoints, release candidates, and official releases. It exists to preserve project continuity and ensure that Sikka remains accessible even if GitHub becomes unavailable.
+
 ## 🐳 Quick start
 
 Sikka is lightweight and efficient. The production Docker image is only **17 MB** and bundles the node, HTTP API, web wallet, and DAG explorer.
