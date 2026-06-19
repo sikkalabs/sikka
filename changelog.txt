@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.3
+
+- Wallet: collapsible tip panel for node operator when nodeaddress / nodemessage are set
+- Fix Tor network health parsing to use the latest bootstrap and circuit replies
+
 ## 0.1.2
 
 - changed default port to 74552
