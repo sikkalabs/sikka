@@ -274,7 +274,6 @@ func parseTorNetworkHealth(bootstrapReplies, circuitReplies []string) torNetwork
 		if health.BootstrapWarning == "" {
 			health.BootstrapWarning = fields["REASON"]
 		}
-		break
 	}
 
 	for _, reply := range circuitReplies {
@@ -285,8 +284,9 @@ func parseTorNetworkHealth(bootstrapReplies, circuitReplies []string) torNetwork
 		switch strings.ToLower(strings.TrimSpace(value)) {
 		case "1", "true", "yes":
 			health.CircuitEstablished = true
+		case "0", "false", "no":
+			health.CircuitEstablished = false
 		}
-		break
 	}
 
 	switch {

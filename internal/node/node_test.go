@@ -465,6 +465,28 @@ func TestParseTorNetworkHealthBootstrapping(t *testing.T) {
 	}
 }
 
+func TestParseTorNetworkHealthUsesLatestReply(t *testing.T) {
+	t.Parallel()
+
+	health := parseTorNetworkHealth(
+		[]string{
+			`status/bootstrap-phase=NOTICE BOOTSTRAP PROGRESS=10 TAG=conn SUMMARY="Starting"`,
+			`status/bootstrap-phase=NOTICE BOOTSTRAP PROGRESS=100 TAG=done SUMMARY="Done"`,
+		},
+		[]string{"status/circuit-established=0", "status/circuit-established=1"},
+	)
+
+	if health.BootstrapProgress != 100 {
+		t.Fatalf("BootstrapProgress = %d, want 100", health.BootstrapProgress)
+	}
+	if health.BootstrapTag != "done" {
+		t.Fatalf("BootstrapTag = %q, want %q", health.BootstrapTag, "done")
+	}
+	if !health.CircuitEstablished {
+		t.Fatal("CircuitEstablished = false, want true")
+	}
+}
+
 func TestStaticTxPageRoute(t *testing.T) {
 	t.Parallel()
 
