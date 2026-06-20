@@ -322,14 +322,40 @@ func (d *DAG) Tips() []string {
 func (d *DAG) TxWeight(id string) int64 {
 	d.mu.RLock()
 	defer d.mu.RUnlock()
-	return d.weights[id]
+	return d.txWeightLocked(id)
 }
 
 // IsConfirmed returns true when the cumulative weight for id meets the threshold.
 func (d *DAG) IsConfirmed(id string) bool {
 	d.mu.RLock()
 	defer d.mu.RUnlock()
-	return d.weights[id] >= d.confirmationThreshold
+	return d.txWeightLocked(id) >= d.confirmationThreshold
+}
+
+// txWeightLocked returns the actual weight or infers saturation if compacted.
+func (d *DAG) txWeightLocked(id string) int64 {
+	if w, ok := d.weights[id]; ok {
+		return w
+	}
+	// Weight index compaction: if a weight is missing but the transaction
+	// is deep enough behind the current active frontier, we assume it has
+	// reached saturation (it would have been pruned if it was a losing branch).
+	depth := d.depths[id]
+	if depth > 0 && d.maxDepthLocked()-depth > WeightCompactionDepth {
+		return d.weightSaturationLocked()
+	}
+	return 0
+}
+
+// maxDepthLocked returns the current maximum dag depth without taking the RLock.
+func (d *DAG) maxDepthLocked() int64 {
+	var max int64
+	for id := range d.tips {
+		if dep := d.depths[id]; dep > max {
+			max = dep
+		}
+	}
+	return max
 }
 
 // DAGDepth returns the longest-path depth of a tx from genesis (0 = genesis).
@@ -343,13 +369,7 @@ func (d *DAG) DAGDepth(id string) int64 {
 func (d *DAG) MaxDepth() int64 {
 	d.mu.RLock()
 	defer d.mu.RUnlock()
-	var max int64
-	for id := range d.tips {
-		if dep := d.depths[id]; dep > max {
-			max = dep
-		}
-	}
-	return max
+	return d.maxDepthLocked()
 }
 
 // GenesisID returns the genesis transaction ID.

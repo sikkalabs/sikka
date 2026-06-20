@@ -221,6 +221,18 @@ func (n *Node) Run(ctx context.Context) error {
 		n.runWitnessSweepLoop(runCtx)
 	}()
 
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		n.runUTXOSweepLoop(runCtx)
+	}()
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		n.runWeightCompactionLoop(runCtx)
+	}()
+
 	select {
 	case err := <-errCh:
 		cancel()

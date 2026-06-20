@@ -33,6 +33,19 @@ func (d *DAG) rebuildSpendStateLocked() {
 			d.spendClaims[key] = appendSpendClaim(d.spendClaims[key], tx.ID)
 		}
 	}
+
+	// Purge confirmed spent UTXOs from memory to save RAM.
+	// If a UTXO is canonically spent and the spending transaction is fully confirmed,
+	// the UTXO is dead and can never be spent again. We don't need it in memory.
+	for key := range d.utxos {
+		claims := d.spendClaims[key]
+		if len(claims) > 0 {
+			winner := canonicalSpenderLocked(d.weights, claims)
+			if winner != "" && d.weights[winner] >= d.confirmationThreshold {
+				delete(d.utxos, key)
+			}
+		}
+	}
 }
 
 // rebuildIndexLocked reconstructs children, tips, and depths from txs and weights.

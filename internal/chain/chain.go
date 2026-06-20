@@ -93,6 +93,13 @@ const (
 	// data is permanently deleted.
 	// Both WitnessMinWeight AND WitnessMinAgeSecs must be satisfied.
 	WitnessMinAgeSecs = int64(180 * 24 * 60 * 60) // 180 days
+
+	// WeightCompactionDepth is the number of epochs (1 epoch = 10k depth)
+	// behind the active DAG frontier beyond which cumulative weight indices
+	// are permanently deleted from memory and disk. Since deep transactions
+	// have saturated weights that never change, their weight can be implicitly
+	// inferred, saving massive index space. Set to 10 epochs (100,000 txs).
+	WeightCompactionDepth = int64(100_000)
 )
 
 // FormatSikka formats a chillar amount as a human-readable SIKKA string.
