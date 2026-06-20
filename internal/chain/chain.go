@@ -77,6 +77,22 @@ const (
 	// congestion window, but a malformed chain (e.g. clock-skewed parents)
 	// could otherwise force an unbounded scan during PoW quoting.
 	recentAncestorCountSafetyCap = 100_000
+
+	// WitnessMinWeight is the minimum cumulative PoW weight a transaction
+	// must have accumulated before its ML-DSA-87 witness bytes are eligible
+	// for stripping. Set to 5× the default confirmation threshold.
+	// Both WitnessMinWeight AND WitnessMinAgeSecs must be satisfied before
+	// any stripping occurs (Deep Finality Guard — dual-condition).
+	WitnessMinWeight = int64(1000)
+
+	// WitnessMinAgeSecs is the minimum wall-clock age (in seconds) a
+	// transaction must reach before its witness bytes are eligible for
+	// stripping. Defaults to 180 days — a conservative launch-phase window
+	// that gives new nodes ample time to bootstrap full history and ensures
+	// the honest network has built substantial weight before any signature
+	// data is permanently deleted.
+	// Both WitnessMinWeight AND WitnessMinAgeSecs must be satisfied.
+	WitnessMinAgeSecs = int64(180 * 24 * 60 * 60) // 180 days
 )
 
 // FormatSikka formats a chillar amount as a human-readable SIKKA string.

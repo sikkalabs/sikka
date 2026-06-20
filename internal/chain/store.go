@@ -11,7 +11,7 @@ import (
 )
 
 const (
-	storageFormatVersion = "1"
+	storageFormatVersion = "2"
 
 	storageMetaBucket    = "meta"
 	storageTxsBucket     = "txs"

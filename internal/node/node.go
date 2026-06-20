@@ -215,6 +215,12 @@ func (n *Node) Run(ctx context.Context) error {
 		n.pruneKnownNodesLoop(runCtx)
 	}()
 
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		n.runWitnessSweepLoop(runCtx)
+	}()
+
 	select {
 	case err := <-errCh:
 		cancel()

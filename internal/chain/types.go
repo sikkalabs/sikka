@@ -37,6 +37,10 @@ type TxOutput struct {
 // transactions at the time of mining. This commits the PoW work to a specific
 // DAG state, preventing selfish mining (pre-mining against stale tips is wasted
 // work because the parent PoW hashes won't match the current DAG state).
+// WitnessStripped is set to true after the Deep Finality Guard (180 days +
+// weight ≥ 1000) triggers and the ML-DSA-87 signature bytes are permanently
+// deleted from this transaction's inputs. Syncing nodes must not treat absent
+// witness data as corruption when this flag is true.
 type Transaction struct {
 	ID              string     `json:"id"`
 	Parents         []string   `json:"parents"`
@@ -46,7 +50,9 @@ type Transaction struct {
 	PowNonce        int64      `json:"pow_nonce"`
 	PowBits         int        `json:"pow_bits"`
 	Timestamp       int64      `json:"timestamp"`
+	WitnessStripped bool       `json:"witness_stripped,omitempty"`
 }
+
 
 // UTXO is an unspent transaction output.
 type UTXO struct {
