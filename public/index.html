@@ -1,534 +1,507 @@
 <!doctype html>
 <html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Sikka Node</title>
-    <meta name="description" content="Sikka node dashboard for chain status, DAG tips, wallet access, and peer recovery." />
-    <meta name="theme-color" content="#020617" />
-    <meta name="robots" content="index,follow" />
-    <meta property="og:type" content="website" />
-    <meta property="og:title" content="Sikka Node" />
-    <meta property="og:description" content="Monitor chain status, inspect DAG tips, open the wallet, and manage peers from a local Sikka node." />
-    <meta property="og:image" content="/public/sikka.svg" />
-    <meta name="twitter:card" content="summary" />
-    <meta name="twitter:title" content="Sikka Node" />
-    <meta name="twitter:description" content="Monitor chain status, inspect DAG tips, open the wallet, and manage peers from a local Sikka node." />
-    <meta name="twitter:image" content="/public/sikka.svg" />
-    <link rel="icon" href="/public/sikka.svg" type="image/svg+xml" />
-    <link rel="apple-touch-icon" href="/public/sikka.svg" />
-    <script src="/public/tailwind.browser.js"></script>
-    <script src="/public/vue.global.prod.js"></script>
-  </head>
-  <body class="min-h-screen overflow-x-hidden bg-slate-950 text-slate-100 antialiased">
-    <div id="app" class="relative isolate min-h-screen">
-      <div class="pointer-events-none absolute inset-0 overflow-hidden">
-        <div class="absolute -left-24 top-0 h-72 w-72 rounded-full bg-sky-400/20 blur-3xl"></div>
-        <div class="absolute right-0 top-8 h-80 w-80 rounded-full bg-cyan-300/10 blur-3xl"></div>
-        <div class="absolute bottom-0 left-1/3 h-64 w-64 rounded-full bg-indigo-500/10 blur-3xl"></div>
-        <div class="absolute inset-x-0 top-0 h-[32rem] bg-gradient-to-b from-slate-900 via-slate-950 to-slate-950"></div>
-      </div>
 
-      <main class="relative mx-auto flex min-h-screen w-full max-w-7xl flex-col justify-center px-4 py-6 sm:px-6 sm:py-8 lg:px-8 lg:py-12">
-        <section
-          class="grid gap-4 rounded-[2rem] border border-white/10 bg-slate-950/65 p-5 shadow-2xl shadow-slate-950/60 backdrop-blur-2xl sm:gap-5 sm:p-6 lg:grid-cols-5 lg:items-center lg:p-8"
-        >
-          <div class="min-w-0 lg:col-span-3">
-            <p class="text-xs font-black uppercase tracking-[0.32em] text-sky-200/70">Sikka Node</p>
-            <h1 class="mt-3 max-w-3xl text-3xl font-black uppercase tracking-tight text-white sm:text-5xl lg:text-6xl">Node active.</h1>
-            <p class="mt-5 max-w-2xl text-sm leading-7 text-slate-300 sm:text-base">Chain status, wallet access, and node routing in one place.</p>
-            <div class="mt-6 flex flex-col gap-3 sm:flex-row">
-              <a
-                href="/wallet.html"
-                class="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-sky-200 px-5 py-3 text-sm font-semibold text-slate-950 transition hover:bg-white sm:w-auto"
-              >
-                Wallet
-                <span aria-hidden="true">&rarr;</span>
-              </a>
-              <a
-                href="https://gitworkshop.dev/npub1x6au4qgw9t403yushl34tgngmgcaqv9yna7ywf8e6x4xf686ln7qc7y6wq/sikka"
-                target="_blank"
-                rel="noreferrer"
-                class="inline-flex w-full items-center justify-center gap-2 rounded-lg border border-white/10 bg-white/[0.04] px-5 py-3 text-sm font-semibold text-slate-200 transition hover:border-white/20 hover:bg-white/[0.07] hover:text-white sm:w-auto"
-              >
-                Source
-                <span aria-hidden="true">&rarr;</span>
-              </a>
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Sikka Node</title>
+  <meta name="description"
+    content="Sikka node dashboard for chain status, DAG tips, wallet access, and peer recovery." />
+  <meta name="theme-color" content="#020617" />
+  <meta name="robots" content="index,follow" />
+  <meta property="og:type" content="website" />
+  <meta property="og:title" content="Sikka Node" />
+  <meta property="og:description"
+    content="Monitor chain status, inspect DAG tips, open the wallet, and manage peers from a local Sikka node." />
+  <meta property="og:image" content="/public/sikka.svg" />
+  <meta name="twitter:card" content="summary" />
+  <meta name="twitter:title" content="Sikka Node" />
+  <meta name="twitter:description"
+    content="Monitor chain status, inspect DAG tips, open the wallet, and manage peers from a local Sikka node." />
+  <meta name="twitter:image" content="/public/sikka.svg" />
+  <link rel="icon" href="/public/sikka.svg" type="image/svg+xml" />
+  <link rel="apple-touch-icon" href="/public/sikka.svg" />
+  <script src="/public/tailwind.browser.js"></script>
+  <script src="/public/vue.global.prod.js"></script>
+</head>
+
+<body class="min-h-screen overflow-x-hidden bg-slate-950 text-slate-100 antialiased">
+  <div id="app" class="relative isolate min-h-screen">
+    <div class="pointer-events-none absolute inset-0 overflow-hidden">
+      <div class="absolute -left-24 top-0 h-72 w-72 rounded-full bg-sky-400/20 blur-3xl"></div>
+      <div class="absolute right-0 top-8 h-80 w-80 rounded-full bg-cyan-300/10 blur-3xl"></div>
+      <div class="absolute bottom-0 left-1/3 h-64 w-64 rounded-full bg-indigo-500/10 blur-3xl"></div>
+      <div class="absolute inset-x-0 top-0 h-[32rem] bg-gradient-to-b from-slate-900 via-slate-950 to-slate-950"></div>
+    </div>
+
+    <main
+      class="relative mx-auto flex min-h-screen w-full max-w-7xl flex-col justify-center px-4 py-6 sm:px-6 sm:py-8 lg:px-8 lg:py-12">
+      <section
+        class="grid gap-4 rounded-[2rem] border border-white/10 bg-slate-950/65 p-5 shadow-2xl shadow-slate-950/60 backdrop-blur-2xl sm:gap-5 sm:p-6 lg:grid-cols-5 lg:items-center lg:p-8">
+        <div class="min-w-0 lg:col-span-3">
+          <p class="text-xs font-black uppercase tracking-[0.32em] text-sky-200/70">Sikka Node</p>
+          <h1 class="mt-3 max-w-3xl text-3xl font-black uppercase tracking-tight text-white sm:text-5xl lg:text-6xl">
+            Node active.</h1>
+          <p class="mt-5 max-w-2xl text-sm leading-7 text-slate-300 sm:text-base">Chain status, wallet access, and node
+            routing in one place.</p>
+          <div class="mt-6 flex flex-col gap-3 sm:flex-row">
+            <a href="/wallet.html"
+              class="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-sky-200 px-5 py-3 text-sm font-semibold text-slate-950 transition hover:bg-white sm:w-auto">
+              Wallet
+              <span aria-hidden="true">&rarr;</span>
+            </a>
+            <a href="https://github.com/sikkalabs/sikka" target="_blank" rel="noreferrer"
+              class="inline-flex w-full items-center justify-center gap-2 rounded-lg border border-white/10 bg-white/[0.04] px-5 py-3 text-sm font-semibold text-slate-200 transition hover:border-white/20 hover:bg-white/[0.07] hover:text-white sm:w-auto">
+              Source
+              <span aria-hidden="true">&rarr;</span>
+            </a>
+          </div>
+        </div>
+
+        <aside
+          class="min-w-0 border-t border-white/10 pt-2 lg:col-span-2 lg:self-center lg:border-l lg:border-t-0 lg:pl-6 lg:pt-0">
+          <div>
+            <div v-for="item in statusItems" :key="item.label"
+              class="border-b border-white/10 py-4 last:border-b-0 last:pb-0 first:pt-0">
+              <div class="flex items-center gap-2">
+                <span v-if="item.pulse" class="relative flex h-3 w-3 flex-none">
+                  <span
+                    class="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75"></span>
+                  <span class="relative inline-flex h-3 w-3 rounded-full bg-emerald-300"></span>
+                </span>
+                <span v-else class="h-3 w-3 flex-none rounded-full bg-sky-200/60"></span>
+                <p class="text-[11px] font-black uppercase tracking-[0.28em] text-sky-200/65">{{ item.label }}</p>
+              </div>
+              <p v-if="!item.href" class="mt-3 min-w-0 break-all font-mono text-sm leading-6 text-slate-100">{{
+                item.value }}</p>
+              <a v-else :href="item.href"
+                class="mt-3 block min-w-0 break-all font-mono text-sm leading-6 text-sky-200 underline decoration-sky-400/40 underline-offset-2 transition hover:text-white">{{
+                item.value }}</a>
             </div>
           </div>
+        </aside>
+      </section>
 
-          <aside class="min-w-0 border-t border-white/10 pt-2 lg:col-span-2 lg:self-center lg:border-l lg:border-t-0 lg:pl-6 lg:pt-0">
-            <div>
-              <div v-for="item in statusItems" :key="item.label" class="border-b border-white/10 py-4 last:border-b-0 last:pb-0 first:pt-0">
-                <div class="flex items-center gap-2">
-                  <span v-if="item.pulse" class="relative flex h-3 w-3 flex-none">
-                    <span class="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75"></span>
-                    <span class="relative inline-flex h-3 w-3 rounded-full bg-emerald-300"></span>
-                  </span>
-                  <span v-else class="h-3 w-3 flex-none rounded-full bg-sky-200/60"></span>
-                  <p class="text-[11px] font-black uppercase tracking-[0.28em] text-sky-200/65">{{ item.label }}</p>
-                </div>
-                <p v-if="!item.href" class="mt-3 min-w-0 break-all font-mono text-sm leading-6 text-slate-100">{{ item.value }}</p>
-                <a
-                  v-else
-                  :href="item.href"
-                  class="mt-3 block min-w-0 break-all font-mono text-sm leading-6 text-sky-200 underline decoration-sky-400/40 underline-offset-2 transition hover:text-white"
-                >{{ item.value }}</a>
-              </div>
-            </div>
-          </aside>
-        </section>
-
-        <section
-          class="mt-5 rounded-[1.75rem] border border-white/10 bg-slate-950/65 p-3 shadow-xl shadow-slate-950/50 backdrop-blur-2xl transition duration-300 hover:-translate-y-1 hover:border-sky-200/25 hover:shadow-2xl hover:shadow-cyan-400/10 sm:p-5"
-        >
-          <form class="grid gap-3 md:grid-cols-[minmax(0,1fr)_auto]" autocomplete="off" @submit.prevent="submitExplorerSearch">
-            <div
-              class="group rounded-[1.6rem] border border-sky-300/20 bg-gradient-to-r from-sky-400/10 via-cyan-300/10 to-sky-400/10 p-2 shadow-lg shadow-cyan-500/5 transition duration-300 hover:-translate-y-0.5 hover:border-sky-200/35 hover:shadow-cyan-400/15 focus-within:-translate-y-0.5 focus-within:border-cyan-300/55 focus-within:shadow-cyan-300/20 md:col-span-2 md:grid md:grid-cols-[minmax(0,1fr)_auto] md:items-center md:gap-3"
-            >
-              <input
-                v-model.trim="searchInput"
-                type="text"
-                spellcheck="false"
-                placeholder="64-char transaction ID or sikka1… address"
-                class="w-full rounded-[1.25rem] border border-sky-200/10 bg-slate-900/85 px-4 py-3 text-sm text-white outline-none ring-0 transition duration-300 placeholder:text-slate-500 hover:border-cyan-300/30 hover:bg-slate-900 focus:border-cyan-300/60 focus:bg-slate-900"
-              />
-              <button
-                type="submit"
-                class="w-full rounded-md bg-gradient-to-r from-sky-400 to-cyan-300 px-5 py-3 text-sm font-black uppercase tracking-[0.18em] text-slate-950 shadow-lg shadow-cyan-400/20 transition duration-300 hover:-translate-y-0.5 hover:scale-[1.02] hover:shadow-xl hover:shadow-cyan-300/35 active:translate-y-0 active:scale-100 md:w-auto"
-              >
-                Go
-              </button>
-            </div>
-          </form>
-          <p
-            :class="[
+      <section
+        class="mt-5 rounded-[1.75rem] border border-white/10 bg-slate-950/65 p-3 shadow-xl shadow-slate-950/50 backdrop-blur-2xl transition duration-300 hover:-translate-y-1 hover:border-sky-200/25 hover:shadow-2xl hover:shadow-cyan-400/10 sm:p-5">
+        <form class="grid gap-3 md:grid-cols-[minmax(0,1fr)_auto]" autocomplete="off"
+          @submit.prevent="submitExplorerSearch">
+          <div
+            class="group rounded-[1.6rem] border border-sky-300/20 bg-gradient-to-r from-sky-400/10 via-cyan-300/10 to-sky-400/10 p-2 shadow-lg shadow-cyan-500/5 transition duration-300 hover:-translate-y-0.5 hover:border-sky-200/35 hover:shadow-cyan-400/15 focus-within:-translate-y-0.5 focus-within:border-cyan-300/55 focus-within:shadow-cyan-300/20 md:col-span-2 md:grid md:grid-cols-[minmax(0,1fr)_auto] md:items-center md:gap-3">
+            <input v-model.trim="searchInput" type="text" spellcheck="false"
+              placeholder="64-char transaction ID or sikka1… address"
+              class="w-full rounded-[1.25rem] border border-sky-200/10 bg-slate-900/85 px-4 py-3 text-sm text-white outline-none ring-0 transition duration-300 placeholder:text-slate-500 hover:border-cyan-300/30 hover:bg-slate-900 focus:border-cyan-300/60 focus:bg-slate-900" />
+            <button type="submit"
+              class="w-full rounded-md bg-gradient-to-r from-sky-400 to-cyan-300 px-5 py-3 text-sm font-black uppercase tracking-[0.18em] text-slate-950 shadow-lg shadow-cyan-400/20 transition duration-300 hover:-translate-y-0.5 hover:scale-[1.02] hover:shadow-xl hover:shadow-cyan-300/35 active:translate-y-0 active:scale-100 md:w-auto">
+              Go
+            </button>
+          </div>
+        </form>
+        <p :class="[
           searchFeedback ? 'mt-3 min-h-6' : 'mt-0 min-h-0',
           'text-sm transition-all duration-200',
           searchFeedbackKind === 'error' ? 'text-rose-300' : 'text-slate-400'
-        ]"
-          >
-            {{ searchFeedback }}
-          </p>
-        </section>
+        ]">
+          {{ searchFeedback }}
+        </p>
+      </section>
 
-        <section class="mt-5 grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
-          <section
-            class="rounded-[1.75rem] border border-white/10 bg-slate-950/65 p-4 shadow-xl shadow-slate-950/50 backdrop-blur-2xl transition duration-300 hover:-translate-y-1 hover:border-sky-200/25 hover:shadow-2xl hover:shadow-cyan-400/10 sm:p-5"
-          >
-            <p class="text-[11px] font-black uppercase tracking-[0.28em] text-sky-200/65">Software Version</p>
-            <p class="mt-4 font-mono text-3xl font-black tracking-tight text-white sm:text-5xl">{{ overview.softwareVersion }}</p>
-            <p class="mt-3 text-sm leading-6 text-slate-400">Embedded release metadata currently served by this node.</p>
-          </section>
-
-          <section
-            class="rounded-[1.75rem] border border-white/10 bg-slate-950/65 p-4 shadow-xl shadow-slate-950/50 backdrop-blur-2xl transition duration-300 hover:-translate-y-1 hover:border-sky-200/25 hover:shadow-2xl hover:shadow-cyan-400/10 sm:p-5 md:col-span-2 xl:col-span-2"
-          >
-            <p class="text-[11px] font-black uppercase tracking-[0.28em] text-sky-200/65">DAG Tips</p>
-            <div class="mt-3 flex flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <h2 class="text-lg font-black text-white">Latest tips</h2>
-              <span class="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 text-xs font-semibold text-slate-300">{{ tips.length }} visible</span>
-            </div>
-
-            <div v-if="!tipsLoaded" class="mt-5 rounded-2xl border border-dashed border-white/10 bg-white/[0.03] px-4 py-5 text-sm text-slate-400">
-              Loading…
-            </div>
-            <div v-else-if="!tips.length" class="mt-5 rounded-2xl border border-dashed border-white/10 bg-white/[0.03] px-4 py-5 text-sm text-slate-400">
-              No tips available.
-            </div>
-            <div v-else class="mt-5 grid gap-3">
-              <a
-                v-for="(txid, index) in tips"
-                :key="txid"
-                :href="'/tx/' + encodeURIComponent(txid)"
-                :title="txid"
-                class="flex flex-col items-center justify-center gap-1 rounded-2xl border border-sky-200/10 bg-slate-900/70 px-3 py-3 text-center transition duration-300 hover:-translate-y-0.5 hover:scale-[1.01] hover:border-sky-200/35 hover:bg-sky-200/5 hover:shadow-lg hover:shadow-cyan-400/10 sm:flex-row sm:gap-2 sm:px-4 sm:py-4"
-              >
-                <span class="font-mono text-lg font-bold tracking-wide text-sky-200 sm:text-xl" :class="index % 2 === 0 ? 'animate-pulse' : ''"
-                  >{{ txid.slice(0, 5) }}</span
-                >
-                <span class="font-mono text-xs uppercase tracking-[0.3em] text-sky-200/30">•••</span>
-                <span class="font-mono text-lg font-bold tracking-wide text-sky-200 sm:text-xl" :class="index % 2 === 1 ? 'animate-pulse' : ''"
-                  >{{ txid.slice(-5) }}</span
-                >
-              </a>
-            </div>
-          </section>
-
-          <section
-            class="rounded-[1.75rem] border border-white/10 bg-slate-950/65 p-4 shadow-xl shadow-slate-950/50 backdrop-blur-2xl transition duration-300 hover:-translate-y-1 hover:border-sky-200/25 hover:shadow-2xl hover:shadow-cyan-400/10 sm:p-5 xl:col-span-1"
-          >
-            <p class="text-[11px] font-black uppercase tracking-[0.28em] text-sky-200/65">Network PoW</p>
-            <p class="mt-4 text-3xl font-black tracking-tight text-white sm:text-5xl">{{ overview.submitPow }}</p>
-            <p class="mt-3 text-sm leading-6 text-slate-400">{{ overview.submitPowNote }}</p>
-          </section>
-
-          <section
-            class="rounded-[1.75rem] border border-white/10 bg-slate-950/65 p-4 shadow-xl shadow-slate-950/50 backdrop-blur-2xl transition duration-300 hover:-translate-y-1 hover:border-sky-200/25 hover:shadow-2xl hover:shadow-cyan-400/10 sm:p-5 xl:col-span-1"
-          >
-            <p class="text-[11px] font-black uppercase tracking-[0.28em] text-sky-200/65">Known Nodes</p>
-            <p class="mt-4 text-3xl font-black tracking-tight text-white sm:text-5xl">{{ overview.knownNodes }}</p>
-            <p class="mt-3 text-sm leading-6 text-slate-400">Visible peers currently tracked by this node.</p>
-          </section>
-        </section>
-
-        <section class="mt-5 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-          <article
-            v-for="stat in statItems"
-            :key="stat.label"
-            class="rounded-[1.75rem] border border-white/10 bg-slate-950/65 p-4 shadow-xl shadow-slate-950/50 backdrop-blur-2xl transition duration-300 hover:-translate-y-1 hover:border-sky-200/25 hover:bg-sky-300/[0.04] hover:shadow-2xl hover:shadow-cyan-400/10 sm:p-5"
-          >
-            <p class="text-[11px] font-black uppercase tracking-[0.28em] text-sky-200/65">{{ stat.label }}</p>
-            <p class="mt-3 text-2xl font-bold text-white">{{ stat.value }}</p>
-          </article>
+      <section class="mt-5 grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
+        <section
+          class="rounded-[1.75rem] border border-white/10 bg-slate-950/65 p-4 shadow-xl shadow-slate-950/50 backdrop-blur-2xl transition duration-300 hover:-translate-y-1 hover:border-sky-200/25 hover:shadow-2xl hover:shadow-cyan-400/10 sm:p-5">
+          <p class="text-[11px] font-black uppercase tracking-[0.28em] text-sky-200/65">Software Version</p>
+          <p class="mt-4 font-mono text-3xl font-black tracking-tight text-white sm:text-5xl">{{
+            overview.softwareVersion }}</p>
+          <p class="mt-3 text-sm leading-6 text-slate-400">Embedded release metadata currently served by this node.</p>
         </section>
 
         <section
-          class="mt-5 rounded-[1.75rem] border border-white/10 bg-slate-950/65 p-4 shadow-xl shadow-slate-950/50 backdrop-blur-2xl transition duration-300 hover:-translate-y-1 hover:border-sky-200/25 hover:shadow-2xl hover:shadow-cyan-400/10 sm:p-6"
-        >
-          <div class="max-w-3xl">
-            <p class="text-[11px] font-black uppercase tracking-[0.28em] text-sky-200/65">Manual Peer Recovery</p>
-            <h2 class="mt-3 text-2xl font-black text-white">Add a known onion peer</h2>
-            <p class="mt-3 text-sm leading-6 text-slate-300">
-              Validate a known onion endpoint and announce it to this node when automated discovery is not enough.
-            </p>
+          class="rounded-[1.75rem] border border-white/10 bg-slate-950/65 p-4 shadow-xl shadow-slate-950/50 backdrop-blur-2xl transition duration-300 hover:-translate-y-1 hover:border-sky-200/25 hover:shadow-2xl hover:shadow-cyan-400/10 sm:p-5 md:col-span-2 xl:col-span-2">
+          <p class="text-[11px] font-black uppercase tracking-[0.28em] text-sky-200/65">DAG Tips</p>
+          <div class="mt-3 flex flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <h2 class="text-lg font-black text-white">Latest tips</h2>
+            <span
+              class="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 text-xs font-semibold text-slate-300">{{
+              tips.length }} visible</span>
           </div>
 
-          <form class="mt-5 grid gap-3 md:grid-cols-[minmax(0,1fr)_auto]" @submit.prevent="submitManualPeer">
-            <div
-              class="group rounded-[1.6rem] border border-sky-300/20 bg-gradient-to-r from-sky-400/10 via-cyan-300/10 to-sky-400/10 p-2 shadow-lg shadow-cyan-500/5 transition duration-300 hover:-translate-y-0.5 hover:border-sky-200/35 hover:shadow-cyan-400/15 focus-within:-translate-y-0.5 focus-within:border-cyan-300/55 focus-within:shadow-cyan-300/20 md:col-span-2 md:grid md:grid-cols-[minmax(0,1fr)_auto] md:items-center md:gap-3"
-            >
-              <input
-                v-model.trim="peerInput"
-                type="url"
-                inputmode="url"
-                placeholder="http://exampleexampleexampleexampleexampleexampleexampleexample.onion"
-                aria-label="Peer onion URL"
-                required
-                :disabled="peerPending"
-                class="w-full rounded-[1.25rem] border border-sky-200/10 bg-slate-900/85 px-4 py-3 text-sm text-white outline-none ring-0 transition duration-300 placeholder:text-slate-500 hover:border-cyan-300/30 hover:bg-slate-900 focus:border-cyan-300/60 focus:bg-slate-900 disabled:cursor-wait disabled:opacity-60"
-              />
-              <button
-                type="submit"
-                :disabled="peerPending"
-                class="w-full rounded-md bg-gradient-to-r from-sky-400 to-cyan-300 px-5 py-3 text-sm font-black uppercase tracking-[0.18em] text-slate-950 shadow-lg shadow-cyan-400/20 transition duration-300 hover:-translate-y-0.5 hover:scale-[1.02] hover:shadow-xl hover:shadow-cyan-300/35 active:translate-y-0 active:scale-100 disabled:cursor-wait disabled:opacity-60 md:w-auto"
-              >
-                {{ peerPending ? 'Checking…' : 'Add Peer' }}
-              </button>
-            </div>
-          </form>
+          <div v-if="!tipsLoaded"
+            class="mt-5 rounded-2xl border border-dashed border-white/10 bg-white/[0.03] px-4 py-5 text-sm text-slate-400">
+            Loading…
+          </div>
+          <div v-else-if="!tips.length"
+            class="mt-5 rounded-2xl border border-dashed border-white/10 bg-white/[0.03] px-4 py-5 text-sm text-slate-400">
+            No tips available.
+          </div>
+          <div v-else class="mt-5 grid gap-3">
+            <a v-for="(txid, index) in tips" :key="txid" :href="'/tx/' + encodeURIComponent(txid)" :title="txid"
+              class="flex flex-col items-center justify-center gap-1 rounded-2xl border border-sky-200/10 bg-slate-900/70 px-3 py-3 text-center transition duration-300 hover:-translate-y-0.5 hover:scale-[1.01] hover:border-sky-200/35 hover:bg-sky-200/5 hover:shadow-lg hover:shadow-cyan-400/10 sm:flex-row sm:gap-2 sm:px-4 sm:py-4">
+              <span class="font-mono text-lg font-bold tracking-wide text-sky-200 sm:text-xl"
+                :class="index % 2 === 0 ? 'animate-pulse' : ''">{{ txid.slice(0, 5) }}</span>
+              <span class="font-mono text-xs uppercase tracking-[0.3em] text-sky-200/30">•••</span>
+              <span class="font-mono text-lg font-bold tracking-wide text-sky-200 sm:text-xl"
+                :class="index % 2 === 1 ? 'animate-pulse' : ''">{{ txid.slice(-5) }}</span>
+            </a>
+          </div>
+        </section>
 
-          <p
-            :class="[
+        <section
+          class="rounded-[1.75rem] border border-white/10 bg-slate-950/65 p-4 shadow-xl shadow-slate-950/50 backdrop-blur-2xl transition duration-300 hover:-translate-y-1 hover:border-sky-200/25 hover:shadow-2xl hover:shadow-cyan-400/10 sm:p-5 xl:col-span-1">
+          <p class="text-[11px] font-black uppercase tracking-[0.28em] text-sky-200/65">Network PoW</p>
+          <p class="mt-4 text-3xl font-black tracking-tight text-white sm:text-5xl">{{ overview.submitPow }}</p>
+          <p class="mt-3 text-sm leading-6 text-slate-400">{{ overview.submitPowNote }}</p>
+        </section>
+
+        <section
+          class="rounded-[1.75rem] border border-white/10 bg-slate-950/65 p-4 shadow-xl shadow-slate-950/50 backdrop-blur-2xl transition duration-300 hover:-translate-y-1 hover:border-sky-200/25 hover:shadow-2xl hover:shadow-cyan-400/10 sm:p-5 xl:col-span-1">
+          <p class="text-[11px] font-black uppercase tracking-[0.28em] text-sky-200/65">Known Nodes</p>
+          <p class="mt-4 text-3xl font-black tracking-tight text-white sm:text-5xl">{{ overview.knownNodes }}</p>
+          <p class="mt-3 text-sm leading-6 text-slate-400">Visible peers currently tracked by this node.</p>
+        </section>
+      </section>
+
+      <section class="mt-5 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+        <article v-for="stat in statItems" :key="stat.label"
+          class="rounded-[1.75rem] border border-white/10 bg-slate-950/65 p-4 shadow-xl shadow-slate-950/50 backdrop-blur-2xl transition duration-300 hover:-translate-y-1 hover:border-sky-200/25 hover:bg-sky-300/[0.04] hover:shadow-2xl hover:shadow-cyan-400/10 sm:p-5">
+          <p class="text-[11px] font-black uppercase tracking-[0.28em] text-sky-200/65">{{ stat.label }}</p>
+          <p class="mt-3 text-2xl font-bold text-white">{{ stat.value }}</p>
+        </article>
+      </section>
+
+      <section
+        class="mt-5 rounded-[1.75rem] border border-white/10 bg-slate-950/65 p-4 shadow-xl shadow-slate-950/50 backdrop-blur-2xl transition duration-300 hover:-translate-y-1 hover:border-sky-200/25 hover:shadow-2xl hover:shadow-cyan-400/10 sm:p-6">
+        <div class="max-w-3xl">
+          <p class="text-[11px] font-black uppercase tracking-[0.28em] text-sky-200/65">Manual Peer Recovery</p>
+          <h2 class="mt-3 text-2xl font-black text-white">Add a known onion peer</h2>
+          <p class="mt-3 text-sm leading-6 text-slate-300">
+            Validate a known onion endpoint and announce it to this node when automated discovery is not enough.
+          </p>
+        </div>
+
+        <form class="mt-5 grid gap-3 md:grid-cols-[minmax(0,1fr)_auto]" @submit.prevent="submitManualPeer">
+          <div
+            class="group rounded-[1.6rem] border border-sky-300/20 bg-gradient-to-r from-sky-400/10 via-cyan-300/10 to-sky-400/10 p-2 shadow-lg shadow-cyan-500/5 transition duration-300 hover:-translate-y-0.5 hover:border-sky-200/35 hover:shadow-cyan-400/15 focus-within:-translate-y-0.5 focus-within:border-cyan-300/55 focus-within:shadow-cyan-300/20 md:col-span-2 md:grid md:grid-cols-[minmax(0,1fr)_auto] md:items-center md:gap-3">
+            <input v-model.trim="peerInput" type="url" inputmode="url"
+              placeholder="http://exampleexampleexampleexampleexampleexampleexampleexample.onion"
+              aria-label="Peer onion URL" required :disabled="peerPending"
+              class="w-full rounded-[1.25rem] border border-sky-200/10 bg-slate-900/85 px-4 py-3 text-sm text-white outline-none ring-0 transition duration-300 placeholder:text-slate-500 hover:border-cyan-300/30 hover:bg-slate-900 focus:border-cyan-300/60 focus:bg-slate-900 disabled:cursor-wait disabled:opacity-60" />
+            <button type="submit" :disabled="peerPending"
+              class="w-full rounded-md bg-gradient-to-r from-sky-400 to-cyan-300 px-5 py-3 text-sm font-black uppercase tracking-[0.18em] text-slate-950 shadow-lg shadow-cyan-400/20 transition duration-300 hover:-translate-y-0.5 hover:scale-[1.02] hover:shadow-xl hover:shadow-cyan-300/35 active:translate-y-0 active:scale-100 disabled:cursor-wait disabled:opacity-60 md:w-auto">
+              {{ peerPending ? 'Checking…' : 'Add Peer' }}
+            </button>
+          </div>
+        </form>
+
+        <p :class="[
           peerFeedbackMessage ? 'mt-4 min-h-6' : 'mt-0 min-h-0',
           'text-sm transition-all duration-200',
           peerFeedbackClass
-        ]"
-          >
-            {{ peerFeedbackMessage }}
-          </p>
-        </section>
-      </main>
-    </div>
+        ]">
+          {{ peerFeedbackMessage }}
+        </p>
+      </section>
+    </main>
+  </div>
 
-    <script>
-      const { createApp } = Vue;
+  <script>
+    const { createApp } = Vue;
 
-      createApp({
-        data() {
-          return {
-            pollHandle: null,
-            searchInput: "",
-            searchFeedback: "",
-            searchFeedbackKind: "",
-            peerInput: "",
-            peerPending: false,
-            peerFeedbackMessage: "",
-            peerFeedbackKind: "",
-            tipsLoaded: false,
-            tips: [],
-            overview: {
-              torNetwork: "Loading...",
-              publicURL: "Loading...",
-              nodeAddress: "Loading...",
-              nodeMessage: "Loading...",
-              softwareVersion: "--",
-              dagSize: "--",
-              tipCount: "--",
-              maxDepth: "--",
-              knownNodes: "--",
-              submitPow: "--",
-              submitPowNote: "Loading...",
+    createApp({
+      data() {
+        return {
+          pollHandle: null,
+          searchInput: "",
+          searchFeedback: "",
+          searchFeedbackKind: "",
+          peerInput: "",
+          peerPending: false,
+          peerFeedbackMessage: "",
+          peerFeedbackKind: "",
+          tipsLoaded: false,
+          tips: [],
+          overview: {
+            torNetwork: "Loading...",
+            publicURL: "Loading...",
+            nodeAddress: "Loading...",
+            nodeMessage: "Loading...",
+            softwareVersion: "--",
+            dagSize: "--",
+            tipCount: "--",
+            maxDepth: "--",
+            knownNodes: "--",
+            submitPow: "--",
+            submitPowNote: "Loading...",
+          },
+        };
+      },
+      computed: {
+        statusItems() {
+          const items = [
+            {
+              label: "Tor Network",
+              value: this.overview.torNetwork,
+              pulse: false,
             },
-          };
-        },
-        computed: {
-          statusItems() {
-            const items = [
-              {
-                label: "Tor Network",
-                value: this.overview.torNetwork,
-                pulse: false,
-              },
-              {
-                label: "Onion Address",
-                value: this.overview.publicURL,
-                pulse: this.hasPublicOnionAddress,
-              },
-            ];
-            if (this.hasCustomDonationAddress) {
-              items.push({
-                label: "Donation Address",
-                value: this.overview.nodeAddress,
-                href: this.nodeAddressWalletHref,
-                pulse: false,
-              });
-            }
+            {
+              label: "Onion Address",
+              value: this.overview.publicURL,
+              pulse: this.hasPublicOnionAddress,
+            },
+          ];
+          if (this.hasCustomDonationAddress) {
             items.push({
-              label: "Node Message",
-              value: this.overview.nodeMessage,
+              label: "Donation Address",
+              value: this.overview.nodeAddress,
+              href: this.nodeAddressWalletHref,
               pulse: false,
             });
-            return items;
-          },
-          hasCustomDonationAddress() {
-            const address = String(this.overview.nodeAddress || "").trim().toLowerCase();
-            if (!address || address === "loading..." || address === "unavailable" || address === "--") {
-              return false;
-            }
-            return true;
-          },
-          hasPublicOnionAddress() {
-            return !["Loading...", "Unavailable", "Not advertised", ""].includes(this.overview.publicURL || "");
-          },
-          nodeAddressWalletHref() {
-            const address = String(this.overview.nodeAddress || "").trim();
-            if (!/^sikka1[023456789acdefghjklmnpqrstuvwxyz]+$/i.test(address)) {
-              return "";
-            }
-            return "/wallet/" + encodeURIComponent(address.toLowerCase());
-          },
-          statItems() {
-            return [
-              { label: "DAG Size", value: this.overview.dagSize },
-              { label: "Tips", value: this.overview.tipCount },
-              { label: "Max Depth", value: this.overview.maxDepth },
-            ];
-          },
-          peerFeedbackClass() {
-            if (this.peerFeedbackKind === "success") {
-              return "text-emerald-300";
-            }
-            if (this.peerFeedbackKind === "error") {
-              return "text-rose-300";
-            }
-            if (this.peerFeedbackKind === "pending") {
-              return "text-sky-200";
-            }
-            return "text-slate-400";
-          },
+          }
+          items.push({
+            label: "Node Message",
+            value: this.overview.nodeMessage,
+            pulse: false,
+          });
+          return items;
         },
-        mounted() {
+        hasCustomDonationAddress() {
+          const address = String(this.overview.nodeAddress || "").trim().toLowerCase();
+          if (!address || address === "loading..." || address === "unavailable" || address === "--") {
+            return false;
+          }
+          return true;
+        },
+        hasPublicOnionAddress() {
+          return !["Loading...", "Unavailable", "Not advertised", ""].includes(this.overview.publicURL || "");
+        },
+        nodeAddressWalletHref() {
+          const address = String(this.overview.nodeAddress || "").trim();
+          if (!/^sikka1[023456789acdefghjklmnpqrstuvwxyz]+$/i.test(address)) {
+            return "";
+          }
+          return "/wallet/" + encodeURIComponent(address.toLowerCase());
+        },
+        statItems() {
+          return [
+            { label: "DAG Size", value: this.overview.dagSize },
+            { label: "Tips", value: this.overview.tipCount },
+            { label: "Max Depth", value: this.overview.maxDepth },
+          ];
+        },
+        peerFeedbackClass() {
+          if (this.peerFeedbackKind === "success") {
+            return "text-emerald-300";
+          }
+          if (this.peerFeedbackKind === "error") {
+            return "text-rose-300";
+          }
+          if (this.peerFeedbackKind === "pending") {
+            return "text-sky-200";
+          }
+          return "text-slate-400";
+        },
+      },
+      mounted() {
+        this.loadNodeOverview();
+        this.pollHandle = window.setInterval(() => {
           this.loadNodeOverview();
-          this.pollHandle = window.setInterval(() => {
-            this.loadNodeOverview();
-          }, 15000);
+        }, 15000);
+      },
+      beforeUnmount() {
+        if (this.pollHandle) {
+          window.clearInterval(this.pollHandle);
+        }
+      },
+      methods: {
+        submitExplorerSearch() {
+          const raw = this.searchInput.trim();
+          this.searchFeedback = "";
+          this.searchFeedbackKind = "";
+
+          if (!raw) {
+            this.searchFeedbackKind = "error";
+            this.searchFeedback = "Paste a transaction ID or address first.";
+            return;
+          }
+          if (/^[A-Fa-f0-9]{64}$/.test(raw)) {
+            window.location.assign("/tx/" + encodeURIComponent(raw));
+            return;
+          }
+          if (/^sikka1[023456789acdefghjklmnpqrstuvwxyz]+$/i.test(raw)) {
+            window.location.assign("/wallet/" + encodeURIComponent(raw));
+            return;
+          }
+
+          this.searchFeedbackKind = "error";
+          this.searchFeedback = "Not recognised - enter a 64-character transaction ID or a sikka1... address.";
         },
-        beforeUnmount() {
-          if (this.pollHandle) {
-            window.clearInterval(this.pollHandle);
+        async loadNodeOverview() {
+          try {
+            const [, status] = await Promise.all([this.fetchJSON("/healthz"), this.fetchJSON("/v1/status")]);
+
+            const torHealth = String(status.network_health || "unavailable");
+            const advertisedAddress = status.addresses?.[0] || status.onion_hostname || "";
+            const tips = Array.isArray(status.tips) ? status.tips : [];
+            const quote = await this.fetchNetworkPowQuote(tips).catch(() => null);
+
+            this.overview.torNetwork = this.formatTorNetwork(status, torHealth);
+            this.overview.publicURL = advertisedAddress.replace(/^http:\/\//, "") || "Not advertised";
+            this.overview.nodeAddress = String(status.node_address ?? "--");
+            this.overview.nodeMessage = String(status.node_message ?? "--");
+            this.overview.softwareVersion = String(status.software_version ?? "--");
+            this.overview.dagSize = String(status.dag_size ?? "--");
+            this.overview.tipCount = String(status.tip_count ?? "--");
+            this.overview.maxDepth = String(status.max_dag_depth ?? "--");
+            this.overview.knownNodes = String(status.known_node_count ?? "--");
+            this.tips = tips;
+            this.tipsLoaded = true;
+            this.applySubmitPow(quote);
+          } catch (error) {
+            this.overview.torNetwork = "Unavailable";
+            this.overview.publicURL = "Unavailable";
+            this.overview.nodeAddress = "Unavailable";
+            this.overview.nodeMessage = "Unavailable";
+            this.overview.softwareVersion = "--";
+            this.overview.dagSize = "--";
+            this.overview.tipCount = "--";
+            this.overview.maxDepth = "--";
+            this.overview.knownNodes = "--";
+            this.overview.submitPow = "--";
+            this.overview.submitPowNote = "Unavailable";
+            this.tips = [];
+            this.tipsLoaded = true;
           }
         },
-        methods: {
-          submitExplorerSearch() {
-            const raw = this.searchInput.trim();
-            this.searchFeedback = "";
-            this.searchFeedbackKind = "";
+        applySubmitPow(quote) {
+          if (!quote || !Number.isFinite(quote.requiredBits)) {
+            this.overview.submitPow = "--";
+            this.overview.submitPowNote = "Unavailable";
+            return;
+          }
 
-            if (!raw) {
-              this.searchFeedbackKind = "error";
-              this.searchFeedback = "Paste a transaction ID or address first.";
-              return;
-            }
-            if (/^[A-Fa-f0-9]{64}$/.test(raw)) {
-              window.location.assign("/tx/" + encodeURIComponent(raw));
-              return;
-            }
-            if (/^sikka1[023456789acdefghjklmnpqrstuvwxyz]+$/i.test(raw)) {
-              window.location.assign("/wallet/" + encodeURIComponent(raw));
-              return;
-            }
+          this.overview.submitPow = quote.requiredBits + " bits";
+          if (Number.isFinite(quote.overrideBits) && quote.overrideBits > 0) {
+            this.overview.submitPowNote = "Fixed override";
+            return;
+          }
+          if (Number.isFinite(quote.recentCount) && Number.isFinite(quote.windowSeconds)) {
+            this.overview.submitPowNote = quote.recentCount + " recent tx / " + quote.windowSeconds + "s window";
+            return;
+          }
+          this.overview.submitPowNote = "Live network quote";
+        },
+        async fetchNetworkPowQuote(tips) {
+          if (!Array.isArray(tips) || !tips.length) {
+            return null;
+          }
 
-            this.searchFeedbackKind = "error";
-            this.searchFeedback = "Not recognised - enter a 64-character transaction ID or a sikka1... address.";
-          },
-          async loadNodeOverview() {
-            try {
-              const [, status] = await Promise.all([this.fetchJSON("/healthz"), this.fetchJSON("/v1/status")]);
+          const parents = tips.length >= 2 ? tips.slice(0, 2) : [tips[0], tips[0]];
+          const response = await fetch("/v1/tx/pow-quote", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              parents,
+              timestamp: Math.floor(Date.now() / 1000),
+            }),
+          });
 
-              const torHealth = String(status.network_health || "unavailable");
-              const advertisedAddress = status.addresses?.[0] || status.onion_hostname || "";
-              const tips = Array.isArray(status.tips) ? status.tips : [];
-              const quote = await this.fetchNetworkPowQuote(tips).catch(() => null);
+          if (!response.ok) {
+            throw new Error("/v1/tx/pow-quote returned HTTP " + response.status);
+          }
 
-              this.overview.torNetwork = this.formatTorNetwork(status, torHealth);
-              this.overview.publicURL = advertisedAddress.replace(/^http:\/\//, "") || "Not advertised";
-              this.overview.nodeAddress = String(status.node_address ?? "--");
-              this.overview.nodeMessage = String(status.node_message ?? "--");
-              this.overview.softwareVersion = String(status.software_version ?? "--");
-              this.overview.dagSize = String(status.dag_size ?? "--");
-              this.overview.tipCount = String(status.tip_count ?? "--");
-              this.overview.maxDepth = String(status.max_dag_depth ?? "--");
-              this.overview.knownNodes = String(status.known_node_count ?? "--");
-              this.tips = tips;
-              this.tipsLoaded = true;
-              this.applySubmitPow(quote);
-            } catch (error) {
-              this.overview.torNetwork = "Unavailable";
-              this.overview.publicURL = "Unavailable";
-              this.overview.nodeAddress = "Unavailable";
-              this.overview.nodeMessage = "Unavailable";
-              this.overview.softwareVersion = "--";
-              this.overview.dagSize = "--";
-              this.overview.tipCount = "--";
-              this.overview.maxDepth = "--";
-              this.overview.knownNodes = "--";
-              this.overview.submitPow = "--";
-              this.overview.submitPowNote = "Unavailable";
-              this.tips = [];
-              this.tipsLoaded = true;
-            }
-          },
-          applySubmitPow(quote) {
-            if (!quote || !Number.isFinite(quote.requiredBits)) {
-              this.overview.submitPow = "--";
-              this.overview.submitPowNote = "Unavailable";
-              return;
-            }
+          const quote = await response.json();
+          const requiredBits = Number(quote.required_bits);
+          if (!Number.isFinite(requiredBits)) {
+            throw new Error("invalid network pow quote");
+          }
 
-            this.overview.submitPow = quote.requiredBits + " bits";
-            if (Number.isFinite(quote.overrideBits) && quote.overrideBits > 0) {
-              this.overview.submitPowNote = "Fixed override";
-              return;
-            }
-            if (Number.isFinite(quote.recentCount) && Number.isFinite(quote.windowSeconds)) {
-              this.overview.submitPowNote = quote.recentCount + " recent tx / " + quote.windowSeconds + "s window";
-              return;
-            }
-            this.overview.submitPowNote = "Live network quote";
-          },
-          async fetchNetworkPowQuote(tips) {
-            if (!Array.isArray(tips) || !tips.length) {
-              return null;
-            }
+          return {
+            requiredBits,
+            recentCount: Number(quote.recent_count ?? NaN),
+            windowSeconds: Number(quote.window_seconds ?? NaN),
+            overrideBits: Number(quote.override_bits ?? NaN),
+          };
+        },
+        formatTorNetwork(torStatus, torHealth) {
+          if (torStatus.control_connected !== true) {
+            return "Control connection unavailable";
+          }
 
-            const parents = tips.length >= 2 ? tips.slice(0, 2) : [tips[0], tips[0]];
-            const response = await fetch("/v1/tx/pow-quote", {
+          const parts = [this.capitalizeLabel(torHealth || "unknown")];
+          parts.push(torStatus.circuit_established ? "circuit ready" : "no circuit yet");
+          if (torStatus.control_error) {
+            parts.push(torStatus.control_error);
+          }
+          return parts.join(" · ");
+        },
+        capitalizeLabel(value) {
+          if (!value) {
+            return "Unknown";
+          }
+          return value.charAt(0).toUpperCase() + value.slice(1);
+        },
+        async submitManualPeer() {
+          const address = this.peerInput.trim();
+          if (!address) {
+            this.setPeerFeedback("Enter one onion URL to validate.", "error");
+            return;
+          }
+
+          this.peerPending = true;
+          this.setPeerFeedback("Checking peer status and compatibility...", "pending");
+
+          try {
+            const response = await fetch("/v1/discovery/announce", {
               method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                parents,
-                timestamp: Math.floor(Date.now() / 1000),
-              }),
+              headers: {
+                "Content-Type": "application/json",
+                Accept: "application/json",
+              },
+              body: JSON.stringify({ addresses: [address] }),
             });
 
+            let payload = null;
+            const contentType = response.headers.get("content-type") || "";
+            if (contentType.includes("application/json")) {
+              payload = await response.json();
+            } else {
+              const text = (await response.text()).trim();
+              throw new Error(text || "Peer validation failed.");
+            }
+
             if (!response.ok) {
-              throw new Error("/v1/tx/pow-quote returned HTTP " + response.status);
+              throw new Error(payload.error || "Peer validation failed.");
             }
 
-            const quote = await response.json();
-            const requiredBits = Number(quote.required_bits);
-            if (!Number.isFinite(requiredBits)) {
-              throw new Error("invalid network pow quote");
-            }
-
-            return {
-              requiredBits,
-              recentCount: Number(quote.recent_count ?? NaN),
-              windowSeconds: Number(quote.window_seconds ?? NaN),
-              overrideBits: Number(quote.override_bits ?? NaN),
-            };
-          },
-          formatTorNetwork(torStatus, torHealth) {
-            if (torStatus.control_connected !== true) {
-              return "Control connection unavailable";
-            }
-
-            const parts = [this.capitalizeLabel(torHealth || "unknown")];
-            parts.push(torStatus.circuit_established ? "circuit ready" : "no circuit yet");
-            if (torStatus.control_error) {
-              parts.push(torStatus.control_error);
-            }
-            return parts.join(" · ");
-          },
-          capitalizeLabel(value) {
-            if (!value) {
-              return "Unknown";
-            }
-            return value.charAt(0).toUpperCase() + value.slice(1);
-          },
-          async submitManualPeer() {
-            const address = this.peerInput.trim();
-            if (!address) {
-              this.setPeerFeedback("Enter one onion URL to validate.", "error");
+            const knownNodeCount = typeof payload.known_node_count === "number" ? payload.known_node_count : null;
+            if (payload.status === "accepted") {
+              const suffix = knownNodeCount === null ? "" : " Known nodes: " + knownNodeCount + ".";
+              this.setPeerFeedback("Peer verified and added." + suffix, "success");
+              this.peerInput = "";
+              await this.loadNodeOverview();
               return;
             }
 
-            this.peerPending = true;
-            this.setPeerFeedback("Checking peer status and compatibility...", "pending");
-
-            try {
-              const response = await fetch("/v1/discovery/announce", {
-                method: "POST",
-                headers: {
-                  "Content-Type": "application/json",
-                  Accept: "application/json",
-                },
-                body: JSON.stringify({ addresses: [address] }),
-              });
-
-              let payload = null;
-              const contentType = response.headers.get("content-type") || "";
-              if (contentType.includes("application/json")) {
-                payload = await response.json();
-              } else {
-                const text = (await response.text()).trim();
-                throw new Error(text || "Peer validation failed.");
-              }
-
-              if (!response.ok) {
-                throw new Error(payload.error || "Peer validation failed.");
-              }
-
-              const knownNodeCount = typeof payload.known_node_count === "number" ? payload.known_node_count : null;
-              if (payload.status === "accepted") {
-                const suffix = knownNodeCount === null ? "" : " Known nodes: " + knownNodeCount + ".";
-                this.setPeerFeedback("Peer verified and added." + suffix, "success");
-                this.peerInput = "";
-                await this.loadNodeOverview();
-                return;
-              }
-
-              this.setPeerFeedback("Peer was ignored because it is already known or maps back to this node.", "pending");
-            } catch (error) {
-              this.setPeerFeedback(error.message || "Peer validation failed.", "error");
-            } finally {
-              this.peerPending = false;
-            }
-          },
-          setPeerFeedback(message, kind) {
-            this.peerFeedbackMessage = message;
-            this.peerFeedbackKind = kind || "";
-          },
-          async fetchJSON(path) {
-            const response = await fetch(path);
-            if (!response.ok) {
-              throw new Error(path + " returned HTTP " + response.status);
-            }
-            return response.json();
-          },
+            this.setPeerFeedback("Peer was ignored because it is already known or maps back to this node.", "pending");
+          } catch (error) {
+            this.setPeerFeedback(error.message || "Peer validation failed.", "error");
+          } finally {
+            this.peerPending = false;
+          }
         },
-      }).mount("#app");
-    </script>
-  </body>
+        setPeerFeedback(message, kind) {
+          this.peerFeedbackMessage = message;
+          this.peerFeedbackKind = kind || "";
+        },
+        async fetchJSON(path) {
+          const response = await fetch(path);
+          if (!response.ok) {
+            throw new Error(path + " returned HTTP " + response.status);
+          }
+          return response.json();
+        },
+      },
+    }).mount("#app");
+  </script>
+</body>
+
 </html>
