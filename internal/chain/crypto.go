@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/cloudflare/circl/sign/mldsa/mldsa87"
 	"golang.org/x/crypto/sha3"
