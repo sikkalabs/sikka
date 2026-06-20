@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.2.0
+
+- Added Deep Finality Guard (Witness Stripping) to permanently delete old ML-DSA-87 signatures, saving massive disk space.
+- Added Spent UTXO Purge to completely drop fully-spent, confirmed UTXOs from memory and database.
+- Added Weight Index Compaction to delete redundant saturated weight indices for deep transactions.
+- Added `WitnessStripped` boolean flag to the Transaction struct for network sync compatibility.
+- Changed `protocol_version` to `2` to enforce the new witness stripping rules.
+- Changed `storageFormatVersion` to `"2"` to protect backwards-compatibility.
+- Massively accelerated `GetBalance()` and `GetUTXOs()` queries by removing dead UTXOs from the search space.
+
 ## 0.1.3
 
 - Wallet: collapsible tip panel for node operator when nodeaddress / nodemessage are set
