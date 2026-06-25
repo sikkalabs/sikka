@@ -1,0 +1,332 @@
+# SIKKA API
+
+Public pages live at the site root. Every machine API is under **`/api/`**.
+
+Nodes listen on port **64552**. Locally: `http://localhost:64552`. Optional
+public clearnet fronts (wallets/SDK): `https://1.sikkalabs.com`. Peer federation
+uses Tor onions only — not these clearnet hostnames.
+
+| Surface | Path |
+| --- | --- |
+| Landing | `GET /` → `public/index.html` |
+| Wallet | `GET /wallet.html` (also `/wallet`) |
+| Address | `GET /address.html?a=0x…` (also `/address`) |
+| API | `GET/POST /api/…` |
+
+All amounts in API payloads are **CHILLAR** integers (`1 SIKKA = 10⁹ CHILLAR`).
+Addresses are `0x` + 64 hex chars (SHA3-256 of an ML-DSA-87 public key). Public
+keys and signatures are hex **without** a `0x` prefix.
+
+CORS is open (`Access-Control-Allow-Origin: *`). `OPTIONS` is accepted on every
+route.
+
+Request bodies on ordinary endpoints are capped at Axum's default **2 MiB**.
+Bulk federation POSTs (`/api/checkpoint/proposal`, `/api/checkpoint/finalized`,
+`/api/tx/sync`) accept up to **256 MiB** so a full 10,000-transaction checkpoint
+(hex-encoded ML-DSA-87 material) can be gossiped. Clients should allow several
+minutes for those transfers on slow links. State snapshots use a
+manifest plus independently zstd-compressed 4 MiB chunks. Chunks are hashed,
+bounded, retried, and persisted so an interrupted transfer resumes instead
+of restarting. Reverse proxies in front of a node still need a matching
+`client_max_body_size` (or equivalent) for the bulk POSTs.
+
+Errors on federation routes look like `{ "error": "…" }` with HTTP 4xx/5xx.
+JSON-RPC errors use `{ "jsonrpc":"2.0", "error":{ "code", "message" }, "id" }`.
+
+---
+
+## Quick index
+
+| Method | Path | Audience |
+| --- | --- | --- |
+| `GET` | `/` | site |
+| `GET` | `/wallet.html` | humans |
+| `GET` | `/address.html` | humans |
+| `GET` | `/api/` | discovery JSON |
+| `GET` | `/api/health` | ops / probes |
+| `GET` | `/api/address/random` | landing teaser |
+| `POST` | `/api/rpc` | wallets / CLI |
+| `POST` | `/api/tx` | peers / clients |
+| `GET` | `/api/tx/{id}` | peers |
+| `POST` | `/api/tx/sync` | peers |
+| `POST` | `/api/vote` | peers |
+| `POST` | `/api/checkpoint/proposal` | peers |
+| `POST` | `/api/checkpoint/finalized` | peers |
+| `GET` | `/api/checkpoint/latest` | peers / clients |
+| `GET` | `/api/checkpoint/{height}` | peers / clients |
+| `POST` | `/api/peers` | peers |
+| `GET` | `/api/state/snapshot/manifest` | peers (fast sync) |
+| `GET` | `/api/state/snapshot/{id}/chunk/{index}` | peers (fast sync) |
+
+---
+
+## Site
+
+### `GET /`
+
+Network status page (`public/index.html`).
+
+### `GET /wallet.html`
+
+Browser wallet (`public/wallet.html`).
+
+### `GET /address.html?a=0x…`
+
+Public account page (`public/address.html`).
+
+### `GET /api/address/random`
+
+Returns a random account whose liquid balance plus bond is at least **1 SIKKA**:
+
+```json
+{
+  "address": "0x…",
+  "balance": 1234567890,
+  "bond": 0,
+  "total": 1234567890
+}
+```
+
+Used by the landing page teaser. HTTP 404 if the chain has no such account yet.
+
+---
+
+## Discovery and ops
+
+### `GET /api/`
+
+Software string, chain id, height, this node's address, endpoint list, and RPC
+method names.
+
+```bash
+curl -s https://1.sikkalabs.com/api/
+```
+
+### `GET /api/health`
+
+Lightweight readiness probe.
+
+**Response:** `chain_id`, `height`, `state_root`, `mempool`, `peers`, `validator`.
+
+```bash
+curl -s https://1.sikkalabs.com/api/health
+```
+
+---
+
+## JSON-RPC (`POST /api/rpc`)
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "method": "chain.info",
+  "params": null
+}
+```
+
+```bash
+curl -s -X POST https://1.sikkalabs.com/api/rpc \
+  -H 'content-type: application/json' \
+  -d '{"jsonrpc":"2.0","id":1,"method":"chain.info","params":null}'
+```
+
+There is no history API: once a checkpoint is final, only the resulting state
+remains. Confirm a payment by reading the recipient's balance.
+
+### `chain.info`
+
+**Params:** `null`
+
+**Result:** `chain_id`, `genesis_fingerprint`, `height`, `state_root`,
+`validator_root`, `last_checkpoint_hash`, `last_checkpoint_time`,
+`total_supply`, `total_bonded`, `accounts`, `active_validators`,
+`checkpoint_tx_interval`, `mempool`, `peers`, `node_address`, `advertise`,
+`tor`, `validator`. `advertise` is this node's peer URL (Tor onion in
+production). `tor` is `{ status, detail }` where `status` is `disabled`,
+`checking`, `ok`, or `down` (onion self-check via SOCKS).
+
+Wallets must copy `chain_id` and `genesis_fingerprint` into every signed
+transaction (exact values from this call; do not invent them). The fingerprint
+is a 32-byte hash of the genesis config and distinguishes networks that share
+the same human-readable `chain_id`.
+
+### `account.get`
+
+**Params:** `{ "address": "0x…" }`
+
+**Result:** `address`, `exists`, `balance`, `nonce`, `battery`, `battery_now`,
+`last_regen_time`, `seconds_until_battery?`, `next_nonce`, `bond?`.
+
+### `account.proof`
+
+**Params:** `{ "address": "0x…" }`
+
+**Result:** Merkle inclusion/absence proof plus the signed checkpoint that
+commits to `state_root`.
+
+### `tx.submit`
+
+**Params:** `{ "transaction": { … } }`
+
+**Result:** `{ "id": "0x…", "accepted": true }`
+
+### `tx.status`
+
+**Params:** `{ "id": "0x…" }`
+
+**Result:** `{ "id", "pending", "transaction"? }` — pending means still in the
+mempool. After finality the body is forgotten.
+
+### `checkpoint.get`
+
+**Params:** `null` (latest) or `{ "height": 12 }`
+
+Only the last 100 heights are retained.
+
+### `validator.list`
+
+**Params:** `null` — array of validators (`address`, `public_key`, `bond`,
+`active_from`, `active`, `unbonding_since?`, `slashed`).
+
+### `peer.list`
+
+**Params:** `null` — peer addresses known to this node.
+
+### `mempool.info`
+
+**Params:** `null` — `{ "pending", "capacity", "until_checkpoint" }`.
+
+---
+
+## Shared types
+
+### Transaction
+
+| Field | Type | Notes |
+| --- | --- | --- |
+| `kind` | `"transfer"` \| `"bond"` \| `"unbond"` | default `transfer` |
+| `from` | address | must equal `SHA3-256(public_key)` |
+| `to` | address | recipient; zero address for bond/unbond |
+| `amount` | u64 | CHILLAR; `0` for unbond |
+| `nonce` | u64 | must match `next_nonce` |
+| `timestamp` | u64 | unix seconds; ±5 minutes of node clock |
+| `chain_id` | string | must match `chain.info.chain_id`; bound into the signature |
+| `genesis_fingerprint` | hex (32 bytes) | must match `chain.info.genesis_fingerprint`; bound into the signature |
+| `public_key` | hex (2592 bytes) | ML-DSA-87 |
+| `signature` | hex (4627 bytes) | context `SIKKA-v1` |
+
+Signing payload:  
+`SIKKA/tx/v1` ‖ `str(chain_id)` ‖ genesis_fingerprint ‖ kind_tag ‖ from ‖ to ‖ amount ‖ nonce ‖ timestamp ‖ public_key  
+(`str` = u32 LE length + UTF-8; integers are little-endian u64;  
+`transfer=0`, `bond=1`, `unbond=2`).
+
+`chain_id` and `genesis_fingerprint` prevent cross-network replay. Two chains
+can share a name (testnet reset, local fork) but not a genesis fingerprint; a
+payment signed for one will not verify on the other even if the same keys
+exist on both.
+
+---
+
+## Federation (peer HTTP)
+
+All under `/api/`. Wallets should prefer `/api/rpc`.
+
+### `POST /api/tx`
+
+```json
+{ "transaction": { … } }
+```
+
+**Response:** `{ "id": "0x…", "accepted": true }`
+
+### `GET /api/tx/{id}`
+
+**Response:** `{ "id": "0x…", "known": true }`
+
+### `POST /api/tx/sync`
+
+```json
+{ "filter": { … }, "limit": 1000 }
+```
+
+### `POST /api/vote`
+
+```json
+{ "vote": { … } }
+```
+
+### `POST /api/checkpoint/proposal`
+
+```json
+{ "proposal": { … } }
+```
+
+Bodies may be large (up to 256 MiB): the proposal carries every transaction in
+the batch.
+
+### `POST /api/checkpoint/finalized`
+
+```json
+{ "checkpoint": { … }, "transactions": [ … ] }
+```
+
+Same size budget as proposals when `transactions` is attached for replay.
+
+### `GET /api/checkpoint/latest`
+
+### `GET /api/checkpoint/{height}`
+
+### `POST /api/peers`
+
+```json
+{ "announce": { … } }
+```
+
+### `GET /api/state/snapshot/manifest`
+
+Versioned snapshot metadata: finalized checkpoint, chain/genesis identity,
+record counts, and the ordered chunk list. Each chunk entry includes its kind,
+record count, compressed and uncompressed sizes, and SHA3-256 hash.
+
+### `GET /api/state/snapshot/{id}/chunk/{index}`
+
+One independently zstd-compressed binary state chunk. The snapshot id is the
+checkpoint hash. Nodes retain valid chunks under `/data/snapshots/download`
+while syncing, verify every chunk before keeping it, and remove the completed
+download after the reconstructed state passes checkpoint and state-root
+verification. Serving nodes cache the two newest requested snapshots under
+`/data/snapshots/serve`.
+
+The old monolithic `GET /api/state/snapshot` JSON response no longer exists.
+
+Snapshot chunks prove their contents against the checkpoint roots, but they do
+not prove an arbitrary history against a long-range fork. A node accepts an
+unpinned snapshot from an ordinary gossip peer only across a single-height gap.
+Any larger gap needs a pin: the hardcoded bootstrap onions attest the live tip
+automatically (see the whitepaper §16.2). `SIKKA_TRUSTED_CHECKPOINT=<height>:<checkpoint-hash>`
+is the operator override when bootstraps disagree or the validator set has
+changed without a bootstrap quorum.
+
+---
+
+## Examples
+
+**Balance**
+
+```bash
+curl -s -X POST https://1.sikkalabs.com/api/rpc \
+  -H 'content-type: application/json' \
+  -d '{
+    "jsonrpc":"2.0","id":1,
+    "method":"account.get",
+    "params":{"address":"0x994992556d62b895dd34da64f4389d16404c81d57a91c737ab641cf652f1c447"}
+  }'
+```
+
+Prefer the CLI or wallet for signing:
+
+```bash
+docker exec sikka sikka send 0x… 10
+# or open https://1.sikkalabs.com/wallet.html
+```

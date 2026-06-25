@@ -1,0 +1,8 @@
+target
+.git
+.gitignore
+testnet
+*.redb
+keys
+.env
+audit.md

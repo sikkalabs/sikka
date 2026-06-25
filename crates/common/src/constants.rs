@@ -1,0 +1,212 @@
+//! Protocol constants.
+
+/// Smallest divisible unit per SIKKA: 1 SIKKA = 10^9 CHILLAR.
+pub const CHILLAR_PER_SIKKA: u64 = 1_000_000_000;
+
+/// Anti-spam battery ceiling per account.
+pub const MAX_BATTERY: u32 = 10;
+
+/// One battery unit regenerates every 60 seconds of signed transaction time.
+pub const BATTERY_REGEN_SECS: u64 = 60;
+
+/// Every transaction burns exactly one battery unit.
+pub const BATTERY_COST_PER_TX: u32 = 1;
+
+/// A checkpoint is produced every 10,000 confirmed transactions. There is no
+/// time-based fallback: an idle network produces no checkpoints.
+pub const DEFAULT_CHECKPOINT_TX_INTERVAL: u32 = 10_000;
+
+/// Maximum HTTP request body on bulk federation endpoints (checkpoint
+/// proposal/finalized, mempool sync).
+///
+/// ML-DSA-87 keys and signatures are hex on the wire (~15 KiB JSON per
+/// transaction), so a full [`DEFAULT_CHECKPOINT_TX_INTERVAL`] batch is about
+/// 150 MiB. 256 MiB leaves headroom for checkpoint metadata and evidence.
+/// Smaller routes keep Axum's 2 MiB default.
+pub const MAX_HTTP_BODY_BYTES: usize = 256 * 1024 * 1024;
+
+/// Outbound timeout for large peer transfers (proposals, finalized
+/// checkpoints, mempool sync, snapshots). Short timeouts are fine for votes
+/// and single transactions; bulk payloads can take minutes on slow links.
+pub const BULK_REQUEST_TIMEOUT_SECS: u64 = 300;
+
+/// Transactions whose signed timestamp differs from a validator's wall clock by
+/// more than five minutes are rejected.
+pub const TX_TIME_TOLERANCE_SECS: u64 = 300;
+
+/// How long the scheduled proposer has to produce a checkpoint before the turn
+/// passes to the next validator (round-robin takeover).
+pub const PROPOSER_TIMEOUT_SECS: u64 = 10;
+
+/// Which proposer round is due, given how long the previous checkpoint has stood.
+///
+/// A round is a pure function of two agreed timestamps, so every node reaches
+/// the same conclusion about whose turn it is without exchanging messages.
+pub fn round_at(now: u64, last_checkpoint_time: u64) -> u32 {
+    let elapsed = now.saturating_sub(last_checkpoint_time);
+    u32::try_from(elapsed / PROPOSER_TIMEOUT_SECS).unwrap_or(u32::MAX)
+}
+
+/// Minimum validator bond is 0.001% of current total supply, i.e. supply/100000.
+pub const MIN_BOND_SUPPLY_DIVISOR: u64 = 100_000;
+
+/// Unbonding cooldown: seven days without rewards, still slashable.
+pub const UNBONDING_SECS: u64 = 7 * 24 * 60 * 60;
+
+/// Consecutive missed full-batch proposer turns before a validator is forced
+/// to unbond (stake is not burned; the normal cooldown still applies).
+///
+/// Only charged when a checkpoint seals a full transaction batch after the
+/// scheduled proposer timed out (`round > 0`). Partial / idle-delay seals do
+/// not increment the counter, so quiet-chain timeouts are not treated as
+/// faults. Genesis may lower this for test networks.
+pub const DEFAULT_MAX_MISSED_PROPOSER_SLOTS: u32 = 100;
+
+/// Number of recent checkpoints retained; older ones are pruned.
+pub const CHECKPOINT_HISTORY: u64 = 100;
+
+/// Maximum height gap a node may fast-sync across without a trust pin.
+///
+/// A gap of one height can still be closed by replaying a finalized checkpoint
+/// against the locally known validator set. Anything larger needs a pin: an
+/// operator `SIKKA_TRUSTED_CHECKPOINT`, or a hash attested by the hardcoded
+/// bootstrap nodes. Unattested snapshots from ordinary gossip peers are never
+/// enough — otherwise a former ≥2/3 set can forge a long-range fork and trick
+/// a stale node.
+pub const WEAK_SUBJECTIVITY_GAP: u64 = 1;
+
+/// Votes more than this many heights ahead of the local tip are ignored.
+///
+/// Stops a bonded key from filling the vote tracker with arbitrary future
+/// heights (memory + ML-DSA verification spam).
+pub const MAX_VOTE_HEIGHT_AHEAD: u64 = 1;
+
+/// Reject votes whose round is fair more than this many rounds ahead of the
+/// turn now due.
+///
+/// A round represents a 10-second proposer turn derived from the last
+/// checkpoint's agreed timestamp, so a vote for any round beyond the local
+/// `round_at(wall, last)` plus this generous margin can only be an attempt to
+/// fill the vote tracker (or this node's ML-DSA budget) with fabricated
+/// rounds. 100 rounds ≈ 17 minutes of headroom for clock skew and catch-up.
+pub const MAX_VOTE_ROUND_AHEAD: u32 = 100;
+
+/// Maximum equivocation proofs accepted in one checkpoint proposal.
+pub const MAX_EVIDENCE_PER_CHECKPOINT: usize = 64;
+
+/// Soft cap on JSON/text bodies for non-bulk peer responses (votes, health,
+/// single-tx receipts). Bulk routes still use [`MAX_HTTP_BODY_BYTES`].
+pub const MAX_RPC_BODY_BYTES: usize = 2 * 1024 * 1024;
+
+/// Seconds in a protocol year (365 days) used by the inflation schedule.
+pub const SECONDS_PER_YEAR: u64 = 31_536_000;
+
+/// Fixed annual inflation, 1.5%, expressed in basis points. Never changes.
+pub const ANNUAL_INFLATION_BPS: u64 = 150;
+
+/// Port every node listens on.
+pub const DEFAULT_PORT: u16 = 64552;
+
+/// Default chain identifier, mixed into genesis.
+pub const DEFAULT_CHAIN_ID: &str = "sikka";
+
+/// Hardcoded Tor bootstrap peers (genesis validators' deterministic onions).
+pub const BOOTSTRAP_NODES: &[&str] = &[
+    "http://vgz5tb6cr3bewedb3zqhfrqgnfghrkvpjqguoeqragqyx247azeym7ad.onion",
+    "http://gejjo77o6nxjtvydahgkcaaebczfj4sjgs2spspykqzqaof46exnqoad.onion",
+];
+
+/// Default SOCKS5h endpoint for dialing `.onion` peers (Arti in the node image).
+pub const DEFAULT_TOR_SOCKS: &str = "127.0.0.1:9050";
+
+/// Ordinary peer request timeout — Tor circuits are slower than clearnet.
+pub const PEER_REQUEST_TIMEOUT_SECS: u64 = 60;
+
+/// Bonded stake required to finalize a checkpoint: `ceil(2/3 * total_active_bond)`.
+///
+/// Quorum is stake-weighted: each active validator contributes its bond, not a
+/// flat one-address-one-vote. Equal bonds recover the old headcount rule.
+///
+/// ```
+/// use sikka_common::constants::quorum_bond;
+/// assert_eq!(quorum_bond(30_000), 20_000);
+/// assert_eq!(quorum_bond(4), 3);
+/// assert_eq!(quorum_bond(1), 1);
+/// ```
+pub const fn quorum_bond(total_active_bond: u64) -> u64 {
+    if total_active_bond == 0 {
+        return 0;
+    }
+    (2 * total_active_bond).div_ceil(3)
+}
+
+/// Headcount form kept for tests that use equal bonds (identical to
+/// [`quorum_bond`] when every validator has bond weight 1).
+pub const fn quorum_threshold(validator_count: usize) -> usize {
+    quorum_bond(validator_count as u64) as usize
+}
+
+/// Minimum bond for the given total supply.
+pub const fn min_bond(total_supply: u64) -> u64 {
+    let bond = total_supply / MIN_BOND_SUPPLY_DIVISOR;
+    if bond == 0 {
+        1
+    } else {
+        bond
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn round_at_advances_once_per_timeout() {
+        use super::{round_at, PROPOSER_TIMEOUT_SECS};
+
+        let last = 1_700_000_000;
+        assert_eq!(round_at(last, last), 0);
+        assert_eq!(round_at(last + PROPOSER_TIMEOUT_SECS - 1, last), 0);
+        assert_eq!(round_at(last + PROPOSER_TIMEOUT_SECS, last), 1);
+        assert_eq!(round_at(last + 3 * PROPOSER_TIMEOUT_SECS + 5, last), 3);
+        assert_eq!(round_at(last - 500, last), 0);
+    }
+
+    #[test]
+    fn quorum_is_two_thirds_rounded_up() {
+        assert_eq!(quorum_bond(0), 0);
+        assert_eq!(quorum_bond(1), 1);
+        assert_eq!(quorum_bond(2), 2);
+        assert_eq!(quorum_bond(3), 2);
+        assert_eq!(quorum_bond(4), 3);
+        assert_eq!(quorum_bond(40_200), 26_800);
+        assert_eq!(quorum_threshold(4), 3);
+        assert_eq!(quorum_threshold(100), 67);
+    }
+
+    #[test]
+    fn quorum_always_exceeds_two_thirds() {
+        for n in 1..500u64 {
+            let q = quorum_bond(n);
+            assert!(q * 3 >= n * 2, "quorum {q} too small for {n}");
+            assert!(
+                (q - 1) * 3 < n * 2,
+                "quorum {q} larger than necessary for {n}"
+            );
+        }
+    }
+
+    #[test]
+    fn min_bond_is_one_thousandth_of_a_percent() {
+        assert_eq!(min_bond(100_000_000), 1_000);
+        assert_eq!(min_bond(0), 1);
+    }
+
+    #[test]
+    fn http_body_budget_covers_a_full_json_checkpoint() {
+        // ~15 KiB JSON per ML-DSA-87 transaction × 10_000 ≈ 150 MiB.
+        let approx_full_batch = DEFAULT_CHECKPOINT_TX_INTERVAL as usize * 15 * 1024;
+        assert!(MAX_HTTP_BODY_BYTES > approx_full_batch);
+        assert_eq!(BULK_REQUEST_TIMEOUT_SECS, 300);
+    }
+}

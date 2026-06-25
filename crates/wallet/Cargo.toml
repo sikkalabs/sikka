@@ -1,0 +1,19 @@
+[package]
+name = "sikka-wallet"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "SIKKA stateless wallet: keystore, transaction building, state proof verification"
+
+[dependencies]
+sikka-common.workspace = true
+sikka-crypto.workspace = true
+sikka-state.workspace = true
+sikka-rpc.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+hex.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

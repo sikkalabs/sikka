@@ -1,0 +1,397 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>SIKKA</title>
+  <style>
+    :root {
+      --ink: #1a1714;
+      --paper: #f3efe6;
+      --muted: #6b645a;
+      --line: #d4cdc0;
+      --accent: #0f6b4c;
+      --mono: "IBM Plex Mono", "SF Mono", ui-monospace, monospace;
+      --sans: "IBM Plex Sans", "Source Sans 3", system-ui, sans-serif;
+      --display: "Fraunces", "IBM Plex Serif", Georgia, serif;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      color: var(--ink);
+      background:
+        radial-gradient(1100px 520px at 8% -8%, #fff6e4 0%, transparent 55%),
+        radial-gradient(900px 480px at 100% 0%, #e4f0ea 0%, transparent 52%),
+        linear-gradient(180deg, #f7f2e8 0%, var(--paper) 40%, #ebe6db 100%);
+      font: 16px/1.5 var(--sans);
+    }
+    main {
+      max-width: 40rem;
+      margin: 0 auto;
+      padding: 4.5rem 1.25rem 4rem;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+    }
+    .brand {
+      font-family: var(--display);
+      font-size: clamp(3.2rem, 12vw, 5.2rem);
+      font-weight: 600;
+      letter-spacing: -0.045em;
+      line-height: 0.95;
+      margin: 0;
+    }
+    .lead {
+      margin: 1.15rem 0 0;
+      max-width: 36rem;
+      color: var(--ink);
+      font-size: 1.02rem;
+      line-height: 1.55;
+    }
+    .lead em {
+      font-style: italic;
+    }
+    .lead a.inline {
+      color: var(--accent);
+      text-decoration: underline;
+      text-underline-offset: 0.15em;
+    }
+    .lead a.inline:hover { color: var(--ink); }
+    .cta {
+      display: inline-block;
+      margin-top: 1.75rem;
+      padding: 0.85rem 1.35rem;
+      border: 1px solid var(--ink);
+      background: var(--ink);
+      color: var(--paper);
+      font: 600 0.95rem/1 var(--sans);
+      text-decoration: none;
+    }
+    .cta:hover { background: var(--accent); border-color: var(--accent); }
+    .links {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 1rem 1.35rem;
+      margin-top: 1.75rem;
+    }
+    .links .cta { margin-top: 0; }
+    .links a.secondary {
+      color: var(--muted);
+      font: 600 0.95rem/1 var(--sans);
+      text-decoration: none;
+      border-bottom: 1px solid var(--line);
+      padding-bottom: 0.15rem;
+    }
+    .links a.secondary:hover { color: var(--ink); border-color: var(--ink); }
+
+    .holder {
+      margin-top: 2.25rem;
+      padding-top: 1.5rem;
+      border-top: 1px solid var(--line);
+      opacity: 0;
+      transform: translateY(0.4rem);
+      transition: opacity 0.45s ease, transform 0.45s ease;
+    }
+    .holder.show {
+      opacity: 1;
+      transform: none;
+    }
+    .holder-label {
+      margin: 0 0 0.85rem;
+      font-size: 0.72rem;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--muted);
+      font-weight: 600;
+    }
+    .holder-card {
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+      text-decoration: none;
+      color: inherit;
+      max-width: 100%;
+    }
+    .holder-card:hover .holder-addr { color: var(--ink); }
+    .holder-card:hover .holder-meta { color: var(--accent); }
+    .holder-avatar {
+      flex: 0 0 auto;
+      width: 3.5rem;
+      height: 3.5rem;
+      border-radius: 0.85rem;
+      overflow: hidden;
+      background: #fffdf8;
+      border: 1px solid var(--line);
+    }
+    .holder-avatar img {
+      display: block;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+    .holder-text { min-width: 0; }
+    .holder-addr {
+      font: 600 0.92rem/1.35 var(--mono);
+      color: var(--accent);
+      word-break: break-all;
+    }
+    .holder-meta {
+      margin-top: 0.2rem;
+      color: var(--muted);
+      font-size: 0.9rem;
+    }
+    .holder-shuffle {
+      margin-top: 0.85rem;
+      appearance: none;
+      border: 0;
+      background: transparent;
+      color: var(--muted);
+      font: 600 0.85rem/1 var(--sans);
+      padding: 0;
+      cursor: pointer;
+      border-bottom: 1px solid var(--line);
+      padding-bottom: 0.12rem;
+    }
+    .holder-shuffle:hover { color: var(--ink); border-color: var(--ink); }
+    .stats {
+      margin-top: 3.5rem;
+      padding-top: 1.5rem;
+      border-top: 1px solid var(--line);
+    }
+    .stats h2 {
+      margin: 0 0 1rem;
+      font-size: 0.72rem;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--muted);
+      font-weight: 600;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 1rem 1.5rem;
+    }
+    .grid .span {
+      grid-column: 1 / -1;
+    }
+    @media (max-width: 520px) { .grid { grid-template-columns: 1fr; } }
+    .label {
+      font-size: 0.72rem;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+    .value {
+      margin-top: 0.2rem;
+      font: 600 1.05rem/1.3 var(--mono);
+      word-break: break-all;
+    }
+    .value.onion {
+      font-size: 0.82rem;
+      color: var(--accent);
+    }
+    .tor-note {
+      margin: 0.45rem 0 0;
+      font-size: 0.88rem;
+      line-height: 1.4;
+      color: var(--muted);
+    }
+    .tor-note.ok { color: var(--accent); }
+    .tor-note.down { color: #a11; }
+    .tor-note.checking { color: var(--muted); }
+    .live {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.45rem;
+      margin-bottom: 1rem;
+      color: var(--muted);
+      font-size: 0.85rem;
+    }
+    .dot {
+      width: 0.5rem;
+      height: 0.5rem;
+      border-radius: 50%;
+      background: var(--line);
+    }
+    .dot.on { background: var(--accent); }
+    .dot.off { background: #a11; }
+    .err { color: #a11; font-size: 0.9rem; margin: 0.5rem 0 0; }
+  </style>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,600&family=IBM+Plex+Sans:wght@400;600&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet" />
+</head>
+<body>
+  <main>
+    <h1 class="brand">SIKKA</h1>
+    <p class="lead">
+      SIKKA is a feeless, post-quantum cryptocurrency named after
+      <em>sikkā</em>, the Punjabi word for coin in the history of
+      <a class="inline" href="https://en.wikipedia.org/wiki/Sikh_coinage">Sikh coinage</a>.
+      The term is borrowed from Persian, where it meant both a die for minting
+      and, by extension, the authority to coin money.
+    </p>
+    <div class="links">
+      <a class="cta" href="/wallet.html">Open wallet</a>
+      <a class="secondary" href="/address.html">Look up address</a>
+      <a class="secondary" href="https://github.com/sikkalabs/sikka">GitHub</a>
+    </div>
+
+    <section class="holder" id="holder" hidden>
+      <p class="holder-label">Someone on this chain</p>
+      <a class="holder-card" id="holderLink" href="/address.html">
+        <div class="holder-avatar" aria-hidden="true">
+          <img id="holderAvatar" alt="" width="112" height="112" />
+        </div>
+        <div class="holder-text">
+          <div class="holder-addr" id="holderAddr">—</div>
+          <div class="holder-meta" id="holderMeta">—</div>
+        </div>
+      </a>
+      <button type="button" class="holder-shuffle" id="holderShuffle">Show another</button>
+    </section>
+
+    <section class="stats" aria-live="polite">
+      <div class="live"><span class="dot" id="dot"></span><span id="status">Connecting…</span></div>
+      <h2>Network</h2>
+      <div class="grid">
+        <div><div class="label">Height</div><div class="value" id="height">—</div></div>
+        <div><div class="label">Supply</div><div class="value" id="supply">—</div></div>
+        <div><div class="label">Bonded</div><div class="value" id="bonded">—</div></div>
+        <div><div class="label">Validators</div><div class="value" id="validators">—</div></div>
+        <div><div class="label">Peers / mempool</div><div class="value" id="peers">—</div></div>
+        <div class="span">
+          <div class="label">Tor identity</div>
+          <div class="value onion" id="onion" title="">—</div>
+          <p class="tor-note" id="torNote" hidden></p>
+        </div>
+      </div>
+      <p class="err" id="error" hidden></p>
+    </section>
+  </main>
+
+  <script type="module">
+    import JSONBig from "https://esm.sh/json-bigint@1.0.0";
+
+    const CHILLAR = 1_000_000_000n;
+    const jsonBig = JSONBig({ useNativeBigInt: true });
+    const $ = (id) => document.getElementById(id);
+
+    function asBig(v) {
+      if (typeof v === "bigint") return v;
+      if (typeof v === "number") return BigInt(Math.trunc(v));
+      if (typeof v === "string") return BigInt(v);
+      return 0n;
+    }
+
+    function formatSikka(chillar) {
+      const c = asBig(chillar);
+      const whole = c / CHILLAR;
+      const frac = c % CHILLAR;
+      if (frac === 0n) return `${whole} SIKKA`;
+      return `${whole}.${frac.toString().padStart(9, "0").replace(/0+$/, "")} SIKKA`;
+    }
+
+    async function rpc(method, params = null) {
+      const res = await fetch("/api/rpc", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
+      });
+      const parsed = jsonBig.parse(await res.text());
+      if (parsed.error) throw new Error(parsed.error.message || "RPC error");
+      return parsed.result;
+    }
+
+    function shortAddress(address) {
+      return `${address.slice(0, 10)}…${address.slice(-8)}`;
+    }
+
+    function avatarUrl(address) {
+      return `https://api.dicebear.com/10.x/adventurer/svg?seed=${encodeURIComponent(address)}&size=112&backgroundColor=f3efe6`;
+    }
+
+    async function loadHolder() {
+      const section = $("holder");
+      try {
+        const res = await fetch("/api/address/random");
+        if (!res.ok) throw new Error("no funded address");
+        const data = jsonBig.parse(await res.text());
+        const address = String(data.address);
+        const page = `/address.html?a=${address}`;
+        $("holderLink").href = page;
+        $("holderAddr").textContent = shortAddress(address);
+        $("holderAddr").title = address;
+        $("holderMeta").textContent = formatSikka(data.total ?? data.balance);
+        const img = $("holderAvatar");
+        img.alt = `Avatar for ${shortAddress(address)}`;
+        img.src = avatarUrl(address);
+        section.hidden = false;
+        requestAnimationFrame(() => section.classList.add("show"));
+      } catch {
+        section.hidden = true;
+        section.classList.remove("show");
+      }
+    }
+
+    async function refresh() {
+      try {
+        const info = await rpc("chain.info");
+        $("dot").className = "dot on";
+        $("status").textContent = `online · height ${info.height}`;
+        $("height").textContent = String(info.height);
+        $("supply").textContent = formatSikka(info.total_supply);
+        $("bonded").textContent = formatSikka(info.total_bonded);
+        $("validators").textContent = String(info.active_validators);
+        $("peers").textContent = `${info.peers} / ${info.mempool}`;
+        const advertise = String(info.advertise || "");
+        const onionHost = advertise.replace(/^https?:\/\//, "").replace(/\/$/, "");
+        const onionEl = $("onion");
+        onionEl.textContent = onionHost || "—";
+        onionEl.title = advertise || "";
+        const tor = info.tor || {};
+        const torStatus = String(tor.status || "");
+        const torDetail = String(tor.detail || "");
+        const note = $("torNote");
+        if (!torStatus || torStatus === "disabled") {
+          note.hidden = true;
+          note.textContent = "";
+          note.className = "tor-note";
+        } else if (torStatus === "ok") {
+          note.hidden = false;
+          note.className = "tor-note ok";
+          note.textContent = "Tor connected — onion reachable";
+        } else if (torStatus === "checking") {
+          note.hidden = false;
+          note.className = "tor-note checking";
+          note.textContent = "Checking Tor…";
+        } else {
+          note.hidden = false;
+          note.className = "tor-note down";
+          note.textContent = torDetail
+            ? `Tor not connected — ${torDetail}`
+            : "Tor not connected — peer mesh unavailable";
+        }
+        $("error").hidden = true;
+      } catch (e) {
+        $("dot").className = "dot off";
+        $("status").textContent = "unreachable";
+        $("error").hidden = false;
+        $("error").textContent = e.message || String(e);
+      }
+    }
+
+    $("holderShuffle").addEventListener("click", () => {
+      $("holder").classList.remove("show");
+      loadHolder();
+    });
+
+    refresh();
+    loadHolder();
+    setInterval(refresh, 12_000);
+  </script>
+</body>
+</html>

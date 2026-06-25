@@ -1,0 +1,701 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>SIKKA wallet</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,600&family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;600&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --ink: #1a1714;
+      --paper: #f3efe6;
+      --muted: #6b645a;
+      --line: #d4cdc0;
+      --accent: #0f6b4c;
+      --warn: #8a3b12;
+      --err: #a11;
+      --mono: "IBM Plex Mono", ui-monospace, monospace;
+      --sans: "IBM Plex Sans", system-ui, sans-serif;
+      --display: "Fraunces", Georgia, serif;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      color: var(--ink);
+      background:
+        radial-gradient(1100px 520px at 8% -8%, #fff6e4 0%, transparent 55%),
+        radial-gradient(900px 480px at 100% 0%, #e4f0ea 0%, transparent 52%),
+        linear-gradient(180deg, #f7f2e8 0%, var(--paper) 45%, #ebe6db 100%);
+      font: 16px/1.5 var(--sans);
+    }
+    main {
+      max-width: 40rem;
+      margin: 0 auto;
+      padding: 2.75rem 1.25rem 4rem;
+    }
+    .brand {
+      font-family: var(--display);
+      font-size: clamp(2.8rem, 10vw, 4.2rem);
+      font-weight: 600;
+      letter-spacing: -0.045em;
+      line-height: 0.95;
+      margin: 0;
+    }
+    .lead {
+      margin: 0.85rem 0 0;
+      color: var(--muted);
+      max-width: 34rem;
+    }
+    .lead a { color: var(--accent); }
+    .nav {
+      margin: 1.25rem 0 0;
+      font-size: 0.9rem;
+    }
+    .nav a { color: var(--muted); margin-right: 1rem; }
+    section {
+      margin-top: 2rem;
+      padding-top: 1.35rem;
+      border-top: 1px solid var(--line);
+    }
+    section h2 {
+      margin: 0 0 0.9rem;
+      font-size: 0.75rem;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--muted);
+      font-weight: 600;
+    }
+    .row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.55rem;
+      align-items: center;
+    }
+    button {
+      appearance: none;
+      border: 1px solid var(--ink);
+      background: var(--ink);
+      color: var(--paper);
+      padding: 0.7rem 1.05rem;
+      font: 600 0.95rem/1 var(--sans);
+      cursor: pointer;
+    }
+    button.secondary { background: transparent; color: var(--ink); }
+    button:disabled { opacity: 0.4; cursor: not-allowed; }
+    button:hover:not(:disabled) { background: var(--accent); border-color: var(--accent); color: var(--paper); }
+    button.secondary:hover:not(:disabled) { background: transparent; color: var(--accent); border-color: var(--accent); }
+    label {
+      display: block;
+      margin: 0.95rem 0 0.35rem;
+      font-size: 0.75rem;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+    input, textarea {
+      width: 100%;
+      border: 1px solid var(--line);
+      background: #fffdf8;
+      color: var(--ink);
+      padding: 0.75rem;
+      font: 0.85rem/1.4 var(--mono);
+    }
+    textarea { resize: vertical; }
+    .grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 0.85rem 1.25rem;
+      margin-top: 1rem;
+    }
+    @media (max-width: 560px) { .grid { grid-template-columns: 1fr; } }
+    .stat-label {
+      font-size: 0.7rem;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+    .stat-value {
+      margin-top: 0.2rem;
+      font: 600 1.05rem/1.35 var(--mono);
+      word-break: break-all;
+    }
+    .stat-value.lg {
+      color: var(--accent);
+      font-size: 1.4rem;
+    }
+    .addr {
+      font: 700 0.95rem/1.4 var(--mono);
+      color: var(--accent);
+      word-break: break-all;
+    }
+    .live {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+      color: var(--muted);
+      font-size: 0.85rem;
+    }
+    .dot {
+      width: 0.55rem;
+      height: 0.55rem;
+      border-radius: 50%;
+      background: var(--line);
+    }
+    .dot.on { background: var(--accent); }
+    .dot.off { background: var(--err); }
+    .status { color: var(--muted); font-size: 0.9rem; min-height: 1.3em; margin: 0.65rem 0 0; }
+    .err { color: var(--err); font-size: 0.9rem; margin: 0.65rem 0 0; }
+    .ok { color: var(--accent); font-size: 0.9rem; margin: 0.65rem 0 0; }
+    .note { color: var(--muted); font-size: 0.85rem; margin: 0.4rem 0 0; }
+    .warn { color: var(--warn); font-size: 0.88rem; margin: 0.85rem 0 0; }
+    details { margin-top: 1rem; }
+    details summary { cursor: pointer; color: var(--muted); font-size: 0.85rem; }
+    [hidden] { display: none !important; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1 class="brand">SIKKA</h1>
+    <p class="lead">
+      Simple browser wallet. Keys stay on this page; the node only sees signed
+      transactions. Amounts are in SIKKA (1 = 10⁹ CHILLAR).
+    </p>
+    <p class="nav">
+      <a href="/">Home</a>
+      <a href="/address.html">Verify address</a>
+    </p>
+
+    <section>
+      <h2>Node</h2>
+      <label for="node">JSON-RPC endpoint</label>
+      <input id="node" type="url" spellcheck="false" />
+      <div class="row" style="margin-top:0.75rem">
+        <button id="refreshNet" class="secondary" type="button" disabled>Refresh</button>
+        <span class="live"><span class="dot" id="dot"></span><span id="netStatus">…</span></span>
+      </div>
+      <div class="grid" id="netStats" hidden>
+        <div><div class="stat-label">Height</div><div class="stat-value" id="nHeight">—</div></div>
+        <div><div class="stat-label">Supply</div><div class="stat-value" id="nSupply">—</div></div>
+        <div><div class="stat-label">Bonded</div><div class="stat-value" id="nBonded">—</div></div>
+        <div><div class="stat-label">Validators</div><div class="stat-value" id="nVals">—</div></div>
+        <div><div class="stat-label">Peers / mempool</div><div class="stat-value" id="nPeers">—</div></div>
+      </div>
+    </section>
+
+    <section>
+      <h2>Keys</h2>
+      <div class="row">
+        <button id="generate" type="button" disabled>Generate</button>
+        <button id="restore" class="secondary" type="button" disabled>Restore</button>
+        <button id="download" class="secondary" type="button" disabled>Download keystore</button>
+      </div>
+      <p class="status" id="status">Loading crypto…</p>
+      <p class="err" id="error" hidden></p>
+      <label for="seed">Seed (32-byte hex) or keystore JSON</label>
+      <input id="seed" type="text" spellcheck="false" placeholder="64 hex chars, or paste sikka_key.json" />
+      <p class="note">Also accepts a full 4896-byte ML-DSA-87 private key.</p>
+    </section>
+
+    <section id="accountPanel" hidden>
+      <h2>Account</h2>
+      <label>Address</label>
+      <div class="addr" id="address">—</div>
+      <div class="grid">
+        <div><div class="stat-label">Balance</div><div class="stat-value lg" id="balance">—</div></div>
+        <div><div class="stat-label">Battery</div><div class="stat-value" id="battery">—</div></div>
+        <div><div class="stat-label">Nonce / next</div><div class="stat-value" id="nonce">—</div></div>
+        <div><div class="stat-label">Bond</div><div class="stat-value" id="bond">—</div></div>
+      </div>
+      <div class="row" style="margin-top:1rem">
+        <button id="refreshBal" class="secondary" type="button">Refresh balance</button>
+      </div>
+      <details>
+        <summary>Show keys</summary>
+        <label for="public">Public key</label>
+        <textarea id="public" rows="3" readonly spellcheck="false"></textarea>
+        <label for="private">Private key</label>
+        <textarea id="private" rows="3" readonly spellcheck="false"></textarea>
+      </details>
+    </section>
+
+    <section id="sendPanel" hidden>
+      <h2>Send</h2>
+      <label for="to">Recipient</label>
+      <input id="to" type="text" spellcheck="false" placeholder="0x…" />
+      <label for="amount">Amount (SIKKA)</label>
+      <input id="amount" type="text" spellcheck="false" placeholder="1.5" />
+      <div class="row" style="margin-top:0.9rem">
+        <button id="send" type="button">Send</button>
+      </div>
+      <p class="ok" id="sendOk" hidden></p>
+      <p class="warn">
+        Signs with ML-DSA-87 (<code>SIKKA/tx/v1</code>, context <code>SIKKA-v1</code>).
+        Nothing is broadcast until you click Send.
+      </p>
+    </section>
+  </main>
+
+  <script type="module">
+    import { ml_dsa87 } from "https://esm.sh/@noble/post-quantum@0.6.1/ml-dsa.js";
+    import { randomBytes } from "https://esm.sh/@noble/post-quantum@0.6.1/utils.js";
+    import { sha3_256 } from "https://esm.sh/@noble/hashes@2.2.0/sha3.js";
+    import JSONBig from "https://esm.sh/json-bigint@1.0.0";
+    import { verifyAccountProof, validatorsFromList } from "./proof.js";
+
+    const SEED_LEN = 32;
+    const SK_LEN = 4896;
+    const PK_LEN = 2592;
+    const SIG_LEN = 4627;
+    const CHILLAR_PER_SIKKA = 1_000_000_000n;
+    const TX_SIGNING_TAG = new TextEncoder().encode("SIKKA/tx/v1");
+    const SIGNING_CONTEXT = new TextEncoder().encode("SIKKA-v1");
+    const DEFAULT_NODE = location.protocol.startsWith("http")
+      ? location.origin
+      : "http://127.0.0.1:64552";
+    const jsonBig = JSONBig({ useNativeBigInt: true, alwaysParseAsBig: false });
+
+    const $ = (id) => document.getElementById(id);
+
+    /** @type {null | {
+     *   address: string,
+     *   publicKey: Uint8Array,
+     *   secretKey: Uint8Array,
+     *   private_key: string,
+     *   seed?: string,
+     *   next_nonce?: bigint,
+     * }} */
+    let wallet = null;
+    let rpcId = 1;
+    /** @type {string|null} */
+    let chainId = null;
+    /** @type {Uint8Array|null} */
+    let genesisFingerprint = null;
+
+    $("node").value = DEFAULT_NODE;
+
+    function hex(bytes) {
+      return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+    }
+
+    function unhex(text) {
+      const clean = text.trim().replace(/^0x/i, "").replace(/\s+/g, "");
+      if (!/^[0-9a-fA-F]*$/.test(clean) || clean.length % 2) {
+        throw new Error("expected even-length hex");
+      }
+      const out = new Uint8Array(clean.length / 2);
+      for (let i = 0; i < out.length; i++) {
+        out[i] = parseInt(clean.slice(i * 2, i * 2 + 2), 16);
+      }
+      return out;
+    }
+
+    function concat(...parts) {
+      const total = parts.reduce((n, p) => n + p.length, 0);
+      const out = new Uint8Array(total);
+      let o = 0;
+      for (const p of parts) {
+        out.set(p, o);
+        o += p.length;
+      }
+      return out;
+    }
+
+    function u64le(n) {
+      const v = BigInt(n);
+      if (v < 0n || v > 0xffffffffffffffffn) throw new Error("u64 out of range");
+      const out = new Uint8Array(8);
+      let x = v;
+      for (let i = 0; i < 8; i++) {
+        out[i] = Number(x & 0xffn);
+        x >>= 8n;
+      }
+      return out;
+    }
+
+    function u32le(n) {
+      const v = Number(n);
+      if (!Number.isInteger(v) || v < 0 || v > 0xffffffff) {
+        throw new Error("u32 out of range");
+      }
+      return Uint8Array.of(v & 0xff, (v >>> 8) & 0xff, (v >>> 16) & 0xff, (v >>> 24) & 0xff);
+    }
+
+    function encodeStr(text) {
+      const bytes = new TextEncoder().encode(text);
+      return concat(u32le(bytes.length), bytes);
+    }
+
+    function asBig(v) {
+      if (typeof v === "bigint") return v;
+      if (typeof v === "number") return BigInt(v);
+      if (typeof v === "string") return BigInt(v);
+      return 0n;
+    }
+
+    function formatSikka(chillar) {
+      const c = asBig(chillar);
+      const whole = c / CHILLAR_PER_SIKKA;
+      const frac = c % CHILLAR_PER_SIKKA;
+      if (frac === 0n) return whole.toString();
+      return `${whole}.${frac.toString().padStart(9, "0").replace(/0+$/, "")}`;
+    }
+
+    function parseSikka(input) {
+      const text = input.trim();
+      if (!text) throw new Error("empty amount");
+      const [wholeRaw, fracRaw = ""] = text.split(".");
+      if (fracRaw.length > 9) throw new Error("at most 9 decimal places");
+      if (!/^\d*$/.test(wholeRaw) || !/^\d*$/.test(fracRaw)) {
+        throw new Error("not a decimal amount");
+      }
+      if (!wholeRaw && !fracRaw) throw new Error("empty amount");
+      return BigInt(wholeRaw || "0") * CHILLAR_PER_SIKKA + BigInt(fracRaw.padEnd(9, "0") || "0");
+    }
+
+    function nodeUrl() {
+      return ($("node").value || DEFAULT_NODE).trim().replace(/\/+$/, "");
+    }
+
+    function stringify(value) {
+      if (typeof value === "bigint") return value.toString();
+      if (value === null || typeof value !== "object") return JSON.stringify(value);
+      if (Array.isArray(value)) return `[${value.map(stringify).join(",")}]`;
+      return `{${Object.entries(value)
+        .filter(([, v]) => v !== undefined)
+        .map(([k, v]) => `${JSON.stringify(k)}:${stringify(v)}`)
+        .join(",")}}`;
+    }
+
+    async function rpc(method, params = null) {
+      const body = stringify({ jsonrpc: "2.0", id: rpcId++, method, params });
+      const res = await fetch(`${nodeUrl()}/api/rpc`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body,
+      });
+      const text = await res.text();
+      let parsed;
+      try {
+        parsed = jsonBig.parse(text);
+      } catch {
+        throw new Error(`bad RPC response (${res.status})`);
+      }
+      if (parsed.error) {
+        throw new Error(parsed.error.message || JSON.stringify(parsed.error));
+      }
+      return parsed.result;
+    }
+
+    function fail(message) {
+      $("error").hidden = !message;
+      $("error").textContent = message || "";
+    }
+
+    function setNet(ok, label) {
+      $("dot").className = `dot ${ok ? "on" : "off"}`;
+      $("netStatus").textContent = label;
+    }
+
+    async function ensureChainBinding() {
+      if (chainId && genesisFingerprint) {
+        return { chainId, genesisFingerprint };
+      }
+      const info = await rpc("chain.info");
+      if (typeof info.chain_id !== "string" || !info.chain_id) {
+        throw new Error("node did not return chain_id");
+      }
+      if (typeof info.genesis_fingerprint !== "string" || !info.genesis_fingerprint) {
+        throw new Error("node did not return genesis_fingerprint");
+      }
+      chainId = info.chain_id;
+      genesisFingerprint = unhex(info.genesis_fingerprint);
+      if (genesisFingerprint.length !== 32) {
+        throw new Error("genesis_fingerprint must be 32 bytes");
+      }
+      return { chainId, genesisFingerprint };
+    }
+
+    async function refreshNetwork() {
+      try {
+        const info = await rpc("chain.info");
+        await ensureChainBinding();
+        $("netStats").hidden = false;
+        $("nHeight").textContent = String(info.height);
+        $("nSupply").textContent = `${formatSikka(info.total_supply)} SIKKA`;
+        $("nBonded").textContent = `${formatSikka(info.total_bonded)} SIKKA`;
+        $("nVals").textContent = String(info.active_validators);
+        $("nPeers").textContent = `${info.peers} / ${info.mempool}`;
+        setNet(true, `online · height ${info.height}`);
+      } catch (e) {
+        chainId = null;
+        genesisFingerprint = null;
+        $("netStats").hidden = true;
+        setNet(false, e.message || String(e));
+      }
+    }
+
+    async function refreshBalance() {
+      if (!wallet) return;
+      try {
+        const binding = await ensureChainBinding();
+        const [proof, validators, info] = await Promise.all([
+          rpc("account.proof", { address: wallet.address }),
+          rpc("validator.list"),
+          rpc("account.get", { address: wallet.address }),
+        ]);
+        const verified = verifyAccountProof(proof, {
+          validators: validatorsFromList(validators),
+          genesisFingerprint: binding.genesisFingerprint,
+        });
+        $("balance").textContent = `${formatSikka(verified.balance)} SIKKA`;
+        $("battery").textContent = `${info.battery_now} / 10`;
+        $("nonce").textContent = `${info.nonce} → ${info.next_nonce}`;
+        $("bond").textContent =
+          info.bond == null ? "none" : `${formatSikka(info.bond)} SIKKA`;
+        wallet.next_nonce = asBig(info.next_nonce);
+        fail("");
+      } catch (e) {
+        $("balance").textContent = "unverified";
+        fail(e.message || String(e));
+      }
+    }
+
+    function normalizeAddress(text) {
+      const bytes = unhex(text);
+      if (bytes.length !== 32) {
+        throw new Error("address must be 32 bytes (64 hex chars)");
+      }
+      return "0x" + hex(bytes);
+    }
+
+    function signingBytes({
+      chainId: id,
+      genesisFingerprint: fingerprint,
+      kind,
+      from,
+      to,
+      amount,
+      nonce,
+      timestamp,
+      publicKey,
+    }) {
+      if (typeof id !== "string" || !id) throw new Error("chain_id required for signing");
+      if (!(fingerprint instanceof Uint8Array) || fingerprint.length !== 32) {
+        throw new Error("genesis_fingerprint must be 32 raw bytes");
+      }
+      if (from.length !== 32 || to.length !== 32) {
+        throw new Error("from/to must be 32 raw address bytes");
+      }
+      if (publicKey.length !== PK_LEN) {
+        throw new Error(`public key must be ${PK_LEN} bytes`);
+      }
+      return concat(
+        TX_SIGNING_TAG,
+        encodeStr(id),
+        fingerprint,
+        Uint8Array.of(kind),
+        from,
+        to,
+        u64le(amount),
+        u64le(nonce),
+        u64le(timestamp),
+        publicKey
+      );
+    }
+
+    function signTransfer(toHex, amountChillar, nonce, binding) {
+      const from = unhex(wallet.address);
+      const toAddr = normalizeAddress(toHex);
+      const to = unhex(toAddr);
+      if (hex(from) === hex(to)) throw new Error("cannot send to yourself");
+      if (amountChillar <= 0n) throw new Error("amount must be positive");
+      const timestamp = BigInt(Math.floor(Date.now() / 1000));
+      const msg = signingBytes({
+        chainId: binding.chainId,
+        genesisFingerprint: binding.genesisFingerprint,
+        kind: 0,
+        from,
+        to,
+        amount: amountChillar,
+        nonce,
+        timestamp,
+        publicKey: wallet.publicKey,
+      });
+      const signature = ml_dsa87.sign(msg, wallet.secretKey, { context: SIGNING_CONTEXT });
+      if (signature.length !== SIG_LEN) {
+        throw new Error(`signature length ${signature.length}, expected ${SIG_LEN}`);
+      }
+      return {
+        kind: "transfer",
+        from: wallet.address,
+        to: toAddr,
+        amount: amountChillar,
+        nonce,
+        timestamp,
+        chain_id: binding.chainId,
+        genesis_fingerprint: hex(binding.genesisFingerprint),
+        public_key: hex(wallet.publicKey),
+        signature: hex(signature),
+      };
+    }
+
+    function openWallet({ secretKey, publicKey, seed }) {
+      if (secretKey.length !== SK_LEN) throw new Error(`private key must be ${SK_LEN} bytes`);
+      if (publicKey.length !== PK_LEN) throw new Error(`public key must be ${PK_LEN} bytes`);
+      wallet = {
+        address: "0x" + hex(sha3_256(publicKey)),
+        publicKey,
+        secretKey,
+        private_key: hex(secretKey),
+      };
+      if (seed && seed.length === SEED_LEN) {
+        wallet.seed = hex(seed);
+        $("seed").value = wallet.seed;
+      }
+      $("private").value = wallet.private_key;
+      $("public").value = "0x" + hex(publicKey);
+      $("address").textContent = wallet.address;
+      $("accountPanel").hidden = false;
+      $("sendPanel").hidden = false;
+      $("download").disabled = false;
+      fail("");
+      refreshBalance();
+    }
+
+    function fromSeed(seed) {
+      if (seed.length !== SEED_LEN) {
+        throw new Error(`seed must be ${SEED_LEN} bytes (64 hex chars)`);
+      }
+      openWallet({ ...ml_dsa87.keygen(seed), seed });
+    }
+
+    $("generate").onclick = () => {
+      try {
+        fromSeed(randomBytes(SEED_LEN));
+        $("status").textContent = "New wallet ready — save the seed.";
+      } catch (e) {
+        fail(e.message || String(e));
+      }
+    };
+
+    $("restore").onclick = () => {
+      try {
+        const raw = $("seed").value.trim();
+        if (!raw) throw new Error("paste a seed, private key, or keystore JSON");
+
+        if (raw.startsWith("{")) {
+          const json = JSON.parse(raw);
+          if (json.seed) {
+            fromSeed(unhex(json.seed));
+            $("status").textContent = "Restored from keystore seed.";
+            return;
+          }
+          if (!json.private_key) throw new Error("keystore missing private_key");
+          const secretKey = unhex(json.private_key);
+          const publicKey = ml_dsa87.getPublicKey(secretKey);
+          if (json.public_key) {
+            const claimed = unhex(json.public_key);
+            if (hex(claimed) !== hex(publicKey)) {
+              throw new Error("keystore public_key does not match private_key");
+            }
+          }
+          openWallet({ secretKey, publicKey });
+          $("status").textContent = "Restored from keystore JSON.";
+          return;
+        }
+
+        const bytes = unhex(raw);
+        if (bytes.length === SEED_LEN) {
+          fromSeed(bytes);
+          $("status").textContent = "Restored from 32-byte seed.";
+          return;
+        }
+        if (bytes.length === SK_LEN) {
+          openWallet({
+            secretKey: bytes,
+            publicKey: ml_dsa87.getPublicKey(bytes),
+          });
+          $("status").textContent = "Restored from full private key.";
+          return;
+        }
+        throw new Error(
+          `unrecognized length ${bytes.length}: use 32-byte seed or ${SK_LEN}-byte key`
+        );
+      } catch (e) {
+        fail(e.message || String(e));
+      }
+    };
+
+    $("download").onclick = () => {
+      if (!wallet) return;
+      const payload = {
+        address: wallet.address,
+        public_key: hex(wallet.publicKey),
+        private_key: wallet.private_key,
+        scheme: "ML-DSA-87",
+      };
+      if (wallet.seed) payload.seed = wallet.seed;
+      const blob = new Blob([JSON.stringify(payload, null, 2) + "\n"], {
+        type: "application/json",
+      });
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = "sikka_key.json";
+      a.click();
+      URL.revokeObjectURL(a.href);
+    };
+
+    $("refreshNet").onclick = () => refreshNetwork();
+    $("refreshBal").onclick = () => refreshBalance();
+    $("node").addEventListener("change", () => {
+      chainId = null;
+      genesisFingerprint = null;
+      refreshNetwork();
+      if (wallet) refreshBalance();
+    });
+
+    $("send").onclick = async () => {
+      $("sendOk").hidden = true;
+      if (!wallet) return;
+      try {
+        $("send").disabled = true;
+        const to = $("to").value.trim();
+        if (!to) throw new Error("recipient required");
+        const amount = parseSikka($("amount").value);
+        if (amount <= 0n) throw new Error("amount must be positive");
+        const account = await rpc("account.get", { address: wallet.address });
+        const nonce = asBig(account.next_nonce);
+        const binding = await ensureChainBinding();
+        const tx = signTransfer(to, amount, nonce, binding);
+        const receipt = await rpc("tx.submit", { transaction: tx });
+        $("sendOk").hidden = false;
+        $("sendOk").textContent =
+          `Submitted ${formatSikka(amount)} SIKKA` +
+          (receipt.accepted ? "" : " (already known)") +
+          ` · ${receipt.id}`;
+        $("amount").value = "";
+        await refreshBalance();
+        await refreshNetwork();
+        fail("");
+      } catch (e) {
+        fail(e.message || String(e));
+      } finally {
+        $("send").disabled = false;
+      }
+    };
+
+    $("generate").disabled = false;
+    $("restore").disabled = false;
+    $("refreshNet").disabled = false;
+    $("status").textContent = "Ready.";
+    refreshNetwork();
+    setInterval(() => {
+      refreshNetwork();
+      if (wallet) refreshBalance();
+    }, 15_000);
+  </script>
+</body>
+</html>
