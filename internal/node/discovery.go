@@ -23,6 +23,9 @@ func (n *Node) runDiscoveryRound(ctx context.Context) error {
 			n.markNodeFailure(nodeURL, err)
 			continue
 		}
+		if err := n.announceToNode(ctx, nodeURL); err != nil {
+			n.log.Debug("discovery announce failed", "peer", nodeURL, "err", err)
+		}
 		n.touchKnownNode(nodeURL)
 		n.adjustNodeScore(nodeURL, 1)
 		n.log.Info("discovery contact ok", "peer", nodeURL)
