@@ -482,10 +482,18 @@ func (n *Node) persistNodeBook() error {
 	if err != nil {
 		return err
 	}
-	tmpPath := n.nodeBookPath() + ".tmp"
-	if err := os.WriteFile(tmpPath, payload, 0o644); err != nil {
+	f, err := os.CreateTemp(filepath.Dir(n.nodeBookPath()), "nodebook.*.tmp")
+	if err != nil {
 		return err
 	}
+	tmpPath := f.Name()
+	if _, err := f.Write(payload); err != nil {
+		f.Close()
+		os.Remove(tmpPath)
+		return err
+	}
+	f.Close()
+	defer os.Remove(tmpPath)
 	return os.Rename(tmpPath, n.nodeBookPath())
 }
 

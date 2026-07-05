@@ -48,7 +48,7 @@ func (n *Node) routes() http.Handler {
 	mux.HandleFunc("POST /v1/sync", n.handleSync)
 	mux.HandleFunc("/v1/discovery/nodes", n.handleDiscoveryNodes)
 	mux.HandleFunc("POST /v1/discovery/announce", n.handleDiscoveryAnnounce)
-	mux.HandleFunc("/v1/tx/{txid}", n.handleTxLookup)
+	mux.HandleFunc("GET /v1/tx/{txid}", n.handleTxLookup)
 	mux.HandleFunc("POST /v1/txs", n.handleTxsBulkLookup)
 	mux.HandleFunc("/v1/address/{address}", n.handleAddress)
 	mux.HandleFunc("POST /v1/tx/pow-quote", n.handleTxPowQuote)
