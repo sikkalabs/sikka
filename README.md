@@ -23,9 +23,18 @@ A secondary mirror is maintained on GitWorkshop:
 
 The GitWorkshop repository is synchronized at stable checkpoints, release candidates, and official releases. It exists to preserve project continuity and ensure that Sikka remains accessible even if GitHub becomes unavailable.
 
+## 🧰 Developer Wallet SDK
+
+Building wallets, payment gateways, or autonomous agents on Sikka?
+
+Use the official **Sikka Wallet SDK**:
+👉 **[github.com/sikkalabs/sikka-sdk](https://github.com/sikkalabs/sikka-sdk)**
+
+The SDK provides post-quantum key derivation (ML-DSA-87), mnemonic management (BIP-39), transaction signing, dynamic PoW mining, and HTTP API integration.
+
 ## 🐳 Quick start
 
-Sikka is lightweight and efficient. The production Docker image is only **17 MB** and bundles the node, HTTP API, web wallet, and DAG explorer.
+Sikka is lightweight and efficient. The production Docker image is only **17 MB** and bundles the node, HTTP API, and DAG explorer.
 
 **Run a node:**
 

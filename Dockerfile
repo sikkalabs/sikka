@@ -13,16 +13,6 @@ COPY release.json ./
 COPY cmd ./cmd
 COPY internal ./internal
 
-FROM build-base AS wasm-build
-
-RUN mkdir -p /out/public && \
-	GOOS=js GOARCH=wasm CGO_ENABLED=0 go build -o /out/public/walletwasm.wasm ./cmd/walletwasm && \
-	if [ -f /usr/local/go/lib/wasm/wasm_exec.js ]; then \
-		cp /usr/local/go/lib/wasm/wasm_exec.js /out/public/wasm_exec.js; \
-	else \
-		cp /usr/local/go/misc/wasm/wasm_exec.js /out/public/wasm_exec.js; \
-	fi
-
 FROM build-base AS node-build
 
 ARG TARGETOS=linux
@@ -45,8 +35,6 @@ WORKDIR /home/sikka
 
 COPY --from=node-build /out/sikka-node /usr/local/bin/sikka-node
 COPY public ./public
-COPY --from=wasm-build /out/public/walletwasm.wasm ./public/walletwasm.wasm
-COPY --from=wasm-build /out/public/wasm_exec.js ./public/wasm_exec.js
 
 USER sikka
 

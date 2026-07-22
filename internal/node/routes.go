@@ -55,8 +55,6 @@ func (n *Node) routes() http.Handler {
 	mux.HandleFunc("POST /v1/tx/pow-quote", n.handleTxPowQuote)
 	mux.HandleFunc("POST /v1/tx/submit", n.handleTxSubmit)
 	mux.Handle("/index.html", n.publicHandler)
-	mux.Handle("/paperwallet.html", n.publicHandler)
-	mux.Handle("/wallet.html", n.publicHandler)
 	mux.HandleFunc("/tx/", n.handleTxPage)
 	mux.HandleFunc("/wallet/", n.handleWalletAddressPage)
 	mux.Handle("/public/", http.StripPrefix("/public/", n.publicHandler))

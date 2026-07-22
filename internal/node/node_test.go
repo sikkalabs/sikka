@@ -544,17 +544,19 @@ func TestRootRouteServesIndex(t *testing.T) {
 	}
 }
 
-func TestStaticMultisigWalletRouteRemoved(t *testing.T) {
+func TestStaticWalletRoutesRemoved(t *testing.T) {
 	t.Parallel()
 
 	n := mustNewNode(t, config.Config{APIPort: 64552, DataDir: t.TempDir()})
 
-	req := httptest.NewRequest(http.MethodGet, "/multisig-wallet.html", nil)
-	rec := httptest.NewRecorder()
-	n.routes().ServeHTTP(rec, req)
+	for _, path := range []string{"/wallet.html", "/paperwallet.html", "/multisig-wallet.html"} {
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		rec := httptest.NewRecorder()
+		n.routes().ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusNotFound {
-		t.Fatalf("status code = %d, want %d (multisig wallet was removed)", rec.Code, http.StatusNotFound)
+		if rec.Code != http.StatusNotFound {
+			t.Fatalf("path %s status code = %d, want %d (standalone wallet HTML was removed)", path, rec.Code, http.StatusNotFound)
+		}
 	}
 }
 
