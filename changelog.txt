@@ -1,8 +1,10 @@
 # Changelog
 
-## 0.3.0
+## 0.3.1
 
 - Implemented O(1) Address Indexing for instant address UTXO and balance queries.
+
+## 0.3.0
 - Added `GET /metrics` Prometheus endpoint for Grafana node telemetry.
 - Implemented O(1) LRU Caching and offloading for historical confirmed transactions to optimize memory scaling.
 - Decoupled web wallet UI and WASM binaries in favor of official `sikkalabs/sikka-sdk`.
