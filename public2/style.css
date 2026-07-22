@@ -168,16 +168,22 @@ html, body {
 
 /* Search Form */
 .nav-search-form {
-  position: relative;
   display: flex;
   align-items: center;
   gap: 0.75rem;
   width: 100%;
 }
 
+.search-input-wrapper {
+  position: relative;
+  flex: 1;
+  display: flex;
+  align-items: center;
+}
+
 .nav-search-input {
   width: 100%;
-  padding: 0.625rem 5.5rem 0.625rem 1rem;
+  padding: 0.625rem 4rem 0.625rem 1rem;
   background: var(--bg-input);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-md);
@@ -200,7 +206,7 @@ html, body {
 
 .kbd-shortcut {
   position: absolute;
-  right: 9.5rem;
+  right: 0.875rem;
   pointer-events: none;
   padding: 0.15rem 0.4rem;
   font-family: var(--font-mono);
@@ -213,7 +219,7 @@ html, body {
 }
 
 .btn-search {
-  padding: 0.5rem 1rem;
+  padding: 0.625rem 1.25rem;
   background: var(--accent-gradient);
   border: none;
   border-radius: var(--radius-md);
