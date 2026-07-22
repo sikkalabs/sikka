@@ -32,7 +32,6 @@
   // DOM Elements
   const el = {
     html: document.documentElement,
-    themeToggleBtn: document.getElementById('themeToggleBtn'),
     kbdShortcut: document.getElementById('kbdShortcut'),
     toast: document.getElementById('toast'),
 
@@ -98,25 +97,6 @@
     } catch {
       showToast('Failed to copy');
     }
-  }
-
-  // Theme Switcher
-  function initTheme() {
-    const savedTheme = localStorage.getItem('sikka_theme') || 'light';
-    setTheme(savedTheme);
-  }
-
-  function setTheme(theme) {
-    el.html.setAttribute('data-theme', theme);
-    localStorage.setItem('sikka_theme', theme);
-    if (el.themeToggleBtn) {
-      el.themeToggleBtn.textContent = theme === 'dark' ? '☀️' : '🌙';
-    }
-  }
-
-  function toggleTheme() {
-    const current = el.html.getAttribute('data-theme') || 'light';
-    setTheme(current === 'dark' ? 'light' : 'dark');
   }
 
   // Helper Functions
@@ -483,9 +463,6 @@
 
   // Init
   document.addEventListener('DOMContentLoaded', () => {
-    initTheme();
-
-    if (el.themeToggleBtn) el.themeToggleBtn.addEventListener('click', toggleTheme);
     if (el.searchForm) el.searchForm.addEventListener('submit', handleSearch);
     if (el.peerForm) el.peerForm.addEventListener('submit', handlePeerSubmit);
     if (el.shufflePeerBtn) el.shufflePeerBtn.addEventListener('click', pickRandomPeer);
