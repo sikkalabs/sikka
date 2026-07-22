@@ -122,6 +122,18 @@ html, body {
   transform: rotate(12deg) scale(1.05);
 }
 
+.nav-brand-title {
+  font-family: var(--font-mono);
+  font-size: 1.125rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: #ffffff !important;
+}
+
+.nav-brand-title span {
+  color: #ffffff !important;
+}
+
 .nav-right {
   display: flex;
   align-items: center;
