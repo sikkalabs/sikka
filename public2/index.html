@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="light">
 
 <head>
   <meta charset="UTF-8" />
@@ -7,10 +7,10 @@
   <title>Sikka Node</title>
   <meta name="description"
     content="Sikka node dashboard for chain status, DAG tips, network topology, and peer recovery." />
-  <meta name="theme-color" content="#070b14" />
+  <meta name="theme-color" content="#ffffff" />
   <meta name="robots" content="index,follow" />
   <meta property="og:type" content="website" />
-  <meta property="og:title" content="Sikka Node Explorer" />
+  <meta property="og:title" content="Sikka Node" />
   <meta property="og:description"
     content="Monitor chain status, inspect DAG tips, and manage peers from a local Sikka node." />
   <meta property="og:image" content="/public/sikka.svg" />
@@ -24,7 +24,7 @@
     <div class="app-bg"></div>
 
     <main class="layout-container">
-      <!-- Navbar with Integrated Search -->
+      <!-- Navbar with Integrated Search & Theme Toggle -->
       <header class="navbar">
         <div class="nav-left">
           <img src="/public/sikka.svg" alt="Sikka Logo" class="nav-logo" />
@@ -35,11 +35,17 @@
           </div>
         </div>
 
-        <form id="searchForm" class="nav-search-form" autocomplete="off">
-          <input id="searchInput" type="text" spellcheck="false"
-            placeholder="Search 64-char TxID or sikka1… address" class="nav-search-input" />
-          <button type="submit" class="btn-search">Search</button>
-        </form>
+        <div style="display: flex; align-items: center; gap: 0.75rem; width: 100%; max-width: 32rem;">
+          <form id="searchForm" class="nav-search-form" autocomplete="off">
+            <input id="searchInput" type="text" spellcheck="false"
+              placeholder="Search 64-char TxID or sikka1… address" class="nav-search-input" />
+            <span class="kbd-shortcut" id="kbdShortcut">⌘K</span>
+            <button type="submit" class="btn-search">Search</button>
+          </form>
+          <button id="themeToggleBtn" type="button" class="btn-theme-toggle" title="Toggle Light/Dark Theme">
+            🌙
+          </button>
+        </div>
       </header>
 
       <p id="searchFeedback" style="display: none; margin-bottom: 1.25rem; font-size: 0.875rem;"></p>
@@ -56,8 +62,8 @@
             </div>
 
             <!-- Node Message Announcement Banner -->
-            <div id="nodeMessageBanner" style="display: none; margin-bottom: 1.25rem; padding: 0.75rem 1rem; background: rgba(56, 189, 248, 0.08); border: 1px solid var(--border-accent); border-radius: var(--radius-md); font-family: var(--font-mono); font-size: 0.8125rem; color: var(--text-cyan);">
-              <span style="color: var(--text-sky); font-weight: 700;">NODE MSG &bull; </span>
+            <div id="nodeMessageBanner" style="display: none; margin-bottom: 1.25rem; padding: 0.75rem 1rem; background: rgba(2, 132, 199, 0.06); border: 1px solid var(--border-subtle); border-radius: var(--radius-md); font-family: var(--font-mono); font-size: 0.8125rem; color: var(--text-sky);">
+              <span style="font-weight: 700;">NODE MSG &bull; </span>
               <span id="overviewNodeMessage"></span>
             </div>
 
@@ -86,6 +92,17 @@
                 <p id="metricSoftwareVersion" class="metric-val" style="font-size: 1.35rem;">--</p>
                 <p class="metric-sub">Node release</p>
               </div>
+            </div>
+
+            <!-- DAG Depth Progression Visual Sparkline -->
+            <div class="sparkline-box">
+              <div>
+                <p class="metric-label" style="margin-bottom: 0;">DAG Depth Progression</p>
+                <p id="sparklineSub" class="metric-sub">Live height tracking</p>
+              </div>
+              <svg id="sparklineSvg" class="sparkline-svg" viewBox="0 0 120 28">
+                <path id="sparklinePath" d="M 0 24 Q 30 18, 60 12 T 120 4" fill="none" stroke="var(--text-sky)" stroke-width="2" stroke-linecap="round" />
+              </svg>
             </div>
 
             <!-- Quick Action Links -->
@@ -130,7 +147,10 @@
 
             <div class="aside-item">
               <p class="aside-label">Onion Address</p>
-              <p id="topoPublicURL" class="aside-val">Loading...</p>
+              <div style="display: flex; align-items: center; justify-content: space-between; gap: 0.5rem;">
+                <p id="topoPublicURL" class="aside-val" style="word-break: break-all;">Loading...</p>
+                <button id="copyOnionBtn" type="button" class="btn-copy" style="display: none;">Copy</button>
+              </div>
             </div>
 
             <div id="topoNodeAddressItem" class="aside-item" style="display: none;">
@@ -144,7 +164,7 @@
             </div>
           </section>
 
-          <!-- Known Peers Counter & Featured Peer -->
+          <!-- Known Peers Counter & Featured Peer Spotlight -->
           <section class="panel">
             <div class="panel-header">
               <span class="panel-title">KNOWN PEERS</span>
@@ -154,12 +174,15 @@
               Connecting to verified Tor onion peers in the Sikka network...
             </p>
 
-            <div id="featuredPeerContainer" style="display: none; padding: 0.875rem; background: rgba(3, 7, 18, 0.5); border: 1px solid var(--border-accent); border-radius: var(--radius-md);">
+            <div id="featuredPeerContainer" style="display: none; padding: 0.875rem; background: var(--bg-card-hover); border: 1px solid var(--border-subtle); border-radius: var(--radius-md);">
               <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.375rem;">
                 <span style="font-size: 0.6875rem; font-family: var(--font-mono); color: var(--text-sky); font-weight: 700; letter-spacing: 0.05em;">PEER SPOTLIGHT</span>
-                <button id="shufflePeerBtn" type="button" class="btn-secondary" style="padding: 0.2rem 0.5rem; font-size: 0.6875rem; border-radius: 0.375rem;">&circlearrowright; Shuffle</button>
+                <div style="display: flex; gap: 0.375rem;">
+                  <button id="copyPeerBtn" type="button" class="btn-copy">Copy</button>
+                  <button id="shufflePeerBtn" type="button" class="btn-secondary" style="padding: 0.15rem 0.4rem; font-size: 0.6875rem; border-radius: 0.375rem;">Shuffle &circlearrowright;</button>
+                </div>
               </div>
-              <p id="featuredPeerUrl" class="tip-hash" style="font-size: 0.75rem; color: var(--text-cyan); word-break: break-all; margin-top: 0.25rem;"></p>
+              <p id="featuredPeerUrl" class="tip-hash" style="font-size: 0.75rem; word-break: break-all; margin-top: 0.25rem;"></p>
             </div>
           </section>
 
@@ -191,6 +214,8 @@
       </footer>
     </main>
   </div>
+
+  <div id="toast" class="toast-msg" style="display: none;"></div>
 
   <script src="/public/app.js"></script>
 </body>

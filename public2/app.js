@@ -6,6 +6,7 @@
     pollHandle: null,
     tipsLoaded: false,
     tips: [],
+    depthHistory: [],
     overview: {
       torNetwork: "Loading...",
       publicURL: "Loading...",
@@ -30,6 +31,11 @@
 
   // DOM Elements
   const el = {
+    html: document.documentElement,
+    themeToggleBtn: document.getElementById('themeToggleBtn'),
+    kbdShortcut: document.getElementById('kbdShortcut'),
+    toast: document.getElementById('toast'),
+
     searchForm: document.getElementById('searchForm'),
     searchInput: document.getElementById('searchInput'),
     searchFeedback: document.getElementById('searchFeedback'),
@@ -49,11 +55,15 @@
     nodeMessageBanner: document.getElementById('nodeMessageBanner'),
     overviewNodeMessage: document.getElementById('overviewNodeMessage'),
     
+    sparklinePath: document.getElementById('sparklinePath'),
+    sparklineSub: document.getElementById('sparklineSub'),
+
     tipsFeed: document.getElementById('tipsFeed'),
     tipsBadge: document.getElementById('tipsBadge'),
     
     torNetwork: document.getElementById('topoTorNetwork'),
     publicURL: document.getElementById('topoPublicURL'),
+    copyOnionBtn: document.getElementById('copyOnionBtn'),
     nodeAddress: document.getElementById('topoNodeAddress'),
     nodeAddressItem: document.getElementById('topoNodeAddressItem'),
     nodeMessage: document.getElementById('topoNodeMessage'),
@@ -64,7 +74,50 @@
     featuredPeerContainer: document.getElementById('featuredPeerContainer'),
     featuredPeerUrl: document.getElementById('featuredPeerUrl'),
     shufflePeerBtn: document.getElementById('shufflePeerBtn'),
+    copyPeerBtn: document.getElementById('copyPeerBtn'),
   };
+
+  // Toast Notification
+  let toastTimer = null;
+  function showToast(message) {
+    if (!el.toast) return;
+    el.toast.textContent = message;
+    el.toast.style.display = 'block';
+    if (toastTimer) clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => {
+      el.toast.style.display = 'none';
+    }, 2500);
+  }
+
+  // Copy Helper
+  async function copyText(text, label) {
+    if (!text || text === 'Loading...' || text === 'Unavailable' || text === '--') return;
+    try {
+      await navigator.clipboard.writeText(text);
+      showToast((label || 'Content') + ' copied to clipboard!');
+    } catch {
+      showToast('Failed to copy');
+    }
+  }
+
+  // Theme Switcher
+  function initTheme() {
+    const savedTheme = localStorage.getItem('sikka_theme') || 'light';
+    setTheme(savedTheme);
+  }
+
+  function setTheme(theme) {
+    el.html.setAttribute('data-theme', theme);
+    localStorage.setItem('sikka_theme', theme);
+    if (el.themeToggleBtn) {
+      el.themeToggleBtn.textContent = theme === 'dark' ? '☀️' : '🌙';
+    }
+  }
+
+  function toggleTheme() {
+    const current = el.html.getAttribute('data-theme') || 'light';
+    setTheme(current === 'dark' ? 'light' : 'dark');
+  }
 
   // Helper Functions
   async function fetchJSON(path) {
@@ -139,6 +192,28 @@
     state.overview.submitPowNote = "Live network quote";
   }
 
+  // Render Sparkline Path
+  function renderSparkline() {
+    if (!el.sparklinePath || !state.depthHistory.length) return;
+    const pts = state.depthHistory;
+    const max = Math.max(...pts);
+    const min = Math.min(...pts);
+    const range = max - min || 1;
+    const w = 120;
+    const h = 24;
+
+    const coords = pts.map((val, idx) => {
+      const x = (idx / (pts.length - 1 || 1)) * w;
+      const y = h - ((val - min) / range) * (h - 6) - 3;
+      return `${x.toFixed(1)},${y.toFixed(1)}`;
+    });
+
+    el.sparklinePath.setAttribute('d', 'M ' + coords.join(' L '));
+    if (el.sparklineSub) {
+      el.sparklineSub.textContent = `Depth: ${pts[pts.length - 1]}`;
+    }
+  }
+
   // Update DOM Views
   function updateUI() {
     if (el.dagSize) el.dagSize.textContent = state.overview.dagSize;
@@ -149,6 +224,10 @@
     
     if (el.torNetwork) el.torNetwork.textContent = state.overview.torNetwork;
     if (el.publicURL) el.publicURL.textContent = state.overview.publicURL;
+    if (el.copyOnionBtn) {
+      const isAvailable = state.overview.publicURL && !['Loading...', 'Unavailable', 'Not advertised'].includes(state.overview.publicURL);
+      el.copyOnionBtn.style.display = isAvailable ? 'inline-block' : 'none';
+    }
     if (el.nodeMessage) el.nodeMessage.textContent = state.overview.nodeMessage;
 
     // Render Node Message in Navbar and Overview Banner
@@ -186,6 +265,7 @@
     if (el.knownNodesDesc) el.knownNodesDesc.textContent = `This node is connected to ${state.overview.knownNodes} verified Tor onion peers in the Sikka network.`;
 
     renderFeaturedPeer();
+    renderSparkline();
 
     // Render Tips
     if (el.tipsBadge) el.tipsBadge.textContent = `${state.tips.length} ACTIVE TIPS`;
@@ -196,14 +276,22 @@
         el.tipsFeed.innerHTML = '<div style="padding: 1rem; color: var(--text-muted); font-family: var(--font-mono); font-size: 0.875rem;">No active tips available.</div>';
       } else {
         el.tipsFeed.innerHTML = state.tips.map(txid => `
-          <a href="/tx/${encodeURIComponent(txid)}" class="tip-row">
-            <span class="tip-hash">${txid}</span>
-            <span class="tip-badge">INSPECT &rarr;</span>
-          </a>
+          <div class="tip-row">
+            <a href="/tx/${encodeURIComponent(txid)}" class="tip-hash" style="text-decoration: none;">${txid}</a>
+            <div class="tip-actions">
+              <button type="button" class="btn-copy" onclick="window.sikkaCopy('${txid}', 'TxID')">Copy</button>
+              <a href="/tx/${encodeURIComponent(txid)}" class="badge badge-emerald" style="text-decoration: none;">INSPECT &rarr;</a>
+            </div>
+          </div>
         `).join('');
       }
     }
   }
+
+  // Global Copy Exposure for inline onclick
+  window.sikkaCopy = function (text, label) {
+    copyText(text, label);
+  };
 
   function pickRandomPeer() {
     if (!state.knownPeersList.length) return;
@@ -241,6 +329,14 @@
         state.knownPeersList = peersResp.items;
         if (!state.featuredPeer) {
           pickRandomPeer();
+        }
+      }
+
+      const currentDepth = Number(status.max_dag_depth);
+      if (Number.isFinite(currentDepth)) {
+        state.depthHistory.push(currentDepth);
+        if (state.depthHistory.length > 10) {
+          state.depthHistory.shift();
         }
       }
 
@@ -369,11 +465,41 @@
     el.peerFeedback.style.display = msg ? 'block' : 'none';
   }
 
+  // Keyboard Shortcuts (⌘K / Ctrl+K / "/")
+  function handleKeyDown(e) {
+    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+      e.preventDefault();
+      if (el.searchInput) {
+        el.searchInput.focus();
+        el.searchInput.select();
+      }
+    } else if (e.key === '/' && document.activeElement !== el.searchInput && document.activeElement !== el.peerInput) {
+      e.preventDefault();
+      if (el.searchInput) {
+        el.searchInput.focus();
+      }
+    }
+  }
+
   // Init
   document.addEventListener('DOMContentLoaded', () => {
+    initTheme();
+
+    if (el.themeToggleBtn) el.themeToggleBtn.addEventListener('click', toggleTheme);
     if (el.searchForm) el.searchForm.addEventListener('submit', handleSearch);
     if (el.peerForm) el.peerForm.addEventListener('submit', handlePeerSubmit);
     if (el.shufflePeerBtn) el.shufflePeerBtn.addEventListener('click', pickRandomPeer);
+    
+    if (el.copyOnionBtn) el.copyOnionBtn.addEventListener('click', () => copyText(state.overview.publicURL, 'Onion address'));
+    if (el.copyPeerBtn) el.copyPeerBtn.addEventListener('click', () => copyText(state.featuredPeer, 'Peer address'));
+
+    document.addEventListener('keydown', handleKeyDown);
+
+    // Platform shortcut detection (Mac vs PC)
+    const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
+    if (el.kbdShortcut) {
+      el.kbdShortcut.textContent = isMac ? '⌘K' : 'Ctrl+K';
+    }
 
     loadNodeOverview();
     state.pollHandle = window.setInterval(loadNodeOverview, 15000);
