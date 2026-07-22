@@ -38,7 +38,6 @@ RUN apk add --no-cache tor ca-certificates tzdata && \
 WORKDIR /home/sikka
 
 COPY --from=node-build /out/sikka-node /usr/local/bin/sikka-node
-COPY public ./public
 COPY public2 ./public2
 
 USER sikka
