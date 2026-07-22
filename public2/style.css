@@ -237,36 +237,20 @@ html, body {
   box-shadow: var(--accent-glow);
 }
 
-/* Dashboard Grid & Column Spacing */
+/* Single Column Dashboard Layout */
 .dashboard-grid {
-  display: grid;
-  grid-template-columns: 1fr;
-  gap: 1.75rem;
-}
-
-.grid-main {
   display: flex;
   flex-direction: column;
   gap: 1.75rem;
+  width: 100%;
 }
 
+.grid-main,
 .grid-side {
   display: flex;
   flex-direction: column;
   gap: 1.75rem;
-}
-
-@media (min-width: 1024px) {
-  .dashboard-grid {
-    grid-template-columns: repeat(12, 1fr);
-    gap: 1.75rem;
-  }
-  .grid-main {
-    grid-column: span 7;
-  }
-  .grid-side {
-    grid-column: span 5;
-  }
+  width: 100%;
 }
 
 /* Dark Panels */
