@@ -1,4 +1,4 @@
-ARG GO_IMAGE=golang:1.25.10-alpine
+ARG GO_IMAGE=golang:1.23-alpine
 
 FROM --platform=$BUILDPLATFORM ${GO_IMAGE} AS build-base
 
@@ -25,13 +25,13 @@ RUN mkdir -p /out/public && \
 
 FROM build-base AS node-build
 
-ARG TARGETOS
-ARG TARGETARCH
-ARG TARGETVARIANT
+ARG TARGETOS=linux
+ARG TARGETARCH=amd64
+ARG TARGETVARIANT=""
 
 RUN set -eux; \
-	export CGO_ENABLED=0 GOOS="$TARGETOS" GOARCH="$TARGETARCH"; \
-	if [ "$TARGETARCH" = "arm" ] && [ -n "$TARGETVARIANT" ]; then export GOARM="${TARGETVARIANT#v}"; fi; \
+	export CGO_ENABLED=0 GOOS="${TARGETOS:-linux}" GOARCH="${TARGETARCH:-amd64}"; \
+	if [ "$GOARCH" = "arm" ] && [ -n "$TARGETVARIANT" ]; then export GOARM="${TARGETVARIANT#v}"; fi; \
 	go build -o /out/sikka-node ./cmd/node
 
 FROM alpine:3.23
