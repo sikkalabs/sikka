@@ -27,72 +27,83 @@
 
 <body>
   <div id="app">
-    <div class="cyber-bg">
-      <div class="orb-cyan"></div>
-      <div class="orb-blue"></div>
+    <div class="cyber-canvas">
+      <div class="orb-glow-top"></div>
     </div>
 
-    <main class="cyber-container">
-      <!-- Cyber Hero Section -->
-      <section class="cyber-card hero-cyber">
-        <div class="cyber-tag">
-          <span class="radar-dot"></span>
-          <span>SIKKA NODE // v0.3.1</span>
+    <main class="hud-container">
+      <!-- Top Navigation -->
+      <nav class="hud-nav">
+        <a href="/" class="hud-brand">
+          <img src="/public/sikka.svg" alt="Sikka Logo" class="hud-logo" />
+          <span class="hud-title">Sikka Node</span>
+        </a>
+        <div class="hud-status-badge">
+          <span class="pulse-dot"></span>
+          <span>MAINNET ONLINE</span>
         </div>
-        <h1 class="hero-title">NODE ACTIVE.</h1>
-        <p class="hero-desc">Chain status, network topology, and node routing in one place.</p>
-        <div class="hero-actions">
-          <a href="https://sikkalabs.com/" target="_blank" rel="noreferrer" class="btn-cyber-primary">
+      </nav>
+
+      <!-- Hero Section -->
+      <section class="hud-panel hero-panel">
+        <div class="hud-status-badge" style="border-color: rgba(56,189,248,0.3); background: rgba(56,189,248,0.08); color: var(--text-cyan);">
+          <span class="pulse-dot" style="background: var(--text-cyan); box-shadow: 0 0 10px var(--text-cyan);"></span>
+          <span>SYSTEM // v0.3.1</span>
+        </div>
+        <h1 class="hero-heading">NODE ACTIVE.</h1>
+        <p class="hero-subtitle">Chain status, network topology, and node routing in one place.</p>
+        <div class="hero-btn-row">
+          <a href="https://sikkalabs.com/" target="_blank" rel="noreferrer" class="btn-cyber">
             Wallet &rarr;
           </a>
-          <a href="https://github.com/sikkalabs/sikka" target="_blank" rel="noreferrer" class="btn-cyber-outline">
+          <a href="https://github.com/sikkalabs/sikka" target="_blank" rel="noreferrer" class="btn-cyber-ghost">
             Source &rarr;
           </a>
         </div>
 
         <!-- Status Grid -->
         <div class="status-grid">
-          <div v-for="item in statusItems" :key="item.label" class="status-box">
+          <div v-for="item in statusItems" :key="item.label" class="status-card">
             <div style="display: flex; align-items: center; gap: 0.5rem;">
-              <span class="radar-dot"></span>
+              <span class="pulse-dot"></span>
               <p class="status-label">{{ item.label }}</p>
             </div>
             <p v-if="!item.href" class="status-val">{{ item.value }}</p>
-            <a v-else :href="item.href" class="status-val" style="color: var(--text-neon); text-decoration: underline;">{{ item.value }}</a>
+            <a v-else :href="item.href" class="status-val" style="color: var(--text-cyan); text-decoration: underline;">{{ item.value }}</a>
           </div>
         </div>
       </section>
 
-      <!-- Cyber Search Box -->
-      <section class="cyber-card search-card">
+      <!-- Search Console -->
+      <section class="hud-panel search-panel">
         <p class="status-label">BLOCKCHAIN EXPLORER</p>
         <form style="margin-top: 0.75rem;" autocomplete="off" @submit.prevent="submitExplorerSearch">
-          <div class="search-form-inner">
+          <div class="search-box-inner">
             <input v-model.trim="searchInput" type="text" spellcheck="false"
-              placeholder="64-char transaction ID or sikka1… address" class="cyber-input" />
-            <button type="submit" class="btn-cyber-primary">Go</button>
+              placeholder="64-char transaction ID or sikka1… address" class="hud-input" />
+            <button type="submit" class="btn-cyber">Search</button>
           </div>
         </form>
-        <p v-if="searchFeedback" :style="{ marginTop: '0.75rem', fontSize: '0.875rem', color: searchFeedbackKind === 'error' ? 'var(--text-rose)' : 'var(--text-secondary)' }">
+        <p v-if="searchFeedback" :style="{ marginTop: '0.75rem', fontSize: '0.875rem', color: searchFeedbackKind === 'error' ? 'var(--text-alert)' : 'var(--text-dim)' }">
           {{ searchFeedback }}
         </p>
       </section>
 
-      <!-- Cyber Grid Stats -->
+      <!-- Primary Metrics Grid -->
       <section class="stats-grid-3">
-        <section class="cyber-card stat-box">
+        <section class="hud-panel stat-box">
           <p class="status-label">SOFTWARE VERSION</p>
           <p class="stat-num">{{ overview.softwareVersion }}</p>
           <p class="stat-sub">Embedded release metadata.</p>
         </section>
 
-        <section class="cyber-card stat-box">
+        <section class="hud-panel stat-box">
           <p class="status-label">NETWORK POW</p>
           <p class="stat-num">{{ overview.submitPow }}</p>
           <p class="stat-sub">{{ overview.submitPowNote }}</p>
         </section>
 
-        <section class="cyber-card stat-box">
+        <section class="hud-panel stat-box">
           <p class="status-label">KNOWN NODES</p>
           <p class="stat-num">{{ overview.knownNodes }}</p>
           <p class="stat-sub">Visible peers tracked.</p>
@@ -100,17 +111,17 @@
       </section>
 
       <!-- DAG Tips -->
-      <section class="cyber-card stat-box" style="margin-top: 1rem;">
+      <section class="hud-panel stat-box" style="margin-top: 1rem;">
         <p class="status-label">DAG TIPS</p>
         <div style="margin-top: 0.5rem; display: flex; align-items: center; gap: 0.5rem;">
           <h2 style="font-size: 1.25rem; font-weight: 800; color: #ffffff;">Latest tips</h2>
-          <span class="cyber-tag" style="padding: 0.15rem 0.5rem; font-size: 10px;">{{ tips.length }} VISIBLE</span>
+          <span class="hud-status-badge" style="padding: 0.15rem 0.5rem; font-size: 10px;">{{ tips.length }} VISIBLE</span>
         </div>
 
-        <div v-if="!tipsLoaded" style="margin-top: 1rem; color: var(--text-muted); font-size: 0.875rem;">
+        <div v-if="!tipsLoaded" style="margin-top: 1rem; color: var(--text-dim); font-size: 0.875rem;">
           Loading…
         </div>
-        <div v-else-if="!tips.length" style="margin-top: 1rem; color: var(--text-muted); font-size: 0.875rem;">
+        <div v-else-if="!tips.length" style="margin-top: 1rem; color: var(--text-dim); font-size: 0.875rem;">
           No tips available.
         </div>
         <div v-else class="tips-container">
@@ -124,14 +135,14 @@
 
       <!-- Secondary Metrics -->
       <section class="stats-grid-3">
-        <article v-for="stat in statItems" :key="stat.label" class="cyber-card stat-box">
+        <article v-for="stat in statItems" :key="stat.label" class="hud-panel stat-box">
           <p class="status-label">{{ stat.label }}</p>
           <p class="stat-num" style="font-size: 2rem;">{{ stat.value }}</p>
         </article>
       </section>
 
       <!-- Manual Peer Recovery -->
-      <section class="cyber-card stat-box" style="margin-top: 1rem;">
+      <section class="hud-panel stat-box" style="margin-top: 1rem;">
         <p class="status-label">MANUAL PEER RECOVERY</p>
         <h2 style="font-size: 1.25rem; font-weight: 800; color: #ffffff; margin-top: 0.375rem;">Add a known onion peer</h2>
         <p class="stat-sub" style="max-width: 30rem;">
@@ -139,17 +150,17 @@
         </p>
 
         <form style="margin-top: 1.25rem; width: 100%; max-width: 32rem;" @submit.prevent="submitManualPeer">
-          <div class="search-form-inner">
+          <div class="search-box-inner">
             <input v-model.trim="peerInput" type="url" inputmode="url"
               placeholder="http://example.onion"
-              aria-label="Peer onion URL" required :disabled="peerPending" class="cyber-input" />
-            <button type="submit" :disabled="peerPending" class="btn-cyber-primary">
+              aria-label="Peer onion URL" required :disabled="peerPending" class="hud-input" />
+            <button type="submit" :disabled="peerPending" class="btn-cyber">
               {{ peerPending ? 'Checking…' : 'Add Peer' }}
             </button>
           </div>
         </form>
 
-        <p v-if="peerFeedbackMessage" :style="{ marginTop: '0.75rem', fontSize: '0.875rem', color: peerFeedbackKind === 'error' ? 'var(--text-rose)' : 'var(--text-cyan)' }">
+        <p v-if="peerFeedbackMessage" :style="{ marginTop: '0.75rem', fontSize: '0.875rem', color: peerFeedbackKind === 'error' ? 'var(--text-alert)' : 'var(--text-neon)' }">
           {{ peerFeedbackMessage }}
         </p>
       </section>
