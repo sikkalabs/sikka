@@ -45,6 +45,10 @@
     submitPowNote: document.getElementById('metricSubmitPowNote'),
     softwareVersion: document.getElementById('metricSoftwareVersion'),
     
+    navNodeMessage: document.getElementById('navNodeMessage'),
+    nodeMessageBanner: document.getElementById('nodeMessageBanner'),
+    overviewNodeMessage: document.getElementById('overviewNodeMessage'),
+    
     tipsFeed: document.getElementById('tipsFeed'),
     tipsBadge: document.getElementById('tipsBadge'),
     
@@ -146,6 +150,22 @@
     if (el.torNetwork) el.torNetwork.textContent = state.overview.torNetwork;
     if (el.publicURL) el.publicURL.textContent = state.overview.publicURL;
     if (el.nodeMessage) el.nodeMessage.textContent = state.overview.nodeMessage;
+
+    // Render Node Message in Navbar and Overview Banner
+    const msg = String(state.overview.nodeMessage || "").trim();
+    if (msg && msg !== "Loading..." && msg !== "Unavailable" && msg !== "--") {
+      if (el.navNodeMessage) {
+        el.navNodeMessage.textContent = msg;
+        el.navNodeMessage.style.display = "inline-flex";
+      }
+      if (el.nodeMessageBanner && el.overviewNodeMessage) {
+        el.overviewNodeMessage.textContent = msg;
+        el.nodeMessageBanner.style.display = "block";
+      }
+    } else {
+      if (el.navNodeMessage) el.navNodeMessage.style.display = "none";
+      if (el.nodeMessageBanner) el.nodeMessageBanner.style.display = "none";
+    }
 
     // Node address
     const addr = String(state.overview.nodeAddress || "").trim().toLowerCase();
