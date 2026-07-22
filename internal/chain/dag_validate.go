@@ -110,7 +110,7 @@ func checkInputMaturity(genesisID, key string, utxo *UTXO, spendTimestamp int64)
 func (d *DAG) snapshotTxInputsRLocked(tx *Transaction) ([]*UTXO, error) {
 	maxParentTimestamp := int64(0)
 	for _, parentID := range tx.Parents {
-		parent := d.txs[parentID]
+		parent := d.getTransactionLocked(parentID)
 		if parent == nil {
 			return nil, fmt.Errorf("parent tx %s not found", parentID)
 		}

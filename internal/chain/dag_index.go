@@ -127,8 +127,9 @@ func (d *DAG) orderedTransactionsLocked() []Transaction {
 		return d.ordered
 	}
 
-	ordered := make([]Transaction, 0, len(d.txs))
-	for _, tx := range d.txs {
+	ordered := make([]Transaction, 0, len(d.depths))
+	for id := range d.depths {
+		tx := d.getTransactionLocked(id)
 		if tx == nil {
 			continue
 		}

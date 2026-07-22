@@ -40,7 +40,7 @@ func (d *DAG) validateTimestampAndParentsLocked(tx *Transaction) error {
 		if len(parentID) != 64 {
 			return fmt.Errorf("parent tx id %q is not a valid 64-char hex string", parentID)
 		}
-		parent := d.txs[parentID]
+		parent := d.getTransactionLocked(parentID)
 		if parent == nil {
 			return fmt.Errorf("parent tx %s not found", parentID)
 		}
@@ -86,7 +86,7 @@ func (d *DAG) prepareTxLocked(tx *Transaction) (map[string]int64, []string, map[
 	if tx.ID == "" {
 		tx.ID = computeTxID(tx)
 	}
-	if _, exists := d.txs[tx.ID]; exists {
+	if d.getTransactionLocked(tx.ID) != nil {
 		return nil, nil, nil, fmt.Errorf("transaction %s already in DAG", tx.ID)
 	}
 
@@ -150,6 +150,7 @@ func (d *DAG) commitTxMemLocked(tx *Transaction, weightUpdates map[string]int64,
 	d.txs[tx.ID] = tx
 	d.ingestedCount++
 	d.ingestHistory = append(d.ingestHistory, time.Now().Unix())
+	d.offloadHistoricalTxsLocked()
 
 	// Maintain the ordered cache incrementally instead of full rebuild.
 	// This avoids O(N) map iteration + O(N log N) sort on every Submit for large DAGs.

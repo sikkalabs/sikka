@@ -63,6 +63,29 @@ func persistTx(db *bbolt.DB, tx *Transaction) error {
 	})
 }
 
+// loadTxFromDB reads and unmarshals a single transaction by ID from the txs bucket.
+func loadTxFromDB(db *bbolt.DB, id string) (*Transaction, error) {
+	if db == nil || id == "" {
+		return nil, fmt.Errorf("invalid storage or txid")
+	}
+	var tx Transaction
+	err := db.View(func(boltTx *bbolt.Tx) error {
+		b := boltTx.Bucket([]byte(storageTxsBucket))
+		if b == nil {
+			return fmt.Errorf("txs bucket not found")
+		}
+		v := b.Get([]byte(id))
+		if len(v) == 0 {
+			return fmt.Errorf("tx %s not found in db", id)
+		}
+		return json.Unmarshal(v, &tx)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &tx, nil
+}
+
 // persistWeight writes the cumulative weight for a tx ID.
 func persistWeight(db *bbolt.DB, txID string, weight int64) error {
 	var buf [8]byte

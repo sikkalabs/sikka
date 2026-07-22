@@ -35,7 +35,7 @@ func (d *DAG) weightUpdatesForTxLocked(tx *Transaction, delta int64) map[string]
 			newW = saturation
 		}
 		updates[id] = newW
-		parent := d.txs[id]
+		parent := d.getTransactionLocked(id)
 		if parent == nil {
 			continue
 		}
@@ -74,7 +74,7 @@ func (d *DAG) propagateWeightLocked(startID string, delta int64) {
 	for len(queue) > 0 {
 		id := queue[0]
 		queue = queue[1:]
-		tx := d.txs[id]
+		tx := d.getTransactionLocked(id)
 		if tx == nil {
 			continue
 		}

@@ -25,7 +25,7 @@ func (d *DAG) quoteTxPoWLocked(tx *Transaction) (TxPowQuote, error) {
 	// submission; using stale values will cause the submitted tx to be rejected.
 	hashes := make([]string, len(tx.Parents))
 	for i, parentID := range tx.Parents {
-		parent := d.txs[parentID]
+		parent := d.getTransactionLocked(parentID)
 		// Existence already validated above.
 		h, err := txPowHash(parent)
 		if err != nil {
@@ -78,7 +78,7 @@ func (d *DAG) validateParentsExistAndTimestampLocked(tx *Transaction) error {
 		if len(parentID) != 64 {
 			return fmt.Errorf("parent tx id %q is not a valid 64-char hex string", parentID)
 		}
-		parent := d.txs[parentID]
+		parent := d.getTransactionLocked(parentID)
 		if parent == nil {
 			return fmt.Errorf("parent tx %s not found", parentID)
 		}
@@ -113,7 +113,7 @@ func (d *DAG) recentAncestorCountLocked(tx *Transaction) int {
 			continue
 		}
 		visited[txid] = true
-		ancestor := d.txs[txid]
+		ancestor := d.getTransactionLocked(txid)
 		if ancestor == nil {
 			continue
 		}

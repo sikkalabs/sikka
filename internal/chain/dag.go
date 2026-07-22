@@ -38,6 +38,7 @@ type DAG struct {
 	dbClosed      bool
 	dataFile      string
 
+	txCache       *lruCache
 	ingestedCount uint64
 	ingestHistory []int64
 
@@ -48,6 +49,11 @@ type DAG struct {
 	// conflictPruneGraceSeconds overrides ConflictPruneGraceSeconds when > 0.
 	conflictPruneGraceSeconds int64
 }
+
+const (
+	DefaultTxCacheCapacity = 10000
+	DefaultMaxHotTxs       = 2000
+)
 
 // Options configures a DAG instance.
 type Options struct {
@@ -63,6 +69,9 @@ type Options struct {
 	// GenesisAddress is the bech32m address that receives TotalSupply in the
 	// genesis tx. If empty, the network default genesis address is used.
 	GenesisAddress string
+	// MaxTxCacheSize is the capacity of the LRU cache for historical transactions.
+	// 0 uses DefaultTxCacheCapacity (10,000). Set to -1 to disable LRU caching.
+	MaxTxCacheSize int
 }
 
 // NewDAG creates or loads a DAG. If DataDir is empty the DAG is in-memory only.
@@ -70,6 +79,11 @@ func NewDAG(opts Options) (*DAG, error) {
 	threshold := opts.ConfirmationThreshold
 	if threshold <= 0 {
 		threshold = DefaultConfirmationThreshold
+	}
+
+	txCacheCap := opts.MaxTxCacheSize
+	if txCacheCap == 0 {
+		txCacheCap = DefaultTxCacheCapacity
 	}
 
 	d := &DAG{
@@ -83,6 +97,9 @@ func NewDAG(opts Options) (*DAG, error) {
 		checksums:             make(map[int][]string),
 		confirmationThreshold: threshold,
 		minPowBits:            opts.MinPowBits,
+	}
+	if txCacheCap > 0 {
+		d.txCache = newLRUCache(txCacheCap)
 	}
 	if opts.ConflictPruneGraceSeconds > 0 {
 		d.conflictPruneGraceSeconds = opts.ConflictPruneGraceSeconds
@@ -240,11 +257,67 @@ func (d *DAG) QuoteTxPoW(tx *Transaction) (TxPowQuote, error) {
 	return d.quoteTxPoWLocked(tx)
 }
 
+// getTransactionLocked retrieves a transaction by ID from hot memory, LRU cache, or bbolt DB.
+func (d *DAG) getTransactionLocked(id string) *Transaction {
+	if id == "" {
+		return nil
+	}
+	if tx, ok := d.txs[id]; ok {
+		return tx
+	}
+	if d.txCache != nil {
+		if tx, ok := d.txCache.Get(id); ok {
+			return tx
+		}
+	}
+	if d.db != nil {
+		tx, err := loadTxFromDB(d.db, id)
+		if err == nil && tx != nil {
+			if d.txCache != nil {
+				d.txCache.Put(id, tx)
+			}
+			return tx
+		}
+	}
+	return nil
+}
+
+// offloadHistoricalTxsLocked moves historical confirmed transactions out of hot RAM into LRU cache.
+func (d *DAG) offloadHistoricalTxsLocked() {
+	if d.db == nil || len(d.txs) <= DefaultMaxHotTxs {
+		return
+	}
+	maxDepth := d.maxDepthLocked()
+	cutoffDepth := maxDepth - 50
+	if cutoffDepth <= 0 {
+		return
+	}
+
+	for id, tx := range d.txs {
+		if id == d.genesis {
+			continue
+		}
+		if _, isTip := d.tips[id]; isTip {
+			continue
+		}
+		depth := d.depths[id]
+		if depth > 0 && depth < cutoffDepth && d.txWeightLocked(id) >= d.confirmationThreshold {
+			if d.txCache != nil {
+				d.txCache.Put(id, tx)
+			}
+			delete(d.txs, id)
+		}
+		if len(d.txs) <= DefaultMaxHotTxs {
+			break
+		}
+	}
+}
+
 // GetTransaction returns a transaction by ID, or nil if not found.
 func (d *DAG) GetTransaction(id string) *Transaction {
 	d.mu.RLock()
 	defer d.mu.RUnlock()
-	tx := d.txs[id]
+	tx := d.getTransactionLocked(id)
 	if tx == nil {
 		return nil
 	}
@@ -271,7 +344,7 @@ func (d *DAG) FillParentPowHashes(tx *Transaction) error {
 	defer d.mu.RUnlock()
 	hashes := make([]string, len(tx.Parents))
 	for i, parentID := range tx.Parents {
-		parent := d.txs[parentID]
+		parent := d.getTransactionLocked(parentID)
 		if parent == nil {
 			return fmt.Errorf("parent tx %s not found in DAG", parentID)
 		}

@@ -50,7 +50,7 @@ func (d *DAG) prunableConflictLosersLocked(now int64) map[string]bool {
 
 		latestClaimTimestamp := int64(0)
 		for _, claimant := range claims {
-			tx := d.txs[claimant]
+			tx := d.getTransactionLocked(claimant)
 			if tx == nil {
 				continue
 			}

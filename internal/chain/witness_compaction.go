@@ -79,7 +79,7 @@ func stripTxWitness(db *bbolt.DB, txID string) error {
 // reflect that witness stripping has occurred. Must be called under the DAG
 // write lock (d.mu.Lock) after stripTxWitness has committed to disk.
 func (d *DAG) markWitnessStrippedMemLocked(txID string) {
-	tx := d.txs[txID]
+	tx := d.getTransactionLocked(txID)
 	if tx == nil {
 		return
 	}
