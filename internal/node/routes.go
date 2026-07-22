@@ -40,6 +40,7 @@ func (n *Node) routes() http.Handler {
 	}
 	mux.HandleFunc("/", n.handleRoot)
 	mux.HandleFunc("/healthz", n.handleHealth)
+	mux.HandleFunc("/metrics", n.handleMetrics)
 	mux.HandleFunc("/v1/status", n.handleStatus)
 	mux.HandleFunc("/v1/tx/{txid}/weight", n.handleTxWeight)
 	mux.HandleFunc("/v1/sync/status", n.handleSyncStatus)

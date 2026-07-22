@@ -60,6 +60,7 @@ Paged list routes return:
 | ------ | ------------------------ | ---------------------------------------------------------- |
 | `GET`  | `/`                      | Node homepage                                              |
 | `GET`  | `/healthz`               | Process health check                                       |
+| `GET`  | `/metrics`               | Prometheus metrics endpoint for Grafana monitoring         |
 | `GET`  | `/v1/status`             | Runtime, DAG, and Tor status                               |
 | `GET`  | `/v1/tx/{txid}/weight`   | Cumulative weight and confirmation state for a transaction |
 | `GET`  | `/v1/sync/status`        | Federation sync metadata (caught-up check via tips_fingerprint + dag_size) |

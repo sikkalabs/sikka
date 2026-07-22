@@ -33,10 +33,13 @@ type DAG struct {
 	utxos       map[string]*UTXO        // "txid:index" → output metadata (all created outputs)
 	spendClaims map[string][]string     // "txid:index" → competing spending tx IDs
 	ordered     []Transaction
-	checksums   map[int][]string
-	db          *bbolt.DB
-	dbClosed    bool
-	dataFile    string
+	checksums     map[int][]string
+	db            *bbolt.DB
+	dbClosed      bool
+	dataFile      string
+
+	ingestedCount uint64
+	ingestHistory []int64
 
 	// confirmationThreshold is the minimum cumulative PoW weight for confirmation.
 	confirmationThreshold int64
@@ -112,6 +115,7 @@ func NewDAG(opts Options) (*DAG, error) {
 			d.weights = weights
 			d.utxos = utxos
 			d.spendClaims = spendClaims
+			d.ingestedCount = uint64(len(txs))
 			d.rebuildIndexLocked()
 			d.rebuildSpendStateLocked()
 			return d, nil

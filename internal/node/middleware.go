@@ -25,7 +25,7 @@ func (r *statusRecorder) Write(b []byte) (int, error) {
 }
 
 func securityProfile(path string) string {
-	if path == "/healthz" || strings.HasPrefix(path, "/v1/") {
+	if path == "/healthz" || path == "/metrics" || strings.HasPrefix(path, "/v1/") {
 		return "api"
 	}
 	return "static"

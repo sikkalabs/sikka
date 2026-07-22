@@ -148,6 +148,8 @@ func (d *DAG) commitTxMemLocked(tx *Transaction, weightUpdates map[string]int64,
 
 	d.depths[tx.ID] = depth
 	d.txs[tx.ID] = tx
+	d.ingestedCount++
+	d.ingestHistory = append(d.ingestHistory, time.Now().Unix())
 
 	// Maintain the ordered cache incrementally instead of full rebuild.
 	// This avoids O(N) map iteration + O(N log N) sort on every Submit for large DAGs.
