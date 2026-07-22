@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Transaction · Sikka</title>
+  <meta name="description" content="Transaction explorer view for a Sikka node.">
+  <link rel="stylesheet" href="/public/style.css">
+</head>
+<body>
+  <div id="app">
+    <div class="app-bg"></div>
+
+    <main class="layout-container">
+      <div style="text-align: center; margin-bottom: 1.5rem;">
+        <a href="/" class="btn-secondary" style="display: inline-flex; align-items: center; gap: 0.5rem; text-decoration: none; font-size: 0.8125rem;">
+          &larr; Return to Node Overview
+        </a>
+      </div>
+
+      <section class="panel">
+        <div class="panel-header">
+          <span class="panel-title">TRANSACTION DETAILS</span>
+        </div>
+        <h1 id="pageTitle" style="margin-top: 0.5rem; word-break: break-all; font-family: var(--font-mono); font-size: 1.25rem; font-weight: 700; color: #ffffff; text-align: center;">Loading…</h1>
+
+        <div id="loading" style="margin-top: 1.5rem; color: var(--text-muted); font-size: 0.875rem; text-align: center;">
+          Loading transaction details…
+        </div>
+
+        <div id="errorMessage" style="display: none; margin-top: 1.5rem; padding: 1rem 1.5rem; border-radius: 0.75rem; border: 1px solid var(--text-rose); background: rgba(244,63,94,0.1); color: var(--text-rose); font-size: 0.875rem; text-align: center;">
+        </div>
+
+        <div id="content" style="display: none; margin-top: 1.5rem; width: 100%;">
+          <div id="summaryCards" class="metrics-row" style="grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));">
+          </div>
+
+          <section id="parentsSection" style="display: none; margin-top: 1.5rem;">
+            <div style="display: flex; align-items: center; justify-content: center; gap: 0.5rem; margin-bottom: 0.75rem;">
+              <span class="panel-title">Parents</span>
+              <span id="parentsBadge" class="badge">0</span>
+            </div>
+            <div id="parentsList" class="tips-table">
+            </div>
+          </section>
+
+          <section id="inputsSection" style="display: none; margin-top: 1.5rem;">
+            <div style="display: flex; align-items: center; justify-content: center; gap: 0.5rem; margin-bottom: 0.75rem;">
+              <span class="panel-title">Inputs</span>
+              <span id="inputsBadge" class="badge">0</span>
+            </div>
+            <div id="inputsList" style="display: grid; gap: 0.75rem;">
+            </div>
+          </section>
+
+          <section id="outputsSection" style="display: none; margin-top: 1.5rem;">
+            <div style="display: flex; align-items: center; justify-content: center; gap: 0.5rem; margin-bottom: 0.75rem;">
+              <span class="panel-title">Outputs</span>
+              <span id="outputsBadge" class="badge">0</span>
+            </div>
+            <div id="outputsList" style="display: grid; gap: 0.75rem;">
+            </div>
+          </section>
+
+          <details style="margin-top: 2rem; cursor: pointer; color: var(--text-muted); font-family: var(--font-mono); font-size: 0.8125rem;">
+            <summary style="padding: 0.5rem 0;">View Raw JSON</summary>
+            <pre id="rawJson" style="margin-top: 0.5rem; padding: 1rem; background: rgba(3,7,18,0.8); border: 1px solid var(--border-subtle); border-radius: 0.5rem; overflow-x: auto; color: var(--text-sky);"></pre>
+          </details>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script>
+    (function () {
+      'use strict';
+
+      const CHILLAR_PER_SIKKA = 10_000_000_000n;
+      const MIN_UTXO_MATURITY_SECONDS = 600;
+
+      function toBigIntInteger(value) {
+        if (typeof value === 'bigint') return value;
+        if (typeof value === 'number') {
+          if (!Number.isFinite(value) || !Number.isInteger(value)) return 0n;
+          return BigInt(String(value));
+        }
+        if (typeof value === 'string') {
+          const trimmed = value.trim();
+          if (!/^-?\d+$/.test(trimmed)) return 0n;
+          return BigInt(trimmed);
+        }
+        return 0n;
+      }
+
+      function formatSikka(chillar) {
+        const amount = toBigIntInteger(chillar);
+        const negative = amount < 0n;
+        const abs = negative ? -amount : amount;
+        const whole = abs / CHILLAR_PER_SIKKA;
+        const frac = abs % CHILLAR_PER_SIKKA;
+        return (negative ? '-' : '') + whole.toString() + '.' + frac.toString().padStart(10, '0');
+      }
+
+      function extractPathValue(prefix) {
+        const segments = window.location.pathname.replace(/^\/+/, '').split('/');
+        if (segments[0] !== prefix) {
+          return '';
+        }
+        return segments.slice(1).map(segment => decodeURIComponent(segment)).join('/').trim();
+      }
+
+      async function apiFetch(path) {
+        const response = await fetch(window.location.origin + path);
+        const text = await response.text();
+        let data;
+        try {
+          data = JSON.parse(text);
+        } catch {
+          data = text;
+        }
+        let raw;
+        try {
+          raw = JSON.stringify(JSON.parse(text), null, 2);
+        } catch {
+          raw = text;
+        }
+        return { ok: response.ok, status: response.status, data, raw };
+      }
+
+      document.addEventListener('DOMContentLoaded', async () => {
+        const txid = extractPathValue('tx');
+        const pageTitle = document.getElementById('pageTitle');
+        const loading = document.getElementById('loading');
+        const errorMessage = document.getElementById('errorMessage');
+        const content = document.getElementById('content');
+
+        if (!txid) {
+          loading.style.display = 'none';
+          errorMessage.style.display = 'block';
+          errorMessage.textContent = 'No transaction ID found in the URL.';
+          document.title = 'Transaction · Sikka';
+          return;
+        }
+
+        document.title = 'Tx ' + txid + ' · Sikka';
+        pageTitle.textContent = txid;
+
+        try {
+          const [txRes, weightRes, statusRes] = await Promise.all([
+            apiFetch('/v1/tx/' + encodeURIComponent(txid)),
+            apiFetch('/v1/tx/' + encodeURIComponent(txid) + '/weight'),
+            apiFetch('/v1/status')
+          ]);
+
+          if (!txRes.ok) {
+            loading.style.display = 'none';
+            errorMessage.style.display = 'block';
+            errorMessage.textContent = 'Transaction not found (HTTP ' + txRes.status + ').';
+            return;
+          }
+
+          const tx = txRes.data || {};
+          const weight = weightRes.ok ? weightRes.data : null;
+          const parents = Array.isArray(tx.parents) ? tx.parents : [];
+          const inputs = Array.isArray(tx.inputs) ? tx.inputs : [];
+          const outputs = Array.isArray(tx.outputs) ? tx.outputs : [];
+
+          // Render summary
+          const summaryCards = document.getElementById('summaryCards');
+          const cards = [
+            { label: 'Weight', val: weight && weight.weight != null ? weight.weight : '—' },
+            { label: 'Work Bits', val: tx.pow_bits ?? '—' },
+            { label: 'Timestamp', val: tx.timestamp ? new Date(Number(tx.timestamp) * 1000).toLocaleString() : '—' },
+            { label: 'Inputs', val: inputs.length },
+            { label: 'Outputs', val: outputs.length },
+          ];
+
+          summaryCards.innerHTML = cards.map(c => `
+            <div class="metric-card">
+              <p class="metric-label">${c.label}</p>
+              <p class="metric-val" style="font-size: 1.125rem;">${c.val}</p>
+            </div>
+          `).join('');
+
+          // Parents
+          if (parents.length) {
+            document.getElementById('parentsSection').style.display = 'block';
+            document.getElementById('parentsBadge').textContent = parents.length;
+            document.getElementById('parentsList').innerHTML = parents.map(p => `
+              <a href="/tx/${encodeURIComponent(p)}" class="tip-row">
+                <span class="tip-hash">${p}</span>
+                <span class="tip-badge">INSPECT &rarr;</span>
+              </a>
+            `).join('');
+          }
+
+          // Inputs
+          if (inputs.length) {
+            document.getElementById('inputsSection').style.display = 'block';
+            document.getElementById('inputsBadge').textContent = inputs.length;
+            document.getElementById('inputsList').innerHTML = inputs.map((inp, idx) => `
+              <div class="metric-card">
+                <p class="metric-label">Input #${idx} (Index ${inp.index ?? '—'})</p>
+                <p class="tip-hash" style="margin-top: 0.25rem;">${inp.txid || '—'}</p>
+              </div>
+            `).join('');
+          }
+
+          // Outputs
+          if (outputs.length) {
+            document.getElementById('outputsSection').style.display = 'block';
+            document.getElementById('outputsBadge').textContent = outputs.length;
+            document.getElementById('outputsList').innerHTML = outputs.map((out, idx) => `
+              <div class="metric-card">
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                  <p class="metric-label">Output #${idx}</p>
+                  <span class="badge badge-emerald">${formatSikka(out.value)} SIKKA</span>
+                </div>
+                ${out.address ? `<a href="/wallet/${encodeURIComponent(out.address)}" class="tip-hash" style="display: block; margin-top: 0.5rem; color: var(--text-sky); text-decoration: underline;">${out.address}</a>` : '<p class="metric-sub">No address</p>'}
+              </div>
+            `).join('');
+          }
+
+          document.getElementById('rawJson').textContent = JSON.stringify(tx, null, 2);
+
+          loading.style.display = 'none';
+          content.style.display = 'block';
+        } catch (err) {
+          loading.style.display = 'none';
+          errorMessage.style.display = 'block';
+          errorMessage.textContent = 'Failed to load transaction: ' + String(err.message || err);
+        }
+      });
+    })();
+  </script>
+</body>
+</html>

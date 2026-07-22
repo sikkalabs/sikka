@@ -1,0 +1,183 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Sikka Node Explorer</title>
+  <meta name="description"
+    content="Sikka node dashboard for chain status, DAG tips, network topology, and peer recovery." />
+  <meta name="theme-color" content="#070b14" />
+  <meta name="robots" content="index,follow" />
+  <meta property="og:type" content="website" />
+  <meta property="og:title" content="Sikka Node Explorer" />
+  <meta property="og:description"
+    content="Monitor chain status, inspect DAG tips, and manage peers from a local Sikka node." />
+  <meta property="og:image" content="/public/sikka.svg" />
+  <link rel="icon" href="/public/sikka.svg" type="image/svg+xml" />
+  <link rel="apple-touch-icon" href="/public/sikka.svg" />
+  <link rel="stylesheet" href="/public/style.css" />
+</head>
+
+<body>
+  <div id="app">
+    <div class="app-bg"></div>
+
+    <main class="layout-container">
+      <!-- Navbar with Integrated Search -->
+      <header class="navbar">
+        <div class="nav-left">
+          <img src="/public/sikka.svg" alt="Sikka Logo" class="nav-logo" />
+          <div>
+            <span class="nav-brand-title">Sikka Node</span>
+            <span class="badge" style="margin-left: 0.5rem;">MAINNET</span>
+          </div>
+        </div>
+
+        <form id="searchForm" class="nav-search-form" autocomplete="off">
+          <input id="searchInput" type="text" spellcheck="false"
+            placeholder="Search 64-char TxID or sikka1… address" class="nav-search-input" />
+          <button type="submit" class="btn-search">Search</button>
+        </form>
+      </header>
+
+      <p id="searchFeedback" style="display: none; margin-bottom: 1.25rem; font-size: 0.875rem;"></p>
+
+      <!-- Main 2-Column Dashboard Grid -->
+      <div class="dashboard-grid">
+        <!-- Main Content Column -->
+        <div class="grid-main">
+          <!-- Primary Network Overview Panel -->
+          <section class="panel">
+            <div class="panel-header">
+              <span class="panel-title">CHAIN STATUS OVERVIEW</span>
+              <span class="badge badge-emerald"><span class="pulse-indicator"></span>ONLINE</span>
+            </div>
+
+            <!-- 4 Metrics Matrix -->
+            <div class="metrics-row">
+              <div class="metric-card">
+                <p class="metric-label">DAG Size</p>
+                <p id="metricDagSize" class="metric-val">--</p>
+                <p class="metric-sub">Total DAG blocks</p>
+              </div>
+
+              <div class="metric-card">
+                <p class="metric-label">Max Depth</p>
+                <p id="metricMaxDepth" class="metric-val">--</p>
+                <p class="metric-sub">Chain height</p>
+              </div>
+
+              <div class="metric-card">
+                <p class="metric-label">Network PoW</p>
+                <p id="metricSubmitPow" class="metric-val">--</p>
+                <p id="metricSubmitPowNote" class="metric-sub">Loading...</p>
+              </div>
+
+              <div class="metric-card">
+                <p class="metric-label">Version</p>
+                <p id="metricSoftwareVersion" class="metric-val" style="font-size: 1.35rem;">--</p>
+                <p class="metric-sub">Node release</p>
+              </div>
+            </div>
+
+            <!-- Quick Action Links -->
+            <div style="display: flex; gap: 0.75rem;">
+              <a href="https://sikkalabs.com/" target="_blank" rel="noreferrer" class="btn-primary">
+                Wallet &rarr;
+              </a>
+              <a href="https://github.com/sikkalabs/sikka" target="_blank" rel="noreferrer" class="btn-secondary">
+                Source &rarr;
+              </a>
+            </div>
+          </section>
+
+          <!-- Live DAG Tips Feed Panel -->
+          <section class="panel">
+            <div class="panel-header">
+              <span class="panel-title">LATEST DAG TIPS FEED</span>
+              <span id="tipsBadge" class="badge">0 ACTIVE TIPS</span>
+            </div>
+
+            <div id="tipsFeed" class="tips-table">
+              <div style="padding: 1rem; color: var(--text-muted); font-family: var(--font-mono); font-size: 0.875rem;">
+                Loading DAG tips…
+              </div>
+            </div>
+          </section>
+        </div>
+
+        <!-- Sidebar Column -->
+        <div class="grid-side">
+          <!-- Node Topology Panel -->
+          <section class="panel">
+            <div class="panel-header">
+              <span class="panel-title">NODE TOPOLOGY</span>
+              <span class="badge"><span class="pulse-indicator"></span>TOR</span>
+            </div>
+
+            <div class="aside-item">
+              <p class="aside-label">Tor Network</p>
+              <p id="topoTorNetwork" class="aside-val">Loading...</p>
+            </div>
+
+            <div class="aside-item">
+              <p class="aside-label">Onion Address</p>
+              <p id="topoPublicURL" class="aside-val">Loading...</p>
+            </div>
+
+            <div id="topoNodeAddressItem" class="aside-item" style="display: none;">
+              <p class="aside-label">Donation Address</p>
+              <p id="topoNodeAddress" class="aside-val">Loading...</p>
+            </div>
+
+            <div class="aside-item">
+              <p class="aside-label">Node Message</p>
+              <p id="topoNodeMessage" class="aside-val">Loading...</p>
+            </div>
+          </section>
+
+          <!-- Known Peers Counter -->
+          <section class="panel">
+            <div class="panel-header">
+              <span class="panel-title">KNOWN PEERS</span>
+              <span id="knownNodesBadge" class="badge">-- TRACKED</span>
+            </div>
+            <p id="knownNodesDesc" style="font-size: 0.875rem; color: var(--text-muted);">
+              Connecting to verified Tor onion peers in the Sikka network...
+            </p>
+          </section>
+
+          <!-- Manual Peer Recovery Panel -->
+          <section class="panel">
+            <div class="panel-header">
+              <span class="panel-title">MANUAL PEER RECOVERY</span>
+            </div>
+            <p style="font-size: 0.8125rem; color: var(--text-muted); margin-bottom: 1rem;">
+              Announce a known onion endpoint to force peer discovery.
+            </p>
+
+            <form id="peerForm" style="display: flex; flex-direction: column; gap: 0.75rem;">
+              <input id="peerInput" type="url" inputmode="url"
+                placeholder="http://example.onion"
+                aria-label="Peer onion URL" required class="nav-search-input" />
+              <button id="peerBtn" type="submit" class="btn-primary" style="width: 100%;">
+                Add Peer
+              </button>
+            </form>
+
+            <p id="peerFeedback" style="display: none; marginTop: 0.75rem; font-size: 0.8125rem;"></p>
+          </section>
+        </div>
+      </div>
+
+      <footer class="footer">
+        <p>Sikka Node Explorer &bull; High performance quantum-resistant DAG network</p>
+      </footer>
+    </main>
+  </div>
+
+  <script src="/public/app.js"></script>
+</body>
+
+</html>

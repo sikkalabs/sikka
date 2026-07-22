@@ -45,6 +45,10 @@ func (n *Node) staticHandler(publicDir string) http.Handler {
 
 func locatePublicDir() (string, bool) {
 	candidates := []string{
+		"public2",
+		filepath.Join("..", "public2"),
+		filepath.Join("..", "..", "public2"),
+		filepath.Join("/home", "sikka", "public2"),
 		"public",
 		filepath.Join("..", "public"),
 		filepath.Join("..", "..", "public"),
