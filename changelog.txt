@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.3.2
+
+- Implemented Peer Health Scoring, Latency RTT Tracking (Exponential Moving Average), and Dynamic Ban Protection.
+- Added penalty score tracking (`PenaltyTransientFailure`, `PenaltyInvalidPayload`, `PenaltyCryptoViolation`), `bannedUntil` timeouts, and latency-aware peer selection.
+- Accelerated Proof-of-Work zero-bit counting using standard library hardware intrinsics (`math/bits.LeadingZeros8`).
+- Optimized UTXO string key generation (`utxoKey`) to eliminate reflection and heap allocations in core DAG loops.
+- Fixed test runner database lock deadlock in `internal/node/node_test.go` by adding explicit `Node.Close()` and test cleanup.
+
 ## 0.3.1
 
 - Implemented O(1) Address Indexing for instant address UTXO and balance queries.
