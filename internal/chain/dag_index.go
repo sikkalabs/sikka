@@ -6,12 +6,40 @@ import (
 	"sort"
 )
 
+func (d *DAG) addUTXOToAddrIndexLocked(utxo *UTXO, key string) {
+	if d.addrIndex == nil {
+		d.addrIndex = make(map[string]map[string]struct{})
+	}
+	if utxo == nil || utxo.Address == "" {
+		return
+	}
+	set, ok := d.addrIndex[utxo.Address]
+	if !ok {
+		set = make(map[string]struct{})
+		d.addrIndex[utxo.Address] = set
+	}
+	set[key] = struct{}{}
+}
+
+func (d *DAG) removeUTXOFromAddrIndexLocked(address string, key string) {
+	if d.addrIndex == nil || address == "" {
+		return
+	}
+	if set, ok := d.addrIndex[address]; ok {
+		delete(set, key)
+		if len(set) == 0 {
+			delete(d.addrIndex, address)
+		}
+	}
+}
+
 // rebuildSpendStateLocked reconstructs outputs and spend claims from all known
 // transactions. Called after loading persisted state so every node derives the
 // same ledger view from the same DAG content.
 func (d *DAG) rebuildSpendStateLocked() {
 	d.utxos = make(map[string]*UTXO)
 	d.spendClaims = make(map[string][]string)
+	d.addrIndex = make(map[string]map[string]struct{})
 	for _, tx := range d.txs {
 		if tx == nil {
 			continue
@@ -19,7 +47,7 @@ func (d *DAG) rebuildSpendStateLocked() {
 		depth := d.depths[tx.ID]
 		for i, out := range tx.Outputs {
 			key := utxoKey(tx.ID, i)
-			d.utxos[key] = &UTXO{
+			u := &UTXO{
 				TxID:      tx.ID,
 				Index:     i,
 				Address:   out.Address,
@@ -27,6 +55,8 @@ func (d *DAG) rebuildSpendStateLocked() {
 				DAGDepth:  depth,
 				CreatedAt: tx.Timestamp,
 			}
+			d.utxos[key] = u
+			d.addUTXOToAddrIndexLocked(u, key)
 		}
 		for _, in := range tx.Inputs {
 			key := utxoKey(in.TxID, in.Index)
@@ -37,11 +67,12 @@ func (d *DAG) rebuildSpendStateLocked() {
 	// Purge confirmed spent UTXOs from memory to save RAM.
 	// If a UTXO is canonically spent and the spending transaction is fully confirmed,
 	// the UTXO is dead and can never be spent again. We don't need it in memory.
-	for key := range d.utxos {
+	for key, utxo := range d.utxos {
 		claims := d.spendClaims[key]
 		if len(claims) > 0 {
 			winner := canonicalSpenderLocked(d.weights, claims)
 			if winner != "" && d.weights[winner] >= d.confirmationThreshold {
+				d.removeUTXOFromAddrIndexLocked(utxo.Address, key)
 				delete(d.utxos, key)
 			}
 		}

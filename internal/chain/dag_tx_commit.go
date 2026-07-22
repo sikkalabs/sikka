@@ -203,6 +203,7 @@ func (d *DAG) commitTxMemLocked(tx *Transaction, weightUpdates map[string]int64,
 	}
 	for key, utxo := range newUTXOs {
 		d.utxos[key] = utxo
+		d.addUTXOToAddrIndexLocked(utxo, key)
 	}
 
 	if d.genesis == "" {

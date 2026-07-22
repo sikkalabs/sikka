@@ -440,32 +440,56 @@ func TestDAGConfirmation(t *testing.T) {
 		t.Fatal("genesis should not be confirmed yet (weight = 1, threshold = 5)")
 	}
 
-	// Submit enough txs to confirm genesis.
-	prevID := genesisTxID
-	currentAddr := wallet.address
-	remaining := TotalSupply
-	for i := 0; i < 5; i++ {
-		utxos := dag.GetUTXOs(currentAddr)
-		if len(utxos) == 0 {
-			t.Fatalf("no UTXOs for wallet at step %d", i)
+	// Submit 5 child txs to confirm genesis.
+	// Step 0 spends genesis UTXO and creates 5 outputs with a past timestamp so they are mature.
+	genesisUTXO := dag.GetUTXOs(wallet.address)[0]
+	baseTime := time.Now().Unix() - 3000
+	tx0 := &Transaction{
+		Parents: []string{genesisTxID, genesisTxID},
+		Inputs:  []TxInput{{TxID: genesisUTXO.TxID, Index: genesisUTXO.Index}},
+		Outputs: []TxOutput{
+			{Address: wallet.address, Value: TotalSupply / 5},
+			{Address: wallet.address, Value: TotalSupply / 5},
+			{Address: wallet.address, Value: TotalSupply / 5},
+			{Address: wallet.address, Value: TotalSupply / 5},
+			{Address: wallet.address, Value: TotalSupply - (TotalSupply / 5 * 4)},
+		},
+		Timestamp: baseTime,
+	}
+	wallet.signInput(t, tx0, 0, genesisUTXO)
+	mineTxPow(t, dag, tx0)
+	if err := dag.SubmitTx(tx0); err != nil {
+		t.Fatalf("SubmitTx step 0 error = %v", err)
+	}
+
+	prevID := tx0.ID
+	for i := 1; i < 5; i++ {
+		utxos := dag.GetUTXOs(wallet.address)
+		var targetUTXO *UTXO
+		for _, u := range utxos {
+			if u.TxID == tx0.ID && u.Index == i {
+				targetUTXO = u
+				break
+			}
 		}
-		u := utxos[0]
+		if targetUTXO == nil {
+			t.Fatalf("no UTXO found at step %d", i)
+		}
 
 		tx := &Transaction{
 			Parents: []string{prevID, prevID},
-			Inputs:  []TxInput{{TxID: u.TxID, Index: u.Index}},
+			Inputs:  []TxInput{{TxID: targetUTXO.TxID, Index: targetUTXO.Index}},
 			Outputs: []TxOutput{
-				{Address: wallet.address, Value: remaining},
+				{Address: wallet.address, Value: targetUTXO.Value},
 			},
-			Timestamp: time.Now().Unix(),
+			Timestamp: baseTime + MinUTXOMaturitySeconds + int64(i),
 		}
-		wallet.signInput(t, tx, 0, u)
+		wallet.signInput(t, tx, 0, targetUTXO)
 		mineTxPow(t, dag, tx)
 		if err := dag.SubmitTx(tx); err != nil {
 			t.Fatalf("SubmitTx step %d error = %v", i, err)
 		}
 		prevID = tx.ID
-		currentAddr = wallet.address
 	}
 
 	if !dag.IsConfirmed(genesisTxID) {
@@ -930,5 +954,56 @@ func TestFutureTimestampAttack(t *testing.T) {
 
 	if err := dag.SubmitTx(tx2); err == nil {
 		t.Fatal("future-timestamp attack must be blocked by maturity: expected rejection, got nil")
+	}
+}
+
+func TestAddressIndexing(t *testing.T) {
+	t.Parallel()
+
+	alice := newTestWallet(t)
+	bob := newTestWallet(t)
+	dag := testNewDAG(t, &alice)
+
+	if bal := dag.GetBalance(bob.address); bal != 0 {
+		t.Fatalf("bob initial balance = %d, want 0", bal)
+	}
+	if utxos := dag.GetUTXOs(bob.address); len(utxos) != 0 {
+		t.Fatalf("bob initial utxos count = %d, want 0", len(utxos))
+	}
+
+	aliceUTXO := dag.GetUTXOs(alice.address)[0]
+	if bal := dag.GetBalance(alice.address); bal != TotalSupply {
+		t.Fatalf("alice initial balance = %d, want %d", bal, TotalSupply)
+	}
+
+	// Send funds from Alice to Bob
+	sendVal := int64(500)
+	changeVal := TotalSupply - sendVal
+	tx := &Transaction{
+		Parents: []string{dag.genesis, dag.genesis},
+		Inputs:  []TxInput{{TxID: aliceUTXO.TxID, Index: aliceUTXO.Index}},
+		Outputs: []TxOutput{
+			{Address: bob.address, Value: sendVal},
+			{Address: alice.address, Value: changeVal},
+		},
+		Timestamp: time.Now().Unix(),
+	}
+	alice.signInput(t, tx, 0, aliceUTXO)
+	mineTxPow(t, dag, tx)
+
+	if err := dag.SubmitTx(tx); err != nil {
+		t.Fatalf("SubmitTx() error = %v", err)
+	}
+
+	if bal := dag.GetBalance(bob.address); bal != sendVal {
+		t.Fatalf("bob balance after tx = %d, want %d", bal, sendVal)
+	}
+	if bal := dag.GetBalance(alice.address); bal != changeVal {
+		t.Fatalf("alice balance after tx = %d, want %d", bal, changeVal)
+	}
+
+	bobUTXOs := dag.GetUTXOs(bob.address)
+	if len(bobUTXOs) != 1 || bobUTXOs[0].Value != sendVal {
+		t.Fatalf("bob UTXOs = %v, want 1 UTXO of value %d", bobUTXOs, sendVal)
 	}
 }

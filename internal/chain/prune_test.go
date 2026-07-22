@@ -81,7 +81,7 @@ func TestPruneLosingConflictAfterGrace(t *testing.T) {
 			Parents:   []string{genesisTxID, lastTip},
 			Inputs:    []TxInput{{TxID: winnerUTXO.TxID, Index: winnerUTXO.Index}},
 			Outputs:   []TxOutput{{Address: winnerWallet.address, Value: winnerUTXO.Value}},
-			Timestamp: stale + int64(10+i),
+			Timestamp: winnerUTXO.CreatedAt + MinUTXOMaturitySeconds + int64(10+i),
 		}
 		winnerWallet.signInput(t, child, 0, winnerUTXO)
 		mineTxPow(t, dag, child)

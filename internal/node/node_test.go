@@ -52,6 +52,7 @@ func TestStatusHandler(t *testing.T) {
 	t.Parallel()
 
 	n := mustNewNode(t, config.Config{
+		NodeAddress:         chain.DefaultGenesisAddress(),
 		APIPort:             64552,
 		DataDir:             t.TempDir(),
 		SyncIntervalSeconds: 15,
@@ -305,6 +306,8 @@ func TestManagedTorArgs(t *testing.T) {
 		"--ControlPort", "127.0.0.1:19051",
 		"--CookieAuthentication", "0",
 		"--DataDirectory", "/tmp/sikka/tor",
+		"--Log", "notice file /tmp/sikka/tor/tor.log",
+		"--Log", "err stderr",
 	}
 	if !reflect.DeepEqual(args, want) {
 		t.Fatalf("managedTorArgs() = %v, want %v", args, want)
@@ -1258,11 +1261,12 @@ func TestSyncFromNodeCatchesUpMissingTransactions(t *testing.T) {
 
 	genesisUTXO := remoteDAG.GetUTXOs(sender.address)[0]
 	tip1, tip2 := remoteDAG.SelectTips()
+	baseTime := time.Now().Unix() - 2000
 	tx1 := &chain.Transaction{
 		Parents:   []string{tip1, tip2},
 		Inputs:    []chain.TxInput{{TxID: genesisUTXO.TxID, Index: genesisUTXO.Index}},
 		Outputs:   []chain.TxOutput{{Address: receiver.address, Value: genesisUTXO.Value}},
-		Timestamp: time.Now().Unix(),
+		Timestamp: baseTime,
 	}
 	sender.sign(t, tx1, 0, genesisUTXO)
 	mineWithDAG(t, remoteDAG, tx1, 1)
@@ -1276,7 +1280,7 @@ func TestSyncFromNodeCatchesUpMissingTransactions(t *testing.T) {
 		Parents:   []string{tip3, tip4},
 		Inputs:    []chain.TxInput{{TxID: remoteSpendable.TxID, Index: remoteSpendable.Index}},
 		Outputs:   []chain.TxOutput{{Address: sender.address, Value: remoteSpendable.Value}},
-		Timestamp: time.Now().Add(time.Second).Unix(),
+		Timestamp: baseTime + chain.MinUTXOMaturitySeconds + 1,
 	}
 	receiver.sign(t, tx2, 0, remoteSpendable)
 	mineWithDAG(t, remoteDAG, tx2, 1)
@@ -1560,9 +1564,35 @@ func newCongestedTestDAG(t *testing.T, wallet testWallet) *chain.DAG {
 		t.Fatalf("NewDAG(bootstrap) error = %v", err)
 	}
 
+	// Step 0: Spend genesis UTXO to split total supply into 100 mature outputs
+	genesisUTXO := bootstrap.GetUTXOs(wallet.address)[0]
+	const numSplit = 100
+	splitOutputs := make([]chain.TxOutput, numSplit)
+	valPerOut := chain.TotalSupply / numSplit
+	for i := 0; i < numSplit-1; i++ {
+		splitOutputs[i] = chain.TxOutput{Address: wallet.address, Value: valPerOut}
+	}
+	splitOutputs[numSplit-1] = chain.TxOutput{Address: wallet.address, Value: chain.TotalSupply - valPerOut*int64(numSplit-1)}
+
+	seedTx := &chain.Transaction{
+		Parents:   []string{bootstrap.GenesisID(), bootstrap.GenesisID()},
+		Inputs:    []chain.TxInput{{TxID: genesisUTXO.TxID, Index: genesisUTXO.Index}},
+		Outputs:   splitOutputs,
+		Timestamp: time.Now().Unix() - chain.MinUTXOMaturitySeconds - 100,
+	}
+	wallet.sign(t, seedTx, 0, genesisUTXO)
+	mineWithDAG(t, bootstrap, seedTx, 1)
+	if err := bootstrap.SubmitTx(seedTx); err != nil {
+		t.Fatalf("SubmitTx(seedSplit) error = %v", err)
+	}
+
 	startTimestamp := time.Now().Unix() - chain.PowCongestionWindowSeconds
+	utxos := bootstrap.GetUTXOs(wallet.address)
 	for offset := int64(0); offset <= chain.PowCongestionWindowSeconds; offset++ {
-		spendable := bootstrap.GetUTXOs(wallet.address)[0]
+		if int(offset) >= len(utxos) {
+			break
+		}
+		spendable := utxos[offset]
 		tip1, tip2 := bootstrap.SelectTips()
 		tx := &chain.Transaction{
 			Parents:   []string{tip1, tip2},
@@ -1840,25 +1870,46 @@ func waitForCondition(t *testing.T, timeout time.Duration, condition func() bool
 // tx.ParentPowHashes is correctly populated before mining.
 func appendLinearTestTxs(t *testing.T, dag *chain.DAG, sender, receiver testWallet, count int) []string {
 	t.Helper()
+
+	// Step 0: Spend genesis UTXO to split total supply into count mature outputs
+	genesisUTXO := dag.GetUTXOs(sender.address)[0]
+	splitOutputs := make([]chain.TxOutput, count)
+	valPerOut := genesisUTXO.Value / int64(count)
+	for i := 0; i < count-1; i++ {
+		splitOutputs[i] = chain.TxOutput{Address: sender.address, Value: valPerOut}
+	}
+	splitOutputs[count-1] = chain.TxOutput{Address: sender.address, Value: genesisUTXO.Value - valPerOut*int64(count-1)}
+
+	baseTime := time.Now().Unix() - chain.MinUTXOMaturitySeconds - 100
+	seedTx := &chain.Transaction{
+		Parents:   []string{dag.GenesisID(), dag.GenesisID()},
+		Inputs:    []chain.TxInput{{TxID: genesisUTXO.TxID, Index: genesisUTXO.Index}},
+		Outputs:   splitOutputs,
+		Timestamp: baseTime,
+	}
+	sender.sign(t, seedTx, 0, genesisUTXO)
+	mineWithDAG(t, dag, seedTx, 1)
+	if err := dag.SubmitTx(seedTx); err != nil {
+		t.Fatalf("SubmitTx(seedSplit) error = %v", err)
+	}
+
 	ids := make([]string, 0, count)
-	spender := sender
+	utxos := dag.GetUTXOs(sender.address)
 	for i := 0; i < count; i++ {
-		spendable := dag.GetUTXOs(spender.address)[0]
+		spendable := utxos[i]
 		tip1, tip2 := dag.SelectTips()
 		tx := &chain.Transaction{
 			Parents:   []string{tip1, tip2},
 			Inputs:    []chain.TxInput{{TxID: spendable.TxID, Index: spendable.Index}},
 			Outputs:   []chain.TxOutput{{Address: receiver.address, Value: spendable.Value}},
-			Timestamp: time.Now().Add(time.Duration(i+1) * time.Second).Unix(),
+			Timestamp: baseTime + chain.MinUTXOMaturitySeconds + int64(i+1),
 		}
-		spender.sign(t, tx, 0, spendable)
+		sender.sign(t, tx, 0, spendable)
 		mineWithDAG(t, dag, tx, 1)
 		if err := dag.SubmitTx(tx); err != nil {
 			t.Fatalf("SubmitTx() error = %v", err)
 		}
 		ids = append(ids, tx.ID)
-		spender = receiver
-		receiver = sender
 	}
 	return ids
 }

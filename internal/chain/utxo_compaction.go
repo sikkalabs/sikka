@@ -60,7 +60,10 @@ func (d *DAG) RunUTXOSweep() int {
 
 		// Remove from memory
 		d.mu.Lock()
-		delete(d.utxos, key)
+		if utxo, ok := d.utxos[key]; ok {
+			d.removeUTXOFromAddrIndexLocked(utxo.Address, key)
+			delete(d.utxos, key)
+		}
 		d.mu.Unlock()
 		purged++
 	}

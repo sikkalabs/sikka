@@ -32,6 +32,7 @@ type DAG struct {
 	depths      map[string]int64        // longest path from genesis
 	utxos       map[string]*UTXO        // "txid:index" → output metadata (all created outputs)
 	spendClaims map[string][]string     // "txid:index" → competing spending tx IDs
+	addrIndex   map[string]map[string]struct{} // address → set of "txid:index" keys
 	ordered     []Transaction
 	checksums     map[int][]string
 	db            *bbolt.DB
@@ -94,6 +95,7 @@ func NewDAG(opts Options) (*DAG, error) {
 		depths:                make(map[string]int64),
 		utxos:                 make(map[string]*UTXO),
 		spendClaims:           make(map[string][]string),
+		addrIndex:             make(map[string]map[string]struct{}),
 		checksums:             make(map[int][]string),
 		confirmationThreshold: threshold,
 		minPowBits:            opts.MinPowBits,
@@ -364,12 +366,25 @@ func (d *DAG) FillParentPowHashes(tx *Transaction) error {
 func (d *DAG) GetUTXOs(address string) []*UTXO {
 	d.mu.RLock()
 	defer d.mu.RUnlock()
-	available := d.effectiveUTXOsLocked()
+
+	keys := d.addrIndex[address]
+	if len(keys) == 0 {
+		return nil
+	}
+	effective := d.effectiveTxSetLocked()
 	var out []*UTXO
-	for _, u := range available {
-		if u.Address == address {
-			out = append(out, cloneUTXO(u))
+	for key := range keys {
+		u := d.utxos[key]
+		if u == nil {
+			continue
 		}
+		if !effective[u.TxID] {
+			continue
+		}
+		if canonicalSpenderLocked(d.weights, d.spendClaims[key]) != "" {
+			continue
+		}
+		out = append(out, cloneUTXO(u))
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].DAGDepth < out[j].DAGDepth })
 	return out
@@ -377,8 +392,26 @@ func (d *DAG) GetUTXOs(address string) []*UTXO {
 
 // GetBalance returns the total unspent balance for an address.
 func (d *DAG) GetBalance(address string) int64 {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+
+	keys := d.addrIndex[address]
+	if len(keys) == 0 {
+		return 0
+	}
+	effective := d.effectiveTxSetLocked()
 	var total int64
-	for _, u := range d.GetUTXOs(address) {
+	for key := range keys {
+		u := d.utxos[key]
+		if u == nil {
+			continue
+		}
+		if !effective[u.TxID] {
+			continue
+		}
+		if canonicalSpenderLocked(d.weights, d.spendClaims[key]) != "" {
+			continue
+		}
 		total += u.Value
 	}
 	return total
