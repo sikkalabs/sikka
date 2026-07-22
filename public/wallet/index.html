@@ -10,48 +10,53 @@
 </head>
 <body>
   <div id="app">
-    <main class="app-container">
+    <div class="cyber-bg">
+      <div class="orb-cyan"></div>
+      <div class="orb-blue"></div>
+    </div>
+
+    <main class="cyber-container">
       <div style="text-align: center; margin-bottom: 1.5rem;">
-        <a href="/" class="btn-secondary" style="display: inline-flex; align-items: center; gap: 0.5rem; text-decoration: none;">
-          &larr; Return to Sikka Node
+        <a href="/" class="btn-cyber-outline" style="display: inline-flex; align-items: center; gap: 0.5rem; text-decoration: none; font-size: 0.75rem;">
+          &larr; Return to Node Overview
         </a>
       </div>
 
-      <section class="mono-card stat-box">
-        <p class="eyebrow-label">Address Details</p>
-        <h1 style="margin-top: 0.5rem; word-break: break-all; font-family: var(--font-mono); font-size: 1.25rem; font-weight: 800; color: var(--text-main); text-align: center;">{{ pageTitle }}</h1>
+      <section class="cyber-card stat-box">
+        <p class="status-label">ADDRESS DETAILS</p>
+        <h1 style="margin-top: 0.5rem; word-break: break-all; font-family: var(--font-mono); font-size: 1.25rem; font-weight: 800; color: #ffffff; text-align: center;">{{ pageTitle }}</h1>
 
-        <div v-if="loading" style="margin-top: 1.5rem; color: var(--text-muted); font-size: 0.875rem;">
+        <div v-if="loading" style="margin-top: 1.5rem; color: var(--text-secondary); font-size: 0.875rem;">
           Loading address details…
         </div>
 
-        <div v-else-if="errorMessage" style="margin-top: 1.5rem; padding: 1rem 1.5rem; border-radius: 0.75rem; border: 1px solid #e11d48; color: #e11d48; font-size: 0.875rem; text-align: center;">
+        <div v-else-if="errorMessage" style="margin-top: 1.5rem; padding: 1rem 1.5rem; border-radius: 0.75rem; border: 1px solid var(--text-rose); background: rgba(244,63,94,0.1); color: var(--text-rose); font-size: 0.875rem; text-align: center;">
           <p>{{ errorMessage }}</p>
         </div>
 
         <div v-else style="margin-top: 1.5rem; width: 100%;">
-          <div class="grid-stats-3">
-            <article v-for="card in summaryCards" :key="card.label" class="mono-card stat-box" style="padding: 1rem;">
-              <p class="eyebrow-label">{{ card.label }}</p>
-              <p style="margin-top: 0.5rem; word-break: break-all; font-size: 0.875rem; font-weight: 600; color: var(--text-main);" :style="{ fontFamily: card.mono ? 'var(--font-mono)' : 'inherit' }">{{ card.value }}</p>
+          <div class="stats-grid-3">
+            <article v-for="card in summaryCards" :key="card.label" class="cyber-card stat-box" style="padding: 1rem;">
+              <p class="status-label">{{ card.label }}</p>
+              <p style="margin-top: 0.5rem; word-break: break-all; font-size: 0.875rem; font-weight: 600; color: #ffffff;" :style="{ fontFamily: card.mono ? 'var(--font-mono)' : 'inherit' }">{{ card.value }}</p>
             </article>
           </div>
 
           <section v-if="utxos.length" style="margin-top: 1.5rem;">
             <div style="display: flex; align-items: center; justify-content: center; gap: 0.5rem; margin-bottom: 0.75rem;">
-              <h2 class="eyebrow-label">Outputs / UTXOs</h2>
-              <span class="mono-badge">{{ utxos.length }}</span>
+              <h2 class="status-label">Outputs / UTXOs</h2>
+              <span class="cyber-tag" style="padding: 0.15rem 0.5rem; font-size: 10px;">{{ utxos.length }}</span>
             </div>
             <div style="display: grid; gap: 0.75rem;">
               <article v-for="(utxo) in utxos" :key="utxo.txid + ':' + utxo.index" class="status-box">
                 <div style="display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 0.5rem;">
-                  <span class="mono-badge">{{ formatSikka(utxo.value) }} SIKKA</span>
+                  <span class="cyber-tag" style="padding: 0.2rem 0.75rem; font-size: 10px;">{{ formatSikka(utxo.value) }} SIKKA</span>
                   <span :class="utxoMaturityBadgeClass(utxo)">{{ utxoMaturityLabel(utxo) }}</span>
                 </div>
-                <a :href="'/tx/' + encodeURIComponent(utxo.txid)" style="margin-top: 0.5rem; display: block; word-break: break-all; font-family: var(--font-mono); font-size: 0.875rem; color: var(--text-main); text-decoration: underline;">
+                <a :href="'/tx/' + encodeURIComponent(utxo.txid)" style="margin-top: 0.5rem; display: block; word-break: break-all; font-family: var(--font-mono); font-size: 0.875rem; color: var(--text-neon); text-decoration: underline;">
                   {{ utxo.txid }}:{{ utxo.index }}
                 </a>
-                <p style="margin-top: 0.25rem; font-size: 0.75rem; color: var(--text-muted);">{{ utxoMaturityDetail(utxo) }}</p>
+                <p style="margin-top: 0.25rem; font-size: 0.75rem; color: var(--text-secondary);">{{ utxoMaturityDetail(utxo) }}</p>
               </article>
             </div>
           </section>

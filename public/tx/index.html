@@ -10,40 +10,45 @@
 </head>
 <body>
   <div id="app">
-    <main class="app-container">
+    <div class="cyber-bg">
+      <div class="orb-cyan"></div>
+      <div class="orb-blue"></div>
+    </div>
+
+    <main class="cyber-container">
       <div style="text-align: center; margin-bottom: 1.5rem;">
-        <a href="/" class="btn-secondary" style="display: inline-flex; align-items: center; gap: 0.5rem; text-decoration: none;">
-          &larr; Return to Sikka Node
+        <a href="/" class="btn-cyber-outline" style="display: inline-flex; align-items: center; gap: 0.5rem; text-decoration: none; font-size: 0.75rem;">
+          &larr; Return to Node Overview
         </a>
       </div>
 
-      <section class="mono-card stat-box">
-        <p class="eyebrow-label">Transaction Details</p>
-        <h1 style="margin-top: 0.5rem; word-break: break-all; font-family: var(--font-mono); font-size: 1.25rem; font-weight: 800; color: var(--text-main); text-align: center;">{{ pageTitle }}</h1>
+      <section class="cyber-card stat-box">
+        <p class="status-label">TRANSACTION DETAILS</p>
+        <h1 style="margin-top: 0.5rem; word-break: break-all; font-family: var(--font-mono); font-size: 1.25rem; font-weight: 800; color: #ffffff; text-align: center;">{{ pageTitle }}</h1>
 
-        <div v-if="loading" style="margin-top: 1.5rem; color: var(--text-muted); font-size: 0.875rem;">
+        <div v-if="loading" style="margin-top: 1.5rem; color: var(--text-secondary); font-size: 0.875rem;">
           Loading transaction details…
         </div>
 
-        <div v-else-if="errorMessage" style="margin-top: 1.5rem; padding: 1rem 1.5rem; border-radius: 0.75rem; border: 1px solid #e11d48; color: #e11d48; font-size: 0.875rem; text-align: center;">
+        <div v-else-if="errorMessage" style="margin-top: 1.5rem; padding: 1rem 1.5rem; border-radius: 0.75rem; border: 1px solid var(--text-rose); background: rgba(244,63,94,0.1); color: var(--text-rose); font-size: 0.875rem; text-align: center;">
           <p>{{ errorMessage }}</p>
         </div>
 
         <div v-else style="margin-top: 1.5rem; width: 100%;">
-          <div class="grid-stats-3">
-            <article v-for="card in summaryCards" :key="card.label" class="mono-card stat-box" style="padding: 1rem;">
-              <p class="eyebrow-label">{{ card.label }}</p>
-              <p v-if="card.kind === 'badge'" class="mono-badge" style="margin-top: 0.5rem; background: var(--text-main); color: #ffffff;">
+          <div class="stats-grid-3">
+            <article v-for="card in summaryCards" :key="card.label" class="cyber-card stat-box" style="padding: 1rem;">
+              <p class="status-label">{{ card.label }}</p>
+              <p v-if="card.kind === 'badge'" class="cyber-tag" style="margin-top: 0.5rem; padding: 0.2rem 0.75rem; font-size: 10px;">
                 {{ card.value }}
               </p>
-              <p v-else style="margin-top: 0.5rem; word-break: break-all; font-size: 0.875rem; font-weight: 600; color: var(--text-main);" :style="{ fontFamily: card.mono ? 'var(--font-mono)' : 'inherit' }">{{ card.value }}</p>
+              <p v-else style="margin-top: 0.5rem; word-break: break-all; font-size: 0.875rem; font-weight: 600; color: #ffffff;" :style="{ fontFamily: card.mono ? 'var(--font-mono)' : 'inherit' }">{{ card.value }}</p>
             </article>
           </div>
 
           <section v-if="parents.length" style="margin-top: 1.5rem;">
             <div style="display: flex; align-items: center; justify-content: center; gap: 0.5rem; margin-bottom: 0.75rem;">
-              <h2 class="eyebrow-label">Parents</h2>
-              <span class="mono-badge">{{ parents.length }}</span>
+              <h2 class="status-label">Parents</h2>
+              <span class="cyber-tag" style="padding: 0.15rem 0.5rem; font-size: 10px;">{{ parents.length }}</span>
             </div>
             <div class="tips-container">
               <a v-for="parent in parents" :key="parent" :href="'/tx/' + encodeURIComponent(parent)" class="tip-link" style="max-width: 100%; font-size: 0.875rem; word-break: break-all;">
@@ -54,37 +59,37 @@
 
           <section v-if="inputs.length" style="margin-top: 1.5rem;">
             <div style="display: flex; align-items: center; justify-content: center; gap: 0.5rem; margin-bottom: 0.75rem;">
-              <h2 class="eyebrow-label">Inputs</h2>
-              <span class="mono-badge">{{ inputs.length }}</span>
+              <h2 class="status-label">Inputs</h2>
+              <span class="cyber-tag" style="padding: 0.15rem 0.5rem; font-size: 10px;">{{ inputs.length }}</span>
             </div>
             <div style="display: grid; gap: 0.75rem;">
               <article v-for="(input, index) in inputs" :key="input.txid + ':' + input.index + ':' + index" class="status-box">
                 <div style="display: flex; align-items: center; justify-content: space-between; width: 100%;">
-                  <p class="eyebrow-label">Input {{ index }}</p>
+                  <p class="status-label">Input {{ index }}</p>
                   <p style="font-size: 0.75rem; color: var(--text-muted);">Index {{ input.index ?? '—' }}</p>
                 </div>
-                <p style="margin-top: 0.5rem; word-break: break-all; font-family: var(--font-mono); font-size: 0.875rem; color: var(--text-main);">{{ input.txid || '—' }}</p>
+                <p style="margin-top: 0.5rem; word-break: break-all; font-family: var(--font-mono); font-size: 0.875rem; color: #ffffff;">{{ input.txid || '—' }}</p>
               </article>
             </div>
           </section>
 
           <section v-if="outputs.length" style="margin-top: 1.5rem;">
             <div style="display: flex; align-items: center; justify-content: center; gap: 0.5rem; margin-bottom: 0.75rem;">
-              <h2 class="eyebrow-label">Outputs</h2>
-              <span class="mono-badge">{{ outputs.length }}</span>
+              <h2 class="status-label">Outputs</h2>
+              <span class="cyber-tag" style="padding: 0.15rem 0.5rem; font-size: 10px;">{{ outputs.length }}</span>
             </div>
             <div style="display: grid; gap: 0.75rem;">
               <article v-for="(output, index) in outputs" :key="(output.address || 'unknown') + ':' + index" class="status-box">
                 <div style="display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 0.5rem;">
-                  <p class="eyebrow-label">Output {{ index }}</p>
-                  <span class="mono-badge">{{ formatSikka(output.value) }} SIKKA</span>
+                  <p class="status-label">Output {{ index }}</p>
+                  <span class="cyber-tag" style="padding: 0.2rem 0.75rem; font-size: 10px;">{{ formatSikka(output.value) }} SIKKA</span>
                   <span :class="outputMaturityBadgeClass(index)">{{ outputMaturityLabel(index) }}</span>
                 </div>
-                <a v-if="output.address" :href="'/wallet/' + encodeURIComponent(output.address)" style="margin-top: 0.5rem; display: block; word-break: break-all; font-family: var(--font-mono); font-size: 0.875rem; color: var(--text-main); text-decoration: underline;">
+                <a v-if="output.address" :href="'/wallet/' + encodeURIComponent(output.address)" style="margin-top: 0.5rem; display: block; word-break: break-all; font-family: var(--font-mono); font-size: 0.875rem; color: var(--text-neon); text-decoration: underline;">
                   {{ output.address }}
                 </a>
                 <p v-else style="margin-top: 0.5rem; font-size: 0.875rem; color: var(--text-muted);">No address</p>
-                <p style="margin-top: 0.25rem; font-size: 0.75rem; color: var(--text-muted);">{{ outputMaturityDetail(index) }}</p>
+                <p style="margin-top: 0.25rem; font-size: 0.75rem; color: var(--text-secondary);">{{ outputMaturityDetail(index) }}</p>
               </article>
             </div>
           </section>
