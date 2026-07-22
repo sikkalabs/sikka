@@ -1,5 +1,5 @@
 {
-  "software_version": "0.2.1",
+  "software_version": "0.2.2",
   "protocol_version": "2",
   "capabilities": [
     "sync_v1",

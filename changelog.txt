@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.2.1
+## 0.2.2
 
 - Added `GET /metrics` Prometheus endpoint for Grafana node telemetry.
 - Implemented O(1) LRU Caching and offloading for historical confirmed transactions to optimize memory scaling.
