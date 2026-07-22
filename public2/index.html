@@ -24,19 +24,31 @@
     <div class="app-bg"></div>
 
     <main class="layout-container">
-      <!-- Navbar Header -->
+      <!-- Enhanced Top Navbar -->
       <header class="navbar">
         <div class="nav-left">
-          <img src="/public/sikka.svg" alt="Sikka Logo" class="nav-logo" />
-          <div>
-            <span class="nav-brand-title">Sikka Node</span>
-            <span class="badge" style="margin-left: 0.5rem;">MAINNET</span>
-            <span id="navNodeMessage" class="badge" style="display: none; margin-left: 0.375rem;"></span>
-          </div>
+          <a href="/" style="display: flex; align-items: center; gap: 0.875rem; text-decoration: none;">
+            <img src="/public/sikka.svg" alt="Sikka Logo" class="nav-logo" />
+            <div style="display: flex; flex-direction: column;">
+              <div style="display: flex; align-items: center; gap: 0.5rem;">
+                <span class="nav-brand-title">Sikka Node</span>
+                <span class="badge">MAINNET</span>
+              </div>
+              <span id="navNodeMessage" class="nav-sub-msg" style="display: none;"></span>
+            </div>
+          </a>
         </div>
 
-        <div>
-          <span class="badge badge-emerald"><span class="pulse-indicator"></span>ONLINE</span>
+        <div class="nav-right">
+          <nav class="nav-links">
+            <a href="/" class="nav-link active">Dashboard</a>
+            <a href="https://sikkalabs.com/" target="_blank" rel="noreferrer" class="nav-link">Website ↗</a>
+            <a href="https://github.com/sikkalabs/sikka" target="_blank" rel="noreferrer" class="nav-link">GitHub ↗</a>
+          </nav>
+          <div class="status-pill">
+            <span class="pulse-indicator"></span>
+            <span class="status-text">ONLINE</span>
+          </div>
         </div>
       </header>
 
