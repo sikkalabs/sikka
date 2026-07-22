@@ -210,6 +210,12 @@ html, body {
   border-color: var(--border-red);
 }
 
+.badge-white {
+  background: rgba(255, 255, 255, 0.08);
+  color: #ffffff;
+  border-color: rgba(255, 255, 255, 0.25);
+}
+
 .pulse-indicator {
   width: 0.5rem;
   height: 0.5rem;
