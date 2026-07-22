@@ -137,8 +137,10 @@
           }
 
           const data = res.data || {};
-          const utxos = Array.isArray(data.utxos) ? data.utxos : [];
-          const totalBalance = utxos.reduce((sum, u) => sum + toBigIntInteger(u.value || '0'), 0n);
+          const meta = (data.meta && typeof data.meta === 'object') ? data.meta : {};
+          const utxos = Array.isArray(data.items) ? data.items : (Array.isArray(data.utxos) ? data.utxos : []);
+          const totalBalance = meta.balance != null ? toBigIntInteger(meta.balance) : utxos.reduce((sum, u) => sum + toBigIntInteger(u.value || '0'), 0n);
+          const utxoCount = meta.utxo_count != null ? meta.utxo_count : utxos.length;
 
           // Summary
           const summaryCards = document.getElementById('summaryCards');
@@ -149,7 +151,7 @@
             </div>
             <div class="metric-card">
               <p class="metric-label">UTXO Count</p>
-              <p class="metric-val" style="font-size: 1.25rem;">${utxos.length}</p>
+              <p class="metric-val" style="font-size: 1.25rem;">${utxoCount}</p>
             </div>
           `;
 
