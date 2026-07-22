@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 )
 
 func (n *Node) getJSON(ctx context.Context, endpoint string, payload any) error {
@@ -17,6 +18,7 @@ func (n *Node) getJSON(ctx context.Context, endpoint string, payload any) error 
 	}
 	req.Header.Set("Accept", "application/json")
 
+	start := time.Now()
 	resp, err := n.outboundHTTPClient().Do(req)
 	if err != nil {
 		return err
@@ -28,8 +30,10 @@ func (n *Node) getJSON(ctx context.Context, endpoint string, payload any) error 
 		return fmt.Errorf("http %d from %s: %s", resp.StatusCode, endpoint, strings.TrimSpace(string(body)))
 	}
 	if err := json.NewDecoder(io.LimitReader(resp.Body, maxResponseBodyBytes)).Decode(payload); err != nil {
+		n.penalizeNode(endpoint, PenaltyInvalidPayload, "invalid JSON response")
 		return err
 	}
+	n.recordPeerLatency(endpoint, time.Since(start))
 	return nil
 }
 
@@ -45,6 +49,7 @@ func (n *Node) postJSONAndDecode(ctx context.Context, endpoint string, reqPayloa
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
 
+	start := time.Now()
 	resp, err := n.outboundHTTPClient().Do(req)
 	if err != nil {
 		return err
@@ -56,8 +61,10 @@ func (n *Node) postJSONAndDecode(ctx context.Context, endpoint string, reqPayloa
 		return fmt.Errorf("http %d from %s: %s", resp.StatusCode, endpoint, strings.TrimSpace(string(msg)))
 	}
 	if err := json.NewDecoder(io.LimitReader(resp.Body, maxResponseBodyBytes)).Decode(respPayload); err != nil {
+		n.penalizeNode(endpoint, PenaltyInvalidPayload, "invalid JSON response")
 		return err
 	}
+	n.recordPeerLatency(endpoint, time.Since(start))
 	return nil
 }
 func (n *Node) postJSON(ctx context.Context, endpoint string, payload any, relay relayContext) error {
@@ -79,6 +86,7 @@ func (n *Node) postJSON(ctx context.Context, endpoint string, payload any, relay
 	}
 	req.Header.Set(relayHeaderHop, strconv.Itoa(relay.hop))
 
+	start := time.Now()
 	resp, err := n.outboundHTTPClient().Do(req)
 	if err != nil {
 		return err
@@ -86,6 +94,7 @@ func (n *Node) postJSON(ctx context.Context, endpoint string, payload any, relay
 	defer resp.Body.Close()
 
 	if resp.StatusCode == http.StatusOK {
+		n.recordPeerLatency(endpoint, time.Since(start))
 		return nil
 	}
 	bodyText, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<10))

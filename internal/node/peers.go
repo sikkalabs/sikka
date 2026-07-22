@@ -87,7 +87,24 @@ func recordAddressURLs(record *nodeRecord) []string {
 	return addresses
 }
 
+func extractBaseNodeURL(rawEndpoint string) string {
+	parsed, err := normalizeDiscoveredNodeURL(rawEndpoint)
+	if err == nil {
+		return parsed
+	}
+	if idx := strings.Index(rawEndpoint, "/v1/"); idx != -1 {
+		return rawEndpoint[:idx]
+	}
+	return rawEndpoint
+}
+
 func (n *Node) selectPeerAddress(record *nodeRecord, now time.Time, availableOnly bool) string {
+	if record == nil {
+		return ""
+	}
+	if availableOnly && !record.bannedUntil.IsZero() && now.Before(record.bannedUntil) {
+		return ""
+	}
 	addresses := recordAddressURLs(record)
 	if len(addresses) == 0 {
 		return ""
@@ -181,6 +198,70 @@ func (n *Node) topSyncCandidateURLs(limit int) []string {
 	return out
 }
 
+func (n *Node) recordPeerLatency(nodeURL string, rtt time.Duration) {
+	normalized, err := normalizeDiscoveredNodeURL(extractBaseNodeURL(nodeURL))
+	if err != nil {
+		return
+	}
+	n.nodeBookMu.Lock()
+	defer n.nodeBookMu.Unlock()
+	_, record, addressState := n.findKnownNodeByAddressLocked(normalized)
+	if record == nil || addressState == nil {
+		return
+	}
+	if addressState.samples == 0 {
+		addressState.latencyEMA = rtt
+	} else {
+		addressState.latencyEMA = time.Duration(latencyAlpha*float64(rtt) + (1-latencyAlpha)*float64(addressState.latencyEMA))
+	}
+	addressState.samples++
+}
+
+func (n *Node) penalizeNode(nodeURL string, penalty int, reason string) {
+	normalized, err := normalizeDiscoveredNodeURL(extractBaseNodeURL(nodeURL))
+	if err != nil {
+		return
+	}
+	n.nodeBookMu.Lock()
+	defer n.nodeBookMu.Unlock()
+	key, record, addressState := n.findKnownNodeByAddressLocked(normalized)
+	if record == nil {
+		key = peerRecordKey(normalized)
+		record = &nodeRecord{score: nodeInitialScore, lastSeen: time.Now(), addresses: make(map[string]*addressRecord)}
+		addressState = &addressRecord{url: normalized, lastSeen: record.lastSeen}
+		record.addresses[normalized] = addressState
+		n.knownNodes[key] = record
+	}
+	record.banScore += penalty
+	if record.banScore >= maxBanScore {
+		record.bannedUntil = time.Now().Add(defaultBanDuration)
+		record.banReason = reason
+		n.log.Warn("peer banned", "url", normalized, "reason", reason, "score", record.banScore, "until", record.bannedUntil)
+	}
+}
+
+func (n *Node) banNode(nodeURL string, duration time.Duration, reason string) {
+	if duration <= 0 {
+		duration = defaultBanDuration
+	}
+	n.penalizeNode(nodeURL, maxBanScore, reason)
+}
+
+func (n *Node) unbanNode(nodeURL string) {
+	normalized, err := normalizeDiscoveredNodeURL(extractBaseNodeURL(nodeURL))
+	if err != nil {
+		return
+	}
+	n.nodeBookMu.Lock()
+	defer n.nodeBookMu.Unlock()
+	_, record, _ := n.findKnownNodeByAddressLocked(normalized)
+	if record != nil {
+		record.banScore = 0
+		record.bannedUntil = time.Time{}
+		record.banReason = ""
+	}
+}
+
 func (n *Node) scoredNodeRecords(limit int, availableOnly bool) []*nodeRecord {
 	now := time.Now()
 	n.nodeBookMu.RLock()
@@ -196,8 +277,20 @@ func (n *Node) scoredNodeRecords(limit int, availableOnly bool) []*nodeRecord {
 	}
 	n.nodeBookMu.RUnlock()
 	sort.Slice(records, func(i, j int) bool {
+		iBanned := !records[i].bannedUntil.IsZero() && now.Before(records[i].bannedUntil)
+		jBanned := !records[j].bannedUntil.IsZero() && now.Before(records[j].bannedUntil)
+		if iBanned != jBanned {
+			return !iBanned
+		}
 		if records[i].score != records[j].score {
 			return records[i].score > records[j].score
+		}
+		addrI := n.selectPeerAddress(records[i], now, false)
+		addrJ := n.selectPeerAddress(records[j], now, false)
+		stateI := records[i].addresses[addrI]
+		stateJ := records[j].addresses[addrJ]
+		if stateI != nil && stateJ != nil && stateI.latencyEMA > 0 && stateJ.latencyEMA > 0 && stateI.latencyEMA != stateJ.latencyEMA {
+			return stateI.latencyEMA < stateJ.latencyEMA
 		}
 		if records[i].lastSeen.Equal(records[j].lastSeen) {
 			return nodeRecordSortKey(records[i]) < nodeRecordSortKey(records[j])
@@ -336,6 +429,11 @@ func (n *Node) markNodeFailure(nodeURL string, failure error) {
 	addressState.failureCount++
 	addressState.lastFailed = now
 	addressState.nextRetryAt = now.Add(nextNodeRetryDelay(addressState.failureCount))
+	record.banScore += PenaltyTransientFailure
+	if record.banScore >= maxBanScore && record.bannedUntil.IsZero() {
+		record.bannedUntil = now.Add(defaultBanDuration)
+		record.banReason = reason
+	}
 	n.nodeBookMu.Unlock()
 	retryAfter := time.Until(addressState.nextRetryAt).Round(time.Second)
 	if retryAfter < 0 {
@@ -398,6 +496,9 @@ func (n *Node) touchKnownNode(nodeURL string) {
 		state.lastFailed = time.Time{}
 		state.failureCount = 0
 		state.nextRetryAt = time.Time{}
+		if record.banScore > 0 {
+			record.banScore--
+		}
 	}
 }
 

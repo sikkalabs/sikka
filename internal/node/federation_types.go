@@ -28,6 +28,14 @@ const (
 	nodeFailureBackoffMax  = 15 * time.Minute
 	nodeStaleAfter         = 24 * time.Hour
 
+	maxBanScore             = 100
+	defaultBanDuration      = 24 * time.Hour
+	latencyAlpha            = 0.2
+	PenaltyTransientFailure = 5
+	PenaltyInvalidPayload   = 30
+	PenaltyProtocolMismatch = 50
+	PenaltyCryptoViolation  = 100
+
 	// maxResponseBodyBytes caps JSON responses from remote peers to prevent
 	// memory exhaustion attacks. ML-DSA-87 transactions are ~15 KB each in
 	// JSON (5184-char pubkey + 9254-char sig hex), so 200 tx/page ≈ 3 MiB.
@@ -154,6 +162,8 @@ type addressRecord struct {
 	lastFailed   time.Time
 	failureCount int
 	nextRetryAt  time.Time
+	latencyEMA   time.Duration
+	samples      int
 }
 
 type nodeRecord struct {
@@ -166,6 +176,9 @@ type nodeRecord struct {
 	// with (either no-op match or full catch-up). Used as a high-quality
 	// known_size hint for future syncs with this specific peer.
 	lastMatchedSize int
+	banScore        int
+	bannedUntil     time.Time
+	banReason       string
 }
 
 type syncAttemptResult struct {
