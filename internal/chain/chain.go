@@ -2,6 +2,8 @@ package chain
 
 import (
 	"fmt"
+	"math/bits"
+	"strconv"
 )
 
 const (
@@ -114,7 +116,7 @@ func FormatSikka(chillar int64) string {
 
 // utxoKey returns the canonical string key for a UTXO.
 func utxoKey(txid string, index int) string {
-	return fmt.Sprintf("%s:%d", txid, index)
+	return txid + ":" + strconv.Itoa(index)
 }
 
 // txPowLeadingZeroBits counts the number of leading zero bits in the
@@ -127,21 +129,16 @@ func txPowLeadingZeroBits(tx *Transaction) (int, error) {
 	return leadingZeroBits(hash[:]), nil
 }
 
-// leadingZeroBits counts the number of leading zero bits in a byte slice.
+// leadingZeroBits counts the number of leading zero bits in a byte slice using math/bits intrinsic.
 func leadingZeroBits(b []byte) int {
 	count := 0
 	for _, byt := range b {
 		if byt == 0 {
 			count += 8
-			continue
+		} else {
+			count += bits.LeadingZeros8(byt)
+			break
 		}
-		for bit := 7; bit >= 0; bit-- {
-			if byt&(1<<uint(bit)) != 0 {
-				return count
-			}
-			count++
-		}
-		break
 	}
 	return count
 }

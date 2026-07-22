@@ -1089,6 +1089,7 @@ func TestNodeBookPersistsDiscoveredNodesAcrossRestart(t *testing.T) {
 	if _, ok, err := n.addKnownNode("https://node-one.example.com", false, true); err != nil || !ok {
 		t.Fatal("expected discovered node to be accepted")
 	}
+	_ = n.Close()
 
 	restarted := mustNewNode(t, config.Config{APIPort: 18092, DataDir: dataDir, SyncIntervalSeconds: 1})
 	if restarted.knownNodeCount() != 1 {
@@ -1116,6 +1117,8 @@ func TestPruneKnownNodesEvictsDeadNodeAndUpdatesNodeBook(t *testing.T) {
 	if removed := n.pruneKnownNodes(time.Now()); removed != 1 {
 		t.Fatalf("pruneKnownNodes() removed %d nodes, want 1", removed)
 	}
+	_ = n.Close()
+
 	restarted := mustNewNode(t, config.Config{APIPort: 18094, DataDir: dataDir, SyncIntervalSeconds: 1})
 	if restarted.knownNodeCount() != 0 {
 		t.Fatalf("knownNodeCount() after restart = %d, want 0", restarted.knownNodeCount())
@@ -1536,6 +1539,7 @@ func mustNewNode(t *testing.T, cfg config.Config) *Node {
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}
+	t.Cleanup(func() { _ = n.Close() })
 	n.torHTTPClient = &http.Client{Timeout: 10 * time.Second}
 	return n
 }

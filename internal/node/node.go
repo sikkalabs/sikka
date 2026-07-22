@@ -154,6 +154,13 @@ func (n *Node) advertisedAddresses() []string {
 func (n *Node) outboundHTTPClient() *http.Client {
 	return n.torHTTPClient
 }
+
+func (n *Node) Close() error {
+	if n == nil || n.dag == nil {
+		return nil
+	}
+	return n.dag.Close()
+}
 func (n *Node) Run(ctx context.Context) error {
 	runCtx, cancel := context.WithCancel(ctx)
 	defer cancel()

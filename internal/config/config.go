@@ -5,7 +5,6 @@ import (
 	"encoding/hex"
 	"fmt"
 	"net"
-	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -145,26 +144,6 @@ func NodePrivateKeySeed(raw string) ([]byte, error) {
 	return sum[:], nil
 }
 
-func normalizeNodeURL(raw string) (string, error) {
-	parsed, err := url.Parse(strings.TrimSpace(raw))
-	if err != nil {
-		return "", err
-	}
-	if parsed.Scheme != "http" && parsed.Scheme != "https" {
-		return "", fmt.Errorf("scheme must be http or https")
-	}
-	if parsed.Host == "" {
-		return "", fmt.Errorf("host is required")
-	}
-	if parsed.RawQuery != "" || parsed.Fragment != "" {
-		return "", fmt.Errorf("query and fragment are not allowed")
-	}
-	parsed.Path = strings.TrimRight(parsed.EscapedPath(), "/")
-	if parsed.Path == "." {
-		parsed.Path = ""
-	}
-	return parsed.String(), nil
-}
 
 func (c Config) APIListenAddress() string {
 	return net.JoinHostPort("0.0.0.0", strconv.Itoa(c.APIPort))

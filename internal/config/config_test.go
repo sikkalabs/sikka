@@ -161,18 +161,4 @@ func TestLoadFromEnvAcceptsNodeDisplayFields(t *testing.T) {
 	}
 }
 
-func TestNormalizeNodeURL(t *testing.T) {
-	t.Parallel()
 
-	got, err := normalizeNodeURL("https://node.example.com/")
-	if err != nil {
-		t.Fatalf("normalizeNodeURL() error = %v", err)
-	}
-	if got != "https://node.example.com" {
-		t.Fatalf("normalizeNodeURL() = %q, want %q", got, "https://node.example.com")
-	}
-
-	if _, err := normalizeNodeURL("ws://relay.example.com"); err == nil {
-		t.Fatal("expected invalid scheme to fail")
-	}
-}
