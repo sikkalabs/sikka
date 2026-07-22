@@ -390,6 +390,69 @@ func (d *DAG) GetUTXOs(address string) []*UTXO {
 	return out
 }
 
+// GetAddressTransactions returns all canonical transactions involving an address,
+// ordered by DAG depth & timestamp (most recent first).
+func (d *DAG) GetAddressTransactions(address string) []Transaction {
+	normalized, err := NormalizeAddress(address)
+	if err != nil {
+		return nil
+	}
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+
+	effective := d.effectiveTxSetLocked()
+	matchedIDs := make(map[string]struct{})
+
+	for id, tx := range d.txs {
+		if tx == nil || !effective[id] {
+			continue
+		}
+		for _, out := range tx.Outputs {
+			if out.Address == normalized {
+				matchedIDs[id] = struct{}{}
+				break
+			}
+		}
+		if _, ok := matchedIDs[id]; ok {
+			continue
+		}
+		for _, in := range tx.Inputs {
+			key := utxoKey(in.TxID, in.Index)
+			if claims, ok := d.spendClaims[key]; ok {
+				if parentTx := d.txs[in.TxID]; parentTx != nil && in.Index < len(parentTx.Outputs) {
+					if parentTx.Outputs[in.Index].Address == normalized {
+						if canonicalSpenderLocked(d.weights, claims) == id {
+							matchedIDs[id] = struct{}{}
+							break
+						}
+					}
+				}
+			}
+		}
+	}
+
+	out := make([]Transaction, 0, len(matchedIDs))
+	for id := range matchedIDs {
+		if tx := d.getTransactionLocked(id); tx != nil {
+			out = append(out, *cloneTransaction(tx))
+		}
+	}
+
+	sort.Slice(out, func(i, j int) bool {
+		leftDepth := d.depths[out[i].ID]
+		rightDepth := d.depths[out[j].ID]
+		if leftDepth != rightDepth {
+			return leftDepth > rightDepth
+		}
+		if out[i].Timestamp != out[j].Timestamp {
+			return out[i].Timestamp > out[j].Timestamp
+		}
+		return out[i].ID > out[j].ID
+	})
+
+	return out
+}
+
 // GetBalance returns the total unspent balance for an address.
 func (d *DAG) GetBalance(address string) int64 {
 	d.mu.RLock()

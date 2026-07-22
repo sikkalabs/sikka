@@ -131,3 +131,108 @@ func (n *Node) handleSyncStatus(w http.ResponseWriter, _ *http.Request) {
 		"order":            syncOrderVersion,
 	})
 }
+
+type dagTipsResponse struct {
+	Tips            []string `json:"tips"`
+	TipCount        int      `json:"tip_count"`
+	MaxDAGDepth     int64    `json:"max_dag_depth"`
+	TipsFingerprint string   `json:"tips_fingerprint"`
+}
+
+func (n *Node) handleDAGTips(w http.ResponseWriter, _ *http.Request) {
+	summary := n.localSyncDAGSummary()
+	tips := n.dag.Tips()
+	n.writeJSON(w, http.StatusOK, dagTipsResponse{
+		Tips:            tips,
+		TipCount:        summary.TipCount,
+		MaxDAGDepth:     summary.MaxDAGDepth,
+		TipsFingerprint: summary.TipsFingerprint,
+	})
+}
+
+type peerTelemetryItem struct {
+	Address     string     `json:"address"`
+	Score       int        `json:"score"`
+	LatencyMs   int64      `json:"latency_ms"`
+	LastSeen    time.Time  `json:"last_seen"`
+	LastSync    time.Time  `json:"last_sync,omitempty"`
+	Bootstrap   bool       `json:"bootstrap"`
+	Banned      bool       `json:"banned"`
+	BannedUntil *time.Time `json:"banned_until,omitempty"`
+	BanReason   string     `json:"ban_reason,omitempty"`
+}
+
+type peerTelemetryResponse struct {
+	Peers       []peerTelemetryItem `json:"peers"`
+	TotalKnown  int                 `json:"total_known"`
+	BannedCount int                 `json:"banned_count"`
+}
+
+func (n *Node) handlePeers(w http.ResponseWriter, _ *http.Request) {
+	now := time.Now()
+	n.nodeBookMu.RLock()
+	peers := make([]peerTelemetryItem, 0, len(n.knownNodes))
+	bannedCount := 0
+
+	for _, record := range n.knownNodes {
+		if record == nil || shouldPruneNode(record, now) {
+			continue
+		}
+		addr := n.selectPeerAddress(record, now, false)
+		if addr == "" {
+			continue
+		}
+		state := record.addresses[addr]
+		latencyMs := int64(0)
+		if state != nil && state.latencyEMA > 0 {
+			latencyMs = state.latencyEMA.Milliseconds()
+		}
+		isBanned := !record.bannedUntil.IsZero() && now.Before(record.bannedUntil)
+		var bannedUntilPtr *time.Time
+		if isBanned {
+			bannedCount++
+			bannedUntilPtr = &record.bannedUntil
+		}
+
+		item := peerTelemetryItem{
+			Address:     addr,
+			Score:       record.score,
+			LatencyMs:   latencyMs,
+			LastSeen:    record.lastSeen,
+			LastSync:    record.lastSync,
+			Bootstrap:   record.bootstrap,
+			Banned:      isBanned,
+			BannedUntil: bannedUntilPtr,
+			BanReason:   record.banReason,
+		}
+		peers = append(peers, item)
+	}
+	n.nodeBookMu.RUnlock()
+
+	n.writeJSON(w, http.StatusOK, peerTelemetryResponse{
+		Peers:       peers,
+		TotalKnown:  len(peers),
+		BannedCount: bannedCount,
+	})
+}
+
+type addressHistoryResponse struct {
+	Address      string              `json:"address"`
+	Transactions []chain.Transaction `json:"transactions"`
+	Count        int                 `json:"count"`
+}
+
+func (n *Node) handleAddressHistory(w http.ResponseWriter, r *http.Request) {
+	rawAddress := r.PathValue("address")
+	normalized, err := chain.NormalizeAddress(rawAddress)
+	if err != nil {
+		n.writeErrorResponse(w, http.StatusBadRequest, "invalid_address", err.Error())
+		return
+	}
+	txs := n.dag.GetAddressTransactions(normalized)
+	n.writeJSON(w, http.StatusOK, addressHistoryResponse{
+		Address:      normalized,
+		Transactions: txs,
+		Count:        len(txs),
+	})
+}

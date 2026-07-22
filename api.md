@@ -56,21 +56,24 @@ Paged list routes return:
 
 ## Route Summary
 
-| Method | Path                     | Purpose                                                    |
+| Method | Path | Purpose |
 | ------ | ------------------------ | ---------------------------------------------------------- |
-| `GET`  | `/`                      | Node homepage                                              |
-| `GET`  | `/healthz`               | Process health check                                       |
-| `GET`  | `/metrics`               | Prometheus metrics endpoint for Grafana monitoring         |
-| `GET`  | `/v1/status`             | Runtime, DAG, and Tor status                               |
-| `GET`  | `/v1/tx/{txid}/weight`   | Cumulative weight and confirmation state for a transaction |
-| `GET`  | `/v1/sync/status`        | Federation sync metadata (caught-up check via tips_fingerprint + dag_size) |
-| `POST` | `/v1/sync`               | `sync_v1` federation catch-up; returns exactly the transactions the caller is missing |
-| `GET/POST` | `/v1/sync/tail`      | Recent transactions from the end (or after_global). Primary for light clients / history |
-| `GET`  | `/v1/discovery/nodes`    | Known peer directory                                       |
-| `POST` | `/v1/discovery/announce` | Announce a node address set                                |
-| `GET`  | `/v1/tx/{txid}`          | Transaction lookup                                         |
-| `GET`  | `/v1/address/{address}`  | Address summary and spendable outputs                      |
-| `POST` | `/v1/tx/submit`          | Submit a DAG transaction                                   |
+| `GET` | `/` | Node homepage |
+| `GET` | `/healthz` | Process health check |
+| `GET` | `/metrics` | Prometheus metrics endpoint for Grafana monitoring |
+| `GET` | `/v1/status` | Runtime, DAG, and Tor status |
+| `GET` | `/v1/dag/tips` | Current DAG tips and unconfirmed frontier |
+| `GET` | `/v1/peers` | Peer health telemetry, RTT latency, and ban status |
+| `GET` | `/v1/tx/{txid}/weight` | Cumulative weight and confirmation state for a transaction |
+| `GET` | `/v1/sync/status` | Federation sync metadata (caught-up check via tips_fingerprint + dag_size) |
+| `POST` | `/v1/sync` | `sync_v1` federation catch-up; returns exactly the transactions the caller is missing |
+| `GET/POST` | `/v1/sync/tail` | Recent transactions from the end (or after_global). Primary for light clients / history |
+| `GET` | `/v1/discovery/nodes` | Known peer directory |
+| `POST` | `/v1/discovery/announce` | Announce a node address set |
+| `GET` | `/v1/tx/{txid}` | Transaction lookup |
+| `GET` | `/v1/address/{address}` | Address summary and spendable outputs |
+| `GET` | `/v1/address/{address}/history` | Historical transaction ledger for an address |
+| `POST` | `/v1/tx/submit` | Submit a DAG transaction |
 
 ## Health And Runtime
 
@@ -363,6 +366,69 @@ Example response:
     "balance": 125000000,
     "utxo_count": 1
   }
+}
+```
+
+### `GET /v1/dag/tips`
+
+Returns the current active unconfirmed frontier (tips) of the DAG. Wallets, dApps, and autonomous agents use this endpoint to pick parent transaction IDs (`tx.Parents`) when mining/building new transactions.
+
+Example response:
+
+```json
+{
+  "tips": [
+    "7f9a2b5e0c1a8d3f6b9c4e2a5f8b1c4d7e0a3b6c9d2e5f8a1b4c7d0e3f6a9b2c",
+    "3c8d1e4f7a0b3c6d9e2f5a8b1c4d7e0a3b6c9d2e5f8a1b4c7d0e3f6a9b2c5d8e"
+  ],
+  "tip_count": 2,
+  "max_dag_depth": 1420,
+  "tips_fingerprint": "a1b2c3d4e5f6..."
+}
+```
+
+### `GET /v1/peers`
+
+Returns detailed P2P peer telemetry including RTT latency Exponential Moving Average (EMA), node scores, connection activity, and active ban status.
+
+Example response:
+
+```json
+{
+  "peers": [
+    {
+      "address": "http://5t6u742nvbuqlfeuzueiqcbifkepcfbr7nz2mvofdmusnxtrk3w2oaqd.onion",
+      "score": 10,
+      "latency_ms": 142,
+      "last_seen": "2026-07-23T04:20:00Z",
+      "bootstrap": false,
+      "banned": false
+    }
+  ],
+  "total_known": 1,
+  "banned_count": 0
+}
+```
+
+### `GET /v1/address/{address}/history`
+
+Returns the full historical transaction ledger for a given address (both incoming outputs and outgoing spent inputs), ordered by DAG depth & timestamp (most recent first).
+
+Example response:
+
+```json
+{
+  "address": "sikka1pd6hpxxz9664h4h3scf8cazdlan33srrg4myywla382avn75rn0fsr537k6",
+  "transactions": [
+    {
+      "id": "8ae7070941b21041927ec10ab9cfc30dcd399b6619fd7c809ec6e66df90f70d2",
+      "parents": [ ... ],
+      "inputs": [ ... ],
+      "outputs": [ ... ],
+      "timestamp": 1710000000
+    }
+  ],
+  "count": 1
 }
 ```
 

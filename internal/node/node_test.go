@@ -568,7 +568,7 @@ func TestStandaloneDAGSummaryRoutesRemoved(t *testing.T) {
 
 	n := mustNewNode(t, config.Config{APIPort: 64552, DataDir: t.TempDir()})
 
-	for _, path := range []string{"/v1/chain/info", "/v1/dag/tips", "/v1/dag/depth"} {
+	for _, path := range []string{"/v1/chain/info", "/v1/dag/depth"} {
 		req := httptest.NewRequest(http.MethodGet, path, nil)
 		rec := httptest.NewRecorder()
 		n.routes().ServeHTTP(rec, req)
