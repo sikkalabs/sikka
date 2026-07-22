@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.2.1
+
+- Added `GET /metrics` Prometheus endpoint for Grafana node telemetry.
+- Implemented O(1) LRU Caching and offloading for historical confirmed transactions to optimize memory scaling.
+- Decoupled web wallet UI and WASM binaries in favor of official `sikkalabs/sikka-sdk`.
+- Upgraded Go runtime toolchain to Go 1.23.0.
+- Optimized Dockerfile with BuildKit cache mounts, ldflags binary stripping, ca-certificates, and HEALTHCHECK directive.
+- Added multi-arch automated dev workflow (`dev.yml`).
+
 ## 0.2.0
 
 - Added Deep Finality Guard (Witness Stripping) to permanently delete old ML-DSA-87 signatures, saving massive disk space.
