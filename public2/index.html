@@ -24,7 +24,7 @@
     <div class="app-bg"></div>
 
     <main class="layout-container">
-      <!-- Navbar with Integrated Search & Theme Toggle -->
+      <!-- Navbar Header -->
       <header class="navbar">
         <div class="nav-left">
           <img src="/public/sikka.svg" alt="Sikka Logo" class="nav-logo" />
@@ -35,15 +35,21 @@
           </div>
         </div>
 
-        <form id="searchForm" class="nav-search-form" autocomplete="off">
-          <input id="searchInput" type="text" spellcheck="false"
-            placeholder="Search 64-char TxID or sikka1… address" class="nav-search-input" />
-          <span class="kbd-shortcut" id="kbdShortcut">⌘K</span>
-          <button type="submit" class="btn-search">Search</button>
-        </form>
+        <div>
+          <span class="badge badge-emerald"><span class="pulse-indicator"></span>ONLINE</span>
+        </div>
       </header>
 
-      <p id="searchFeedback" style="display: none; margin-bottom: 1.25rem; font-size: 0.875rem;"></p>
+      <!-- Full Column Explorer Search Section -->
+      <section class="panel search-section" style="margin-bottom: 1.75rem;">
+        <form id="searchForm" class="nav-search-form" autocomplete="off">
+          <input id="searchInput" type="text" spellcheck="false"
+            placeholder="Search transaction by 64-character TxID or address by sikka1…" class="nav-search-input" />
+          <span class="kbd-shortcut" id="kbdShortcut">⌘K</span>
+          <button type="submit" class="btn-search">Search Explorer</button>
+        </form>
+        <p id="searchFeedback" style="display: none; margin-top: 0.75rem; font-size: 0.875rem;"></p>
+      </section>
 
       <!-- Main 2-Column Dashboard Grid -->
       <div class="dashboard-grid">
