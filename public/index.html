@@ -7,7 +7,7 @@
   <title>Sikka Node</title>
   <meta name="description"
     content="Sikka node dashboard for chain status, DAG tips, network topology, and peer recovery." />
-  <meta name="theme-color" content="#020617" />
+  <meta name="theme-color" content="#ffffff" />
   <meta name="robots" content="index,follow" />
   <meta property="og:type" content="website" />
   <meta property="og:title" content="Sikka Node" />
@@ -27,131 +27,121 @@
 
 <body>
   <div id="app">
-    <div class="bg-ambient">
-      <div class="glow-1"></div>
-      <div class="glow-2"></div>
-      <div class="glow-3"></div>
-    </div>
-
     <main class="app-container">
-      <section class="glass-panel hero-card">
-        <div>
-          <p class="eyebrow-label">Sikka Node</p>
-          <h1 class="hero-title">Node active.</h1>
-          <p class="hero-desc">Chain status, network topology, and node routing in one place.</p>
-          <div class="hero-actions">
-            <a href="https://sikkalabs.com/" target="_blank" rel="noreferrer" class="btn-accent">
-              Wallet
-              <span aria-hidden="true">&rarr;</span>
-            </a>
-            <a href="https://github.com/sikkalabs/sikka" target="_blank" rel="noreferrer" class="btn-outline">
-              Source
-              <span aria-hidden="true">&rarr;</span>
-            </a>
-          </div>
+      <!-- Centered Hero Section -->
+      <section class="mono-card hero-centered">
+        <p class="eyebrow-label">Sikka Node</p>
+        <h1 class="hero-title">Node active.</h1>
+        <p class="hero-desc">Chain status, network topology, and node routing in one place.</p>
+        <div class="hero-actions">
+          <a href="https://sikkalabs.com/" target="_blank" rel="noreferrer" class="btn-primary">
+            Wallet &rarr;
+          </a>
+          <a href="https://github.com/sikkalabs/sikka" target="_blank" rel="noreferrer" class="btn-secondary">
+            Source &rarr;
+          </a>
         </div>
 
-        <aside class="status-aside">
-          <div>
-            <div v-for="item in statusItems" :key="item.label" class="status-item">
-              <div class="status-header">
-                <span v-if="item.pulse" class="pulse-indicator">
-                  <span class="pulse-ring"></span>
-                  <span class="pulse-dot"></span>
-                </span>
-                <span v-else class="static-dot"></span>
-                <p class="eyebrow-label">{{ item.label }}</p>
-              </div>
-              <p v-if="!item.href" class="status-value">{{ item.value }}</p>
-              <a v-else :href="item.href" class="status-value" style="color: var(--text-sky); text-decoration: underline;">{{ item.value }}</a>
+        <!-- Status Grid (Centered) -->
+        <div class="status-grid">
+          <div v-for="item in statusItems" :key="item.label" class="status-box">
+            <div class="status-box-header">
+              <span class="status-dot"></span>
+              <p class="eyebrow-label">{{ item.label }}</p>
             </div>
+            <p v-if="!item.href" class="status-value">{{ item.value }}</p>
+            <a v-else :href="item.href" class="status-value" style="color: var(--text-main); text-decoration: underline;">{{ item.value }}</a>
           </div>
-        </aside>
+        </div>
       </section>
 
-      <section class="glass-panel search-form-card">
-        <form autocomplete="off" @submit.prevent="submitExplorerSearch">
-          <div class="search-field-container">
+      <!-- Centered Search Form -->
+      <section class="mono-card search-card">
+        <p class="eyebrow-label">Blockchain Explorer</p>
+        <form style="margin-top: 1rem;" autocomplete="off" @submit.prevent="submitExplorerSearch">
+          <div class="search-form-inner">
             <input v-model.trim="searchInput" type="text" spellcheck="false"
-              placeholder="64-char transaction ID or sikka1… address" class="search-input-field" />
-            <button type="submit" class="search-submit-btn">Go</button>
+              placeholder="64-char transaction ID or sikka1… address" class="input-field" />
+            <button type="submit" class="btn-primary">Search</button>
           </div>
         </form>
-        <p v-if="searchFeedback" :style="{ color: searchFeedbackKind === 'error' ? 'var(--text-rose)' : 'var(--text-muted)', marginTop: '0.75rem', fontSize: '0.875rem' }">
+        <p v-if="searchFeedback" :style="{ marginTop: '0.75rem', fontSize: '0.875rem', color: searchFeedbackKind === 'error' ? '#e11d48' : 'var(--text-muted)' }">
           {{ searchFeedback }}
         </p>
       </section>
 
-      <section class="grid-5-col">
-        <section class="glass-panel">
+      <!-- Grid Stats (Centered) -->
+      <section class="grid-stats-3">
+        <section class="mono-card stat-box">
           <p class="eyebrow-label">Software Version</p>
-          <p class="stat-card-number">{{ overview.softwareVersion }}</p>
-          <p class="stat-card-desc">Embedded release metadata currently served by this node.</p>
+          <p class="stat-number">{{ overview.softwareVersion }}</p>
+          <p class="stat-desc">Embedded release metadata.</p>
         </section>
 
-        <section class="glass-panel span-col-2">
-          <p class="eyebrow-label">DAG Tips</p>
-          <div style="display: flex; align-items: center; justify-content: space-between; margin-top: 0.5rem;">
-            <h2 style="font-size: 1.125rem; font-weight: 900; color: #ffffff;">Latest tips</h2>
-            <span class="badge-tag">{{ tips.length }} visible</span>
-          </div>
-
-          <div v-if="!tipsLoaded" style="margin-top: 1rem; color: var(--text-muted); font-size: 0.875rem;">
-            Loading…
-          </div>
-          <div v-else-if="!tips.length" style="margin-top: 1rem; color: var(--text-muted); font-size: 0.875rem;">
-            No tips available.
-          </div>
-          <div v-else class="tips-list">
-            <a v-for="(txid, index) in tips" :key="txid" :href="'/tx/' + encodeURIComponent(txid)" :title="txid" class="tip-item-link">
-              <span :class="index % 2 === 0 ? 'animate-pulse' : ''">{{ txid.slice(0, 5) }}</span>
-              <span style="opacity: 0.4;">•••</span>
-              <span :class="index % 2 === 1 ? 'animate-pulse' : ''">{{ txid.slice(-5) }}</span>
-            </a>
-          </div>
-        </section>
-
-        <section class="glass-panel">
+        <section class="mono-card stat-box">
           <p class="eyebrow-label">Network PoW</p>
-          <p class="stat-card-number">{{ overview.submitPow }}</p>
-          <p class="stat-card-desc">{{ overview.submitPowNote }}</p>
+          <p class="stat-number">{{ overview.submitPow }}</p>
+          <p class="stat-desc">{{ overview.submitPowNote }}</p>
         </section>
 
-        <section class="glass-panel">
+        <section class="mono-card stat-box">
           <p class="eyebrow-label">Known Nodes</p>
-          <p class="stat-card-number">{{ overview.knownNodes }}</p>
-          <p class="stat-card-desc">Visible peers currently tracked by this node.</p>
+          <p class="stat-number">{{ overview.knownNodes }}</p>
+          <p class="stat-desc">Visible peers tracked.</p>
         </section>
       </section>
 
-      <section class="grid-3-col">
-        <article v-for="stat in statItems" :key="stat.label" class="glass-panel">
+      <!-- DAG Tips (Centered) -->
+      <section class="mono-card stat-box" style="margin-top: 1rem;">
+        <p class="eyebrow-label">DAG Tips</p>
+        <div style="margin-top: 0.5rem; display: flex; align-items: center; gap: 0.5rem;">
+          <h2 style="font-size: 1.25rem; font-weight: 800;">Latest tips</h2>
+          <span class="mono-badge">{{ tips.length }} visible</span>
+        </div>
+
+        <div v-if="!tipsLoaded" style="margin-top: 1rem; color: var(--text-muted); font-size: 0.875rem;">
+          Loading…
+        </div>
+        <div v-else-if="!tips.length" style="margin-top: 1rem; color: var(--text-muted); font-size: 0.875rem;">
+          No tips available.
+        </div>
+        <div v-else class="tips-container">
+          <a v-for="(txid) in tips" :key="txid" :href="'/tx/' + encodeURIComponent(txid)" :title="txid" class="tip-link">
+            <span>{{ txid.slice(0, 8) }}</span>
+            <span style="opacity: 0.3;">•••</span>
+            <span>{{ txid.slice(-8) }}</span>
+          </a>
+        </div>
+      </section>
+
+      <!-- Secondary Metrics (Centered Grid) -->
+      <section class="grid-stats-3">
+        <article v-for="stat in statItems" :key="stat.label" class="mono-card stat-box">
           <p class="eyebrow-label">{{ stat.label }}</p>
-          <p class="stat-card-number" style="font-size: 1.5rem; margin-top: 0.5rem;">{{ stat.value }}</p>
+          <p class="stat-number" style="font-size: 1.75rem;">{{ stat.value }}</p>
         </article>
       </section>
 
-      <section class="glass-panel" style="margin-top: 1.25rem;">
-        <div>
-          <p class="eyebrow-label">Manual Peer Recovery</p>
-          <h2 style="font-size: 1.5rem; font-weight: 900; color: #ffffff; margin-top: 0.5rem;">Add a known onion peer</h2>
-          <p style="color: var(--text-muted); font-size: 0.875rem; margin-top: 0.5rem;">
-            Validate a known onion endpoint and announce it to this node when automated discovery is not enough.
-          </p>
-        </div>
+      <!-- Manual Peer Recovery (Centered) -->
+      <section class="mono-card stat-box" style="margin-top: 1rem;">
+        <p class="eyebrow-label">Manual Peer Recovery</p>
+        <h2 style="font-size: 1.25rem; font-weight: 800; margin-top: 0.375rem;">Add a known onion peer</h2>
+        <p class="stat-desc" style="max-w-2xl;">
+          Validate a known onion endpoint and announce it to this node when automated discovery is not enough.
+        </p>
 
-        <form style="margin-top: 1.25rem;" @submit.prevent="submitManualPeer">
-          <div class="search-field-container">
+        <form style="margin-top: 1.25rem; width: 100%; max-width: 32rem;" @submit.prevent="submitManualPeer">
+          <div class="search-form-inner">
             <input v-model.trim="peerInput" type="url" inputmode="url"
-              placeholder="http://exampleexampleexampleexampleexampleexampleexampleexample.onion"
-              aria-label="Peer onion URL" required :disabled="peerPending" class="search-input-field" />
-            <button type="submit" :disabled="peerPending" class="search-submit-btn">
+              placeholder="http://example.onion"
+              aria-label="Peer onion URL" required :disabled="peerPending" class="input-field" />
+            <button type="submit" :disabled="peerPending" class="btn-primary">
               {{ peerPending ? 'Checking…' : 'Add Peer' }}
             </button>
           </div>
         </form>
 
-        <p v-if="peerFeedbackMessage" :style="{ marginTop: '1rem', fontSize: '0.875rem', color: peerFeedbackClass === 'text-emerald-300' ? 'var(--text-emerald)' : peerFeedbackClass === 'text-rose-300' ? 'var(--text-rose)' : 'var(--text-sky)' }">
+        <p v-if="peerFeedbackMessage" :style="{ marginTop: '0.75rem', fontSize: '0.875rem', color: peerFeedbackKind === 'error' ? '#e11d48' : 'var(--text-main)' }">
           {{ peerFeedbackMessage }}
         </p>
       </section>
