@@ -1,7 +1,6 @@
 name: dev
 
 on:
-  push:
   workflow_dispatch:
 
 env:
