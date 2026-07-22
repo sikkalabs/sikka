@@ -7,129 +7,103 @@
   <meta name="description" content="Transaction explorer view for a Sikka node.">
   <link rel="stylesheet" href="/public/style.css">
   <script src="/public/vue.global.prod.js"></script>
-  <style>
-    .maturity-badge {
-      display: inline-flex;
-      align-items: center;
-      border-radius: 9999px;
-      border-width: 1px;
-      padding: 0.125rem 0.625rem;
-      font-size: 10px;
-      font-weight: 700;
-      letter-spacing: 0.16em;
-      text-transform: uppercase;
-      white-space: nowrap;
-    }
-    .maturity-badge-mature {
-      border-color: rgba(110, 231, 183, 0.25);
-      background: rgba(16, 185, 129, 0.12);
-      color: #a7f3d0;
-    }
-    .maturity-badge-immature {
-      border-color: rgba(251, 191, 36, 0.25);
-      background: rgba(245, 158, 11, 0.12);
-      color: #fcd34d;
-    }
-  </style>
 </head>
-<body class="min-h-screen overflow-x-hidden bg-slate-950 text-slate-100 antialiased">
-  <div id="app" class="relative isolate min-h-screen">
-    <div class="pointer-events-none absolute inset-0 overflow-hidden">
-      <div class="absolute -left-24 top-0 h-72 w-72 rounded-full bg-sky-400/20 blur-3xl"></div>
-      <div class="absolute right-0 top-8 h-80 w-80 rounded-full bg-cyan-300/10 blur-3xl"></div>
-      <div class="absolute bottom-0 left-1/3 h-64 w-64 rounded-full bg-indigo-500/10 blur-3xl"></div>
-      <div class="absolute inset-x-0 top-0 h-[28rem] bg-gradient-to-b from-slate-900 via-slate-950 to-slate-950"></div>
+<body>
+  <div id="app">
+    <div class="bg-ambient">
+      <div class="glow-1"></div>
+      <div class="glow-2"></div>
+      <div class="glow-3"></div>
     </div>
 
-    <main class="relative mx-auto flex min-h-screen w-full max-w-5xl flex-col px-4 py-6 sm:px-6 sm:py-8 lg:px-8 lg:py-12">
-      <a href="/" class="inline-flex items-center gap-2 text-sm font-semibold text-sky-200 transition hover:text-white">
-        <span aria-hidden="true">&larr;</span>
-        Sikka Node
+    <main class="app-container" style="max-width: 64rem;">
+      <a href="/" style="display: inline-flex; align-items: center; gap: 0.5rem; font-size: 0.875rem; font-weight: 600; color: var(--text-sky); text-decoration: none; margin-bottom: 1rem;">
+        &larr; Sikka Node
       </a>
 
-      <section class="mt-4 rounded-[2rem] border border-white/10 bg-slate-950/65 p-5 shadow-2xl shadow-slate-950/60 backdrop-blur-2xl sm:p-7 lg:p-8">
-        <div class="flex flex-col items-start gap-4 sm:flex-row sm:flex-wrap sm:justify-between">
-          <div class="min-w-0 flex-1">
-            <p class="text-xs font-black uppercase tracking-[0.32em] text-sky-200/70">Transaction</p>
-            <h1 class="mt-3 break-all font-mono text-lg font-black tracking-tight text-white sm:text-2xl lg:text-3xl">{{ pageTitle }}</h1>
+      <section class="glass-panel" style="padding: 1.75rem;">
+        <div style="display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 1rem;">
+          <div style="min-width: 0; flex: 1;">
+            <p class="eyebrow-label">Transaction</p>
+            <h1 style="margin-top: 0.75rem; word-break: break-all; font-family: var(--font-mono); font-size: 1.5rem; font-weight: 900; color: #ffffff;">{{ pageTitle }}</h1>
           </div>
-          <div v-if="txid && !loading && !errorMessage" class="rounded-full border border-sky-300/20 bg-sky-300/10 px-4 py-2 text-xs font-bold uppercase tracking-[0.24em] text-sky-100">
+          <div v-if="txid && !loading && !errorMessage" class="badge-tag" style="border-color: rgba(103, 232, 249, 0.2); background: rgba(103, 232, 249, 0.1); color: var(--text-cyan); font-weight: 700;">
             Explorer View
           </div>
         </div>
 
-        <div v-if="loading" class="mt-8 rounded-[1.5rem] border border-dashed border-white/10 bg-white/[0.03] px-5 py-6 text-sm text-slate-400">
+        <div v-if="loading" style="margin-top: 2rem; padding: 1.5rem; border-radius: 1.5rem; border: 1px dashed var(--border-subtle); color: var(--text-muted); font-size: 0.875rem;">
           Loading transaction…
         </div>
 
-        <div v-else-if="errorMessage" class="mt-8 rounded-[1.5rem] border border-rose-300/20 bg-rose-300/10 px-5 py-6 text-sm text-rose-200">
+        <div v-else-if="errorMessage" style="margin-top: 2rem; padding: 1.5rem; border-radius: 1.5rem; border: 1px solid rgba(253, 164, 175, 0.2); background: rgba(253, 164, 175, 0.1); color: var(--text-rose); font-size: 0.875rem;">
           <p>{{ errorMessage }}</p>
-          <a href="/" class="mt-3 inline-flex text-sky-200 transition hover:text-white">Return to the node overview</a>
+          <a href="/" style="margin-top: 0.75rem; display: inline-flex; color: var(--text-sky); text-decoration: underline;">Return to the node overview</a>
         </div>
 
-        <div v-else class="mt-8">
-          <section class="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-            <article v-for="card in summaryCards" :key="card.label" class="rounded-[1.35rem] border border-white/10 bg-white/[0.035] px-4 py-4 shadow-lg shadow-slate-950/20 ring-1 ring-white/5">
-              <p class="text-[11px] font-black uppercase tracking-[0.28em] text-sky-200/65">{{ card.label }}</p>
-              <p v-if="card.kind === 'badge'" class="mt-3 inline-flex rounded-full border border-emerald-300/20 bg-emerald-300/10 px-3 py-1 text-xs font-bold uppercase tracking-[0.2em] text-emerald-200">
+        <div v-else style="margin-top: 2rem;">
+          <section class="grid-3-col">
+            <article v-for="card in summaryCards" :key="card.label" class="glass-panel" style="padding: 1rem;">
+              <p class="eyebrow-label">{{ card.label }}</p>
+              <p v-if="card.kind === 'badge'" class="badge-tag" style="margin-top: 0.75rem; border-color: rgba(110, 231, 183, 0.2); background: rgba(110, 231, 183, 0.1); color: var(--text-emerald); font-weight: 700;">
                 {{ card.value }}
               </p>
-              <p v-else class="mt-3 break-all text-sm font-semibold text-white" :class="card.mono ? 'font-mono text-xs sm:text-sm' : ''">{{ card.value }}</p>
+              <p v-else style="margin-top: 0.75rem; word-break: break-all; font-size: 0.875rem; font-weight: 600; color: #ffffff;" :style="{ fontFamily: card.mono ? 'var(--font-mono)' : 'inherit' }">{{ card.value }}</p>
             </article>
           </section>
 
-          <section v-if="parents.length" class="mt-8">
-            <div class="flex flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <h2 class="text-xs font-black uppercase tracking-[0.32em] text-sky-200/70">Parents</h2>
-              <span class="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 text-xs font-semibold text-slate-300">{{ parents.length }}</span>
+          <section v-if="parents.length" style="margin-top: 2rem;">
+            <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 1rem;">
+              <h2 class="eyebrow-label" style="font-size: 0.875rem;">Parents</h2>
+              <span class="badge-tag">{{ parents.length }}</span>
             </div>
-            <div class="mt-4 grid gap-3">
-              <a v-for="parent in parents" :key="parent" :href="'/tx/' + encodeURIComponent(parent)" class="block rounded-[1.25rem] border border-white/10 bg-white/[0.03] px-4 py-4 font-mono text-xs text-sky-200 transition hover:border-sky-200/35 hover:bg-sky-200/5 sm:text-sm">
+            <div style="display: grid; gap: 0.75rem;">
+              <a v-for="parent in parents" :key="parent" :href="'/tx/' + encodeURIComponent(parent)" class="tip-item-link" style="justify-content: flex-start; font-size: 0.875rem; padding: 1rem; word-break: break-all;">
                 {{ parent }}
               </a>
             </div>
           </section>
 
-          <section v-if="inputs.length" class="mt-8">
-            <div class="flex flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <h2 class="text-xs font-black uppercase tracking-[0.32em] text-sky-200/70">Inputs</h2>
-              <span class="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 text-xs font-semibold text-slate-300">{{ inputs.length }}</span>
+          <section v-if="inputs.length" style="margin-top: 2rem;">
+            <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 1rem;">
+              <h2 class="eyebrow-label" style="font-size: 0.875rem;">Inputs</h2>
+              <span class="badge-tag">{{ inputs.length }}</span>
             </div>
-            <div class="mt-4 grid gap-3">
-              <article v-for="(input, index) in inputs" :key="input.txid + ':' + input.index + ':' + index" class="rounded-[1.25rem] border border-white/10 bg-white/[0.03] px-4 py-4 ring-1 ring-white/5">
-                <div class="flex flex-col gap-2 sm:flex-row sm:items-baseline sm:justify-between">
-                  <p class="text-[11px] font-black uppercase tracking-[0.28em] text-slate-400">Input {{ index }}</p>
-                  <p class="text-xs text-slate-400">Index {{ input.index ?? '—' }}</p>
+            <div style="display: grid; gap: 0.75rem;">
+              <article v-for="(input, index) in inputs" :key="input.txid + ':' + input.index + ':' + index" class="glass-panel" style="padding: 1rem;">
+                <div style="display: flex; align-items: center; justify-content: space-between;">
+                  <p class="eyebrow-label" style="color: var(--text-subtle);">Input {{ index }}</p>
+                  <p style="font-size: 0.75rem; color: var(--text-subtle);">Index {{ input.index ?? '—' }}</p>
                 </div>
-                <p class="mt-3 break-all font-mono text-xs text-white sm:text-sm">{{ input.txid || '—' }}</p>
+                <p style="margin-top: 0.75rem; word-break: break-all; font-family: var(--font-mono); font-size: 0.875rem; color: #ffffff;">{{ input.txid || '—' }}</p>
               </article>
             </div>
           </section>
 
-          <section v-if="outputs.length" class="mt-8">
-            <div class="flex flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <h2 class="text-xs font-black uppercase tracking-[0.32em] text-sky-200/70">Outputs</h2>
-              <span class="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 text-xs font-semibold text-slate-300">{{ outputs.length }}</span>
+          <section v-if="outputs.length" style="margin-top: 2rem;">
+            <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 1rem;">
+              <h2 class="eyebrow-label" style="font-size: 0.875rem;">Outputs</h2>
+              <span class="badge-tag">{{ outputs.length }}</span>
             </div>
-            <div class="mt-4 grid gap-3">
-              <article v-for="(output, index) in outputs" :key="(output.address || 'unknown') + ':' + index" class="rounded-[1.25rem] border border-white/10 bg-white/[0.03] px-4 py-4 ring-1 ring-white/5">
-                <div class="flex flex-wrap items-center gap-3">
-                  <p class="text-[11px] font-black uppercase tracking-[0.28em] text-slate-400">Output {{ index }}</p>
-                  <span class="rounded-full border border-cyan-300/20 bg-cyan-300/10 px-3 py-1 text-xs font-bold uppercase tracking-[0.2em] text-cyan-200">{{ formatSikka(output.value) }} SIKKA</span>
+            <div style="display: grid; gap: 0.75rem;">
+              <article v-for="(output, index) in outputs" :key="(output.address || 'unknown') + ':' + index" class="glass-panel" style="padding: 1rem;">
+                <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 0.75rem;">
+                  <p class="eyebrow-label" style="color: var(--text-subtle);">Output {{ index }}</p>
+                  <span class="badge-tag" style="border-color: rgba(103, 232, 249, 0.2); background: rgba(103, 232, 249, 0.1); color: var(--text-cyan); font-weight: 700;">{{ formatSikka(output.value) }} SIKKA</span>
                   <span :class="outputMaturityBadgeClass(index)" :title="outputMaturityDetail(index)">{{ outputMaturityLabel(index) }}</span>
                 </div>
-                <a v-if="output.address" :href="'/wallet/' + encodeURIComponent(output.address)" class="mt-3 block break-all font-mono text-xs text-sky-200 transition hover:text-white sm:text-sm">
+                <a v-if="output.address" :href="'/wallet/' + encodeURIComponent(output.address)" style="margin-top: 0.75rem; display: block; word-break: break-all; font-family: var(--font-mono); font-size: 0.875rem; color: var(--text-sky); text-decoration: none;">
                   {{ output.address }}
                 </a>
-                <p v-else class="mt-3 text-sm text-slate-400">No address</p>
-                <p class="mt-3 text-xs text-slate-400">{{ outputMaturityDetail(index) }}</p>
+                <p v-else style="margin-top: 0.75rem; font-size: 0.875rem; color: var(--text-subtle);">No address</p>
+                <p style="margin-top: 0.5rem; font-size: 0.75rem; color: var(--text-muted);">{{ outputMaturityDetail(index) }}</p>
               </article>
             </div>
           </section>
 
-          <details class="mt-8 overflow-hidden rounded-[1.5rem] border border-white/10 bg-white/[0.03]">
-            <summary class="cursor-pointer px-5 py-4 text-sm font-semibold text-slate-300 transition hover:text-white">View raw JSON</summary>
-            <pre class="overflow-x-auto border-t border-white/10 bg-slate-900/70 px-5 py-5 font-mono text-xs leading-6 text-slate-300">{{ rawJson }}</pre>
+          <details>
+            <summary>View raw JSON</summary>
+            <pre>{{ rawJson }}</pre>
           </details>
         </div>
       </section>
@@ -340,7 +314,6 @@
           return Number.isNaN(date.getTime()) ? '—' : date.toLocaleString();
         },
         formatSikka(chillar) {
-          // precise BigInt version from wallet-common.js
           return formatSikka(chillar);
         },
         outputMaturityState(index) {
