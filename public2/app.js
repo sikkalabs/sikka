@@ -49,6 +49,7 @@
     submitPow: document.getElementById('metricSubmitPow'),
     submitPowNote: document.getElementById('metricSubmitPowNote'),
     softwareVersion: document.getElementById('metricSoftwareVersion'),
+    navVersion: document.getElementById('navVersion'),
     
     navNodeMessage: document.getElementById('navNodeMessage'),
     nodeMessageBanner: document.getElementById('nodeMessageBanner'),
@@ -201,6 +202,7 @@
     if (el.submitPow) el.submitPow.textContent = state.overview.submitPow;
     if (el.submitPowNote) el.submitPowNote.textContent = state.overview.submitPowNote;
     if (el.softwareVersion) el.softwareVersion.textContent = "v" + state.overview.softwareVersion;
+    if (el.navVersion && state.overview.softwareVersion !== "--") el.navVersion.textContent = state.overview.softwareVersion;
     
     if (el.torNetwork) el.torNetwork.textContent = state.overview.torNetwork;
     if (el.publicURL) el.publicURL.textContent = state.overview.publicURL;
