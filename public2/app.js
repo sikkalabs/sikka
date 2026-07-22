@@ -24,6 +24,8 @@
     peerPending: false,
     peerFeedbackMessage: "",
     peerFeedbackKind: "",
+    knownPeersList: [],
+    featuredPeer: "",
   };
 
   // DOM Elements
@@ -54,6 +56,10 @@
     
     knownNodesBadge: document.getElementById('knownNodesBadge'),
     knownNodesDesc: document.getElementById('knownNodesDesc'),
+
+    featuredPeerContainer: document.getElementById('featuredPeerContainer'),
+    featuredPeerUrl: document.getElementById('featuredPeerUrl'),
+    shufflePeerBtn: document.getElementById('shufflePeerBtn'),
   };
 
   // Helper Functions
@@ -159,6 +165,8 @@
     if (el.knownNodesBadge) el.knownNodesBadge.textContent = state.overview.knownNodes + " TRACKED";
     if (el.knownNodesDesc) el.knownNodesDesc.textContent = `This node is connected to ${state.overview.knownNodes} verified Tor onion peers in the Sikka network.`;
 
+    renderFeaturedPeer();
+
     // Render Tips
     if (el.tipsBadge) el.tipsBadge.textContent = `${state.tips.length} ACTIVE TIPS`;
     if (el.tipsFeed) {
@@ -177,15 +185,44 @@
     }
   }
 
+  function pickRandomPeer() {
+    if (!state.knownPeersList.length) return;
+    const randomIndex = Math.floor(Math.random() * state.knownPeersList.length);
+    state.featuredPeer = state.knownPeersList[randomIndex];
+    renderFeaturedPeer();
+  }
+
+  function renderFeaturedPeer() {
+    if (el.featuredPeerContainer && el.featuredPeerUrl) {
+      if (state.featuredPeer) {
+        el.featuredPeerContainer.style.display = "block";
+        el.featuredPeerUrl.textContent = state.featuredPeer;
+      } else {
+        el.featuredPeerContainer.style.display = "none";
+      }
+    }
+  }
+
   // Load Data
   async function loadNodeOverview() {
     try {
-      const [, status] = await Promise.all([fetchJSON("/healthz"), fetchJSON("/v1/status")]);
+      const [, status, peersResp] = await Promise.all([
+        fetchJSON("/healthz"),
+        fetchJSON("/v1/status"),
+        fetchJSON("/v1/discovery/nodes").catch(() => null)
+      ]);
 
       const torHealth = String(status.network_health || "unavailable");
       const advertisedAddress = status.addresses?.[0] || status.onion_hostname || "";
       const tips = Array.isArray(status.tips) ? status.tips : [];
       const quote = await fetchNetworkPowQuote(tips).catch(() => null);
+
+      if (peersResp && Array.isArray(peersResp.items) && peersResp.items.length > 0) {
+        state.knownPeersList = peersResp.items;
+        if (!state.featuredPeer) {
+          pickRandomPeer();
+        }
+      }
 
       state.overview.torNetwork = formatTorNetwork(status, torHealth);
       state.overview.publicURL = advertisedAddress.replace(/^http:\/\//, "") || "Not advertised";
@@ -316,6 +353,7 @@
   document.addEventListener('DOMContentLoaded', () => {
     if (el.searchForm) el.searchForm.addEventListener('submit', handleSearch);
     if (el.peerForm) el.peerForm.addEventListener('submit', handlePeerSubmit);
+    if (el.shufflePeerBtn) el.shufflePeerBtn.addEventListener('click', pickRandomPeer);
 
     loadNodeOverview();
     state.pollHandle = window.setInterval(loadNodeOverview, 15000);
