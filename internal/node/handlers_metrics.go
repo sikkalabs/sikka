@@ -2,6 +2,7 @@ package node
 
 import (
 	"fmt"
+	"io"
 	"net/http"
 	"runtime"
 	"strings"
@@ -96,5 +97,5 @@ func (n *Node) handleMetrics(w http.ResponseWriter, _ *http.Request) {
 
 	w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
-	_, _ = w.WriteString(sb.String())
+	_, _ = io.WriteString(w, sb.String())
 }
