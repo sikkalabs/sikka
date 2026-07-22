@@ -277,28 +277,35 @@ html, body {
   background: rgba(100, 116, 139, 0.15);
 }
 
-/* Dashboard Grid */
+/* Dashboard Grid & Column Spacing */
 .dashboard-grid {
   display: grid;
   grid-template-columns: 1fr;
-  gap: 1.5rem;
+  gap: 1.75rem;
+}
+
+.grid-main {
+  display: flex;
+  flex-direction: column;
+  gap: 1.75rem;
+}
+
+.grid-side {
+  display: flex;
+  flex-direction: column;
+  gap: 1.75rem;
 }
 
 @media (min-width: 1024px) {
   .dashboard-grid {
-    grid-template-columns: 12fr;
+    grid-template-columns: repeat(12, 1fr);
+    gap: 1.75rem;
   }
   .grid-main {
     grid-column: span 7;
-    display: flex;
-    flex-direction: column;
-    gap: 1.5rem;
   }
   .grid-side {
     grid-column: span 5;
-    display: flex;
-    flex-direction: column;
-    gap: 1.5rem;
   }
 }
 
