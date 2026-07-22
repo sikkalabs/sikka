@@ -4,21 +4,16 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Sikka Node</title>
+  <title>Sikka Node Explorer</title>
   <meta name="description"
     content="Sikka node dashboard for chain status, DAG tips, network topology, and peer recovery." />
-  <meta name="theme-color" content="#030712" />
+  <meta name="theme-color" content="#090d16" />
   <meta name="robots" content="index,follow" />
   <meta property="og:type" content="website" />
-  <meta property="og:title" content="Sikka Node" />
+  <meta property="og:title" content="Sikka Node Explorer" />
   <meta property="og:description"
     content="Monitor chain status, inspect DAG tips, and manage peers from a local Sikka node." />
   <meta property="og:image" content="/public/sikka.svg" />
-  <meta name="twitter:card" content="summary" />
-  <meta name="twitter:title" content="Sikka Node" />
-  <meta name="twitter:description"
-    content="Monitor chain status, inspect DAG tips, and manage peers from a local Sikka node." />
-  <meta name="twitter:image" content="/public/sikka.svg" />
   <link rel="icon" href="/public/sikka.svg" type="image/svg+xml" />
   <link rel="apple-touch-icon" href="/public/sikka.svg" />
   <link rel="stylesheet" href="/public/style.css" />
@@ -27,143 +22,152 @@
 
 <body>
   <div id="app">
-    <div class="cyber-canvas">
-      <div class="orb-glow-top"></div>
-    </div>
+    <div class="app-bg"></div>
 
-    <main class="hud-container">
-      <!-- Top Navigation -->
-      <nav class="hud-nav">
-        <a href="/" class="hud-brand">
-          <img src="/public/sikka.svg" alt="Sikka Logo" class="hud-logo" />
-          <span class="hud-title">Sikka Node</span>
-        </a>
-        <div class="hud-status-badge">
-          <span class="pulse-dot"></span>
-          <span>MAINNET ONLINE</span>
-        </div>
-      </nav>
-
-      <!-- Hero Section -->
-      <section class="hud-panel hero-panel">
-        <div class="hud-status-badge" style="border-color: rgba(56,189,248,0.3); background: rgba(56,189,248,0.08); color: var(--text-cyan);">
-          <span class="pulse-dot" style="background: var(--text-cyan); box-shadow: 0 0 10px var(--text-cyan);"></span>
-          <span>SYSTEM // v0.3.1</span>
-        </div>
-        <h1 class="hero-heading">NODE ACTIVE.</h1>
-        <p class="hero-subtitle">Chain status, network topology, and node routing in one place.</p>
-        <div class="hero-btn-row">
-          <a href="https://sikkalabs.com/" target="_blank" rel="noreferrer" class="btn-cyber">
-            Wallet &rarr;
-          </a>
-          <a href="https://github.com/sikkalabs/sikka" target="_blank" rel="noreferrer" class="btn-cyber-ghost">
-            Source &rarr;
-          </a>
+    <main class="layout-container">
+      <!-- Navbar with Integrated Search -->
+      <header class="navbar">
+        <div class="nav-left">
+          <img src="/public/sikka.svg" alt="Sikka Logo" class="nav-logo" />
+          <div>
+            <span class="nav-brand-title">Sikka Node</span>
+            <span class="badge" style="margin-left: 0.5rem; font-size: 10px;">MAINNET</span>
+          </div>
         </div>
 
-        <!-- Status Grid -->
-        <div class="status-grid">
-          <div v-for="item in statusItems" :key="item.label" class="status-card">
-            <div style="display: flex; align-items: center; gap: 0.5rem;">
-              <span class="pulse-dot"></span>
-              <p class="status-label">{{ item.label }}</p>
+        <form class="nav-search-form" autocomplete="off" @submit.prevent="submitExplorerSearch">
+          <input v-model.trim="searchInput" type="text" spellcheck="false"
+            placeholder="Search 64-char TxID or sikka1… address" class="nav-search-input" />
+          <button type="submit" class="btn-search">Search</button>
+        </form>
+      </header>
+
+      <p v-if="searchFeedback" :style="{ marginBottom: '1.25rem', fontSize: '0.875rem', color: searchFeedbackKind === 'error' ? 'var(--text-rose)' : 'var(--text-muted)' }">
+        {{ searchFeedback }}
+      </p>
+
+      <!-- Main 2-Column Dashboard Grid -->
+      <div class="dashboard-grid">
+        <!-- Main Content Column (8 cols) -->
+        <div style="display: flex; flex-direction: column; gap: 1.5rem;">
+          <!-- Primary Network Overview Panel -->
+          <section class="panel">
+            <div class="panel-header">
+              <span class="panel-title">CHAIN STATUS OVERVIEW</span>
+              <span class="badge"><span class="pulse-indicator"></span>ONLINE</span>
             </div>
-            <p v-if="!item.href" class="status-val">{{ item.value }}</p>
-            <a v-else :href="item.href" class="status-val" style="color: var(--text-cyan); text-decoration: underline;">{{ item.value }}</a>
-          </div>
+
+            <!-- 4 Metrics Matrix -->
+            <div class="metrics-row">
+              <div class="metric-card">
+                <p class="metric-label">DAG Size</p>
+                <p class="metric-val">{{ overview.dagSize }}</p>
+                <p class="metric-sub">Total DAG blocks</p>
+              </div>
+
+              <div class="metric-card">
+                <p class="metric-label">Max Depth</p>
+                <p class="metric-val">{{ overview.maxDepth }}</p>
+                <p class="metric-sub">Chain height</p>
+              </div>
+
+              <div class="metric-card">
+                <p class="metric-label">Network PoW</p>
+                <p class="metric-val">{{ overview.submitPow }}</p>
+                <p class="metric-sub">{{ overview.submitPowNote }}</p>
+              </div>
+
+              <div class="metric-card">
+                <p class="metric-label">Version</p>
+                <p class="metric-val" style="font-size: 1.35rem;">v{{ overview.softwareVersion }}</p>
+                <p class="metric-sub">Node release</p>
+              </div>
+            </div>
+
+            <!-- Quick Action Links -->
+            <div style="display: flex; gap: 0.75rem;">
+              <a href="https://sikkalabs.com/" target="_blank" rel="noreferrer" class="btn-primary">
+                Wallet &rarr;
+              </a>
+              <a href="https://github.com/sikkalabs/sikka" target="_blank" rel="noreferrer" class="btn-secondary">
+                Source &rarr;
+              </a>
+            </div>
+          </section>
+
+          <!-- Live DAG Tips Feed Panel -->
+          <section class="panel">
+            <div class="panel-header">
+              <span class="panel-title">LATEST DAG TIPS FEED</span>
+              <span class="badge">{{ tips.length }} ACTIVE TIPS</span>
+            </div>
+
+            <div v-if="!tipsLoaded" style="padding: 1rem; color: var(--text-muted); font-family: var(--font-mono); font-size: 0.875rem;">
+              Loading DAG tips…
+            </div>
+            <div v-else-if="!tips.length" style="padding: 1rem; color: var(--text-muted); font-family: var(--font-mono); font-size: 0.875rem;">
+              No active tips available.
+            </div>
+            <div v-else class="tips-table">
+              <a v-for="(txid) in tips" :key="txid" :href="'/tx/' + encodeURIComponent(txid)" class="tip-row">
+                <span class="tip-hash">{{ txid }}</span>
+                <span class="tip-badge">INSPECT &rarr;</span>
+              </a>
+            </div>
+          </section>
         </div>
-      </section>
 
-      <!-- Search Console -->
-      <section class="hud-panel search-panel">
-        <p class="status-label">BLOCKCHAIN EXPLORER</p>
-        <form style="margin-top: 0.75rem;" autocomplete="off" @submit.prevent="submitExplorerSearch">
-          <div class="search-box-inner">
-            <input v-model.trim="searchInput" type="text" spellcheck="false"
-              placeholder="64-char transaction ID or sikka1… address" class="hud-input" />
-            <button type="submit" class="btn-cyber">Search</button>
-          </div>
-        </form>
-        <p v-if="searchFeedback" :style="{ marginTop: '0.75rem', fontSize: '0.875rem', color: searchFeedbackKind === 'error' ? 'var(--text-alert)' : 'var(--text-dim)' }">
-          {{ searchFeedback }}
-        </p>
-      </section>
+        <!-- Sidebar Column (4 cols) -->
+        <div style="display: flex; flex-direction: column; gap: 1.5rem;">
+          <!-- Node Topology & Tor Panel -->
+          <section class="panel">
+            <div class="panel-header">
+              <span class="panel-title">NODE TOPOLOGY</span>
+              <span class="badge"><span class="pulse-indicator"></span>TOR</span>
+            </div>
 
-      <!-- Primary Metrics Grid -->
-      <section class="stats-grid-3">
-        <section class="hud-panel stat-box">
-          <p class="status-label">SOFTWARE VERSION</p>
-          <p class="stat-num">{{ overview.softwareVersion }}</p>
-          <p class="stat-sub">Embedded release metadata.</p>
-        </section>
+            <div class="aside-item" v-for="item in statusItems" :key="item.label">
+              <p class="aside-label">{{ item.label }}</p>
+              <p v-if="!item.href" class="aside-val">{{ item.value }}</p>
+              <a v-else :href="item.href" class="aside-val" style="color: var(--text-sky); text-decoration: underline;">{{ item.value }}</a>
+            </div>
+          </section>
 
-        <section class="hud-panel stat-box">
-          <p class="status-label">NETWORK POW</p>
-          <p class="stat-num">{{ overview.submitPow }}</p>
-          <p class="stat-sub">{{ overview.submitPowNote }}</p>
-        </section>
+          <!-- Known Peers Counter -->
+          <section class="panel">
+            <div class="panel-header">
+              <span class="panel-title">KNOWN PEERS</span>
+              <span class="badge">{{ overview.knownNodes }} TRACKED</span>
+            </div>
+            <p style="font-size: 0.875rem; color: var(--text-muted);">
+              This node is connected to {{ overview.knownNodes }} verified Tor onion peers in the Sikka network.
+            </p>
+          </section>
 
-        <section class="hud-panel stat-box">
-          <p class="status-label">KNOWN NODES</p>
-          <p class="stat-num">{{ overview.knownNodes }}</p>
-          <p class="stat-sub">Visible peers tracked.</p>
-        </section>
-      </section>
+          <!-- Manual Peer Recovery Panel -->
+          <section class="panel">
+            <div class="panel-header">
+              <span class="panel-title">MANUAL PEER RECOVERY</span>
+            </div>
+            <p style="font-size: 0.8125rem; color: var(--text-muted); margin-bottom: 1rem;">
+              Announce a known onion endpoint to force peer discovery.
+            </p>
 
-      <!-- DAG Tips -->
-      <section class="hud-panel stat-box" style="margin-top: 1rem;">
-        <p class="status-label">DAG TIPS</p>
-        <div style="margin-top: 0.5rem; display: flex; align-items: center; gap: 0.5rem;">
-          <h2 style="font-size: 1.25rem; font-weight: 800; color: #ffffff;">Latest tips</h2>
-          <span class="hud-status-badge" style="padding: 0.15rem 0.5rem; font-size: 10px;">{{ tips.length }} VISIBLE</span>
+            <form style="display: flex; flex-direction: column; gap: 0.75rem;" @submit.prevent="submitManualPeer">
+              <input v-model.trim="peerInput" type="url" inputmode="url"
+                placeholder="http://example.onion"
+                aria-label="Peer onion URL" required :disabled="peerPending" class="nav-search-input" />
+              <button type="submit" :disabled="peerPending" class="btn-primary" style="width: 100%;">
+                {{ peerPending ? 'Checking…' : 'Add Peer' }}
+              </button>
+            </form>
+
+            <p v-if="peerFeedbackMessage" :style="{ marginTop: '0.75rem', fontSize: '0.8125rem', color: peerFeedbackKind === 'error' ? 'var(--text-rose)' : 'var(--text-sky)' }">
+              {{ peerFeedbackMessage }}
+            </p>
+          </section>
         </div>
-
-        <div v-if="!tipsLoaded" style="margin-top: 1rem; color: var(--text-dim); font-size: 0.875rem;">
-          Loading…
-        </div>
-        <div v-else-if="!tips.length" style="margin-top: 1rem; color: var(--text-dim); font-size: 0.875rem;">
-          No tips available.
-        </div>
-        <div v-else class="tips-container">
-          <a v-for="txid in tips" :key="txid" :href="'/tx/' + encodeURIComponent(txid)" :title="txid" class="tip-link">
-            <span>{{ txid.slice(0, 8) }}</span>
-            <span style="opacity: 0.3;">•••</span>
-            <span>{{ txid.slice(-8) }}</span>
-          </a>
-        </div>
-      </section>
-
-      <!-- Secondary Metrics -->
-      <section class="stats-grid-3">
-        <article v-for="stat in statItems" :key="stat.label" class="hud-panel stat-box">
-          <p class="status-label">{{ stat.label }}</p>
-          <p class="stat-num" style="font-size: 2rem;">{{ stat.value }}</p>
-        </article>
-      </section>
-
-      <!-- Manual Peer Recovery -->
-      <section class="hud-panel stat-box" style="margin-top: 1rem;">
-        <p class="status-label">MANUAL PEER RECOVERY</p>
-        <h2 style="font-size: 1.25rem; font-weight: 800; color: #ffffff; margin-top: 0.375rem;">Add a known onion peer</h2>
-        <p class="stat-sub" style="max-width: 30rem;">
-          Validate a known onion endpoint and announce it to this node when automated discovery is not enough.
-        </p>
-
-        <form style="margin-top: 1.25rem; width: 100%; max-width: 32rem;" @submit.prevent="submitManualPeer">
-          <div class="search-box-inner">
-            <input v-model.trim="peerInput" type="url" inputmode="url"
-              placeholder="http://example.onion"
-              aria-label="Peer onion URL" required :disabled="peerPending" class="hud-input" />
-            <button type="submit" :disabled="peerPending" class="btn-cyber">
-              {{ peerPending ? 'Checking…' : 'Add Peer' }}
-            </button>
-          </div>
-        </form>
-
-        <p v-if="peerFeedbackMessage" :style="{ marginTop: '0.75rem', fontSize: '0.875rem', color: peerFeedbackKind === 'error' ? 'var(--text-alert)' : 'var(--text-neon)' }">
-          {{ peerFeedbackMessage }}
-        </p>
-      </section>
+      </div>
     </main>
   </div>
 
@@ -250,18 +254,6 @@
             { label: "Tips", value: this.overview.tipCount },
             { label: "Max Depth", value: this.overview.maxDepth },
           ];
-        },
-        peerFeedbackClass() {
-          if (this.peerFeedbackKind === "success") {
-            return "text-emerald-300";
-          }
-          if (this.peerFeedbackKind === "error") {
-            return "text-rose-300";
-          }
-          if (this.peerFeedbackKind === "pending") {
-            return "text-sky-200";
-          }
-          return "text-slate-400";
         },
       },
       mounted() {
