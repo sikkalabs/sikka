@@ -5,10 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Address · Sikka</title>
   <meta name="description" content="Address explorer view for a Sikka node.">
-  <meta name="theme-color" content="#020617">
-  <script src="/public/tailwind.browser.js"></script>
+  <link rel="stylesheet" href="/public/style.css">
   <script src="/public/vue.global.prod.js"></script>
-  <script src="/public/wallet-common.js"></script>
   <style>
     .maturity-badge {
       display: inline-flex;
@@ -114,12 +112,90 @@
 
   <script>
     const { createApp } = Vue;
-    const {
-      formatSikka,
-      normalizeUTXO,
-      utxoMaturityInfo,
-      utxoMaturityBadgeClass
-    } = window;
+
+    const CHILLAR_PER_SIKKA = 10_000_000_000n;
+    const MIN_UTXO_MATURITY_SECONDS = 600;
+
+    function toBigIntInteger(value) {
+      if (typeof value === 'bigint') return value;
+      if (typeof value === 'number') {
+        if (!Number.isFinite(value) || !Number.isInteger(value)) return 0n;
+        return BigInt(String(value));
+      }
+      if (typeof value === 'string') {
+        const trimmed = value.trim();
+        if (!/^-?\d+$/.test(trimmed)) return 0n;
+        return BigInt(trimmed);
+      }
+      return 0n;
+    }
+
+    function normalizeUTXO(utxo) {
+      return {
+        ...utxo,
+        txid: String(utxo.txid || ''),
+        index: Number(utxo.index || 0),
+        address: String(utxo.address || ''),
+        value: toBigIntInteger(utxo.value || '0'),
+        dag_depth: Number(utxo.dag_depth || 0),
+        created_at: Number(utxo.created_at || 0)
+      };
+    }
+
+    function formatSikka(chillar) {
+      const amount = toBigIntInteger(chillar);
+      const negative = amount < 0n;
+      const abs = negative ? -amount : amount;
+      const whole = abs / CHILLAR_PER_SIKKA;
+      const frac = abs % CHILLAR_PER_SIKKA;
+      return (negative ? '-' : '') + whole.toString() + '.' + frac.toString().padStart(10, '0');
+    }
+
+    function formatMaturityCountdown(seconds) {
+      const remaining = Math.max(0, Number(seconds) || 0);
+      if (remaining < 60) return 'in ' + remaining + 's';
+      const minutes = Math.ceil(remaining / 60);
+      if (minutes < 60) return 'in ~' + minutes + ' min';
+      const hours = Math.floor(minutes / 60);
+      const remMinutes = minutes % 60;
+      if (hours < 24) return 'in ~' + hours + 'h' + (remMinutes ? ' ' + remMinutes + 'm' : '');
+      return 'at ' + new Date((Math.floor(Date.now() / 1000) + remaining) * 1000).toLocaleString();
+    }
+
+    function utxoMaturityInfo(utxo, options) {
+      const opts = options && typeof options === 'object' ? options : {};
+      const genesisTxId = String(opts.genesisTxId || '');
+      const now = Number.isFinite(opts.now) ? opts.now : Math.floor(Date.now() / 1000);
+      const txid = String(utxo.txid || '');
+      const createdAt = Number(utxo.created_at || 0);
+
+      if (genesisTxId && txid === genesisTxId) {
+        return { mature: true, kind: 'genesis', createdAt, maturesAt: createdAt, secondsRemaining: 0, label: 'Mature', detail: 'Genesis payout' };
+      }
+      if (!createdAt) {
+        return { mature: false, kind: 'missing', createdAt: 0, maturesAt: null, secondsRemaining: null, label: 'Immature', detail: 'Missing created_at' };
+      }
+      const maturesAt = createdAt + MIN_UTXO_MATURITY_SECONDS;
+      const mature = now >= maturesAt;
+      const secondsRemaining = mature ? 0 : maturesAt - now;
+
+      return {
+        mature,
+        kind: mature ? 'mature' : 'immature',
+        createdAt,
+        maturesAt,
+        secondsRemaining,
+        label: mature ? 'Mature' : 'Immature',
+        detail: mature ? 'Ready to spend' : 'Matures ' + formatMaturityCountdown(secondsRemaining)
+      };
+    }
+
+    function utxoMaturityBadgeClass(info) {
+      if (!info || !info.mature) {
+        return 'maturity-badge maturity-badge-immature';
+      }
+      return 'maturity-badge maturity-badge-mature';
+    }
 
     createApp({
       data() {

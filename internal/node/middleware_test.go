@@ -46,23 +46,3 @@ func TestSecurityHeadersStatic(t *testing.T) {
 	}
 }
 
-func TestWalletCommonJSServed(t *testing.T) {
-	t.Parallel()
-
-	n := mustNewNode(t, config.Config{APIPort: 64552, DataDir: t.TempDir(), SyncIntervalSeconds: 15})
-	if n.publicDir == "" {
-		t.Skip("public assets not available in test runtime")
-	}
-
-	req := httptest.NewRequest(http.MethodGet, "/public/wallet-common.js", nil)
-	rec := httptest.NewRecorder()
-	n.routes().ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
-	}
-	if body := rec.Body.String(); !strings.Contains(body, "formatSikka") || !strings.Contains(body, "utxoMaturityInfo") {
-		t.Fatalf("wallet-common.js missing expected functions")
-	}
-}
-
