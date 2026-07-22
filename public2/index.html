@@ -167,17 +167,18 @@
             </div>
           </section>
 
-          <!-- Known Peers Counter & Featured Peer Spotlight -->
+          <!-- Network Peers & Recovery Panel -->
           <section class="panel">
             <div class="panel-header">
-              <span class="panel-title">KNOWN PEERS</span>
+              <span class="panel-title">NETWORK PEERS & RECOVERY</span>
               <span id="knownNodesBadge" class="badge">-- TRACKED</span>
             </div>
+            
             <p id="knownNodesDesc" style="font-size: 0.875rem; color: var(--text-muted); margin-bottom: 1rem;">
               Connecting to verified Tor onion peers in the Sikka network...
             </p>
 
-            <div id="featuredPeerContainer" style="display: none; padding: 0.875rem; background: var(--bg-card-hover); border: 1px solid var(--border-subtle); border-radius: var(--radius-md);">
+            <div id="featuredPeerContainer" style="display: none; padding: 0.875rem; background: var(--bg-card-hover); border: 1px solid var(--border-subtle); border-radius: var(--radius-md); margin-bottom: 1.25rem;">
               <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.375rem;">
                 <span style="font-size: 0.6875rem; font-family: var(--font-mono); color: var(--text-sky); font-weight: 700; letter-spacing: 0.05em;">PEER SPOTLIGHT</span>
                 <div style="display: flex; gap: 0.375rem;">
@@ -187,27 +188,26 @@
               </div>
               <p id="featuredPeerUrl" class="tip-hash" style="font-size: 0.75rem; word-break: break-all; margin-top: 0.25rem;"></p>
             </div>
-          </section>
 
-          <!-- Manual Peer Recovery Panel -->
-          <section class="panel">
-            <div class="panel-header">
-              <span class="panel-title">MANUAL PEER RECOVERY</span>
+            <div style="padding-top: 1.25rem; border-top: 1px solid var(--border-subtle);">
+              <div style="margin-bottom: 0.75rem;">
+                <span style="font-family: var(--font-mono); font-size: 0.75rem; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em;">MANUAL PEER RECOVERY</span>
+                <p style="font-size: 0.8125rem; color: var(--text-subtle); margin-top: 0.25rem;">
+                  Announce a known onion endpoint to force peer discovery.
+                </p>
+              </div>
+
+              <form id="peerForm" style="display: flex; gap: 0.75rem;">
+                <input id="peerInput" type="url" inputmode="url"
+                  placeholder="http://example.onion"
+                  aria-label="Peer onion URL" required class="nav-search-input" style="flex: 1;" />
+                <button id="peerBtn" type="submit" class="btn-primary" style="white-space: nowrap;">
+                  Add Peer
+                </button>
+              </form>
+
+              <p id="peerFeedback" style="display: none; margin-top: 0.75rem; font-size: 0.8125rem;"></p>
             </div>
-            <p style="font-size: 0.8125rem; color: var(--text-muted); margin-bottom: 1rem;">
-              Announce a known onion endpoint to force peer discovery.
-            </p>
-
-            <form id="peerForm" style="display: flex; flex-direction: column; gap: 0.75rem;">
-              <input id="peerInput" type="url" inputmode="url"
-                placeholder="http://example.onion"
-                aria-label="Peer onion URL" required class="nav-search-input" />
-              <button id="peerBtn" type="submit" class="btn-primary" style="width: 100%;">
-                Add Peer
-              </button>
-            </form>
-
-            <p id="peerFeedback" style="display: none; marginTop: 0.75rem; font-size: 0.8125rem;"></p>
           </section>
         </div>
       </div>
