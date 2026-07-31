@@ -44,11 +44,21 @@
       margin: 0;
     }
     .lead {
-      margin: 1rem 0 0;
-      max-width: 28rem;
-      color: var(--muted);
-      font-size: 1.05rem;
+      margin: 1.15rem 0 0;
+      max-width: 36rem;
+      color: var(--ink);
+      font-size: 1.02rem;
+      line-height: 1.55;
     }
+    .lead em {
+      font-style: italic;
+    }
+    .lead a.inline {
+      color: var(--accent);
+      text-decoration: underline;
+      text-underline-offset: 0.15em;
+    }
+    .lead a.inline:hover { color: var(--ink); }
     .cta {
       display: inline-block;
       margin-top: 1.75rem;
@@ -132,7 +142,11 @@
   <main>
     <h1 class="brand">SIKKA</h1>
     <p class="lead">
-      Feeless, post-quantum payments. Balances stay; history does not.
+      SIKKA is a feeless, post-quantum cryptocurrency named after
+      <em>sikkā</em>, the Punjabi word for coin in the history of
+      <a class="inline" href="https://en.wikipedia.org/wiki/Sikh_coinage">Sikh coinage</a>.
+      The term is borrowed from Persian, where it meant both a die for minting
+      and, by extension, the authority to coin money.
     </p>
     <div class="links">
       <a class="cta" href="/wallet.html">Open wallet</a>
