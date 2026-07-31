@@ -12,7 +12,7 @@ use std::sync::Arc;
 use parking_lot::{Mutex, MutexGuard};
 use tracing::{debug, info, warn};
 
-use sikka_checkpoint::CheckpointStore;
+use sikka_checkpoint::{CheckpointStore, LocalVoteStore};
 use sikka_common::account::Account;
 use sikka_common::bytes::{Address, Hash, PublicKey};
 use sikka_common::checkpoint::Checkpoint;
@@ -100,6 +100,9 @@ pub struct Node {
     chain: Mutex<Chain>,
     mempool: Mutex<Mempool>,
     votes: Mutex<VoteTracker>,
+    /// Our own signed votes for unfinalized heights. Survives restarts so we
+    /// cannot equivocate against ourselves after a reboot.
+    local_votes: LocalVoteStore,
     peers: Mutex<PeerBook>,
     started_at: u64,
 }
@@ -127,6 +130,7 @@ impl Node {
 
         let (ledger, outcome) = Ledger::open(config.state_path(), &genesis)?;
         let checkpoints = CheckpointStore::open(config.checkpoints_path())?;
+        let local_votes = LocalVoteStore::open(config.local_votes_path())?;
 
         match &outcome {
             GenesisOutcome::Initialized(checkpoint) => {
@@ -141,6 +145,18 @@ impl Node {
             GenesisOutcome::Existing => {
                 info!(height = ledger.height(), "opened existing chain");
             }
+        }
+
+        let mut votes = VoteTracker::new();
+        let restored = local_votes.load_above(ledger.height())?;
+        for vote in restored {
+            votes.record(vote)?;
+        }
+        if votes.tracked_heights() > 0 {
+            info!(
+                heights = votes.tracked_heights(),
+                "restored local votes from disk"
+            );
         }
 
         let mut peers = PeerBook::new(address);
@@ -163,7 +179,8 @@ impl Node {
                 last_progress: now,
             }),
             mempool: Mutex::new(mempool),
-            votes: Mutex::new(VoteTracker::new()),
+            votes: Mutex::new(votes),
+            local_votes,
             peers: Mutex::new(peers),
             started_at: now,
             config,
@@ -484,6 +501,8 @@ impl Node {
 
         let hash = verified.hash();
         let vote = Vote::sign(&self.keypair, height, hash)?;
+        // Disk before broadcast: a crash after signing must not let us sign again.
+        self.local_votes.put(&vote)?;
         chain.pending = Some(Pending {
             transactions: proposal.transactions.clone(),
             verified,
@@ -563,6 +582,7 @@ impl Node {
         let verified_ids: HashSet<Hash> = self.mempool.lock().verified_ids();
         let verified = verify_proposal(&mut chain.ledger, proposal, now, &verified_ids)?;
         let vote = Vote::sign(&self.keypair, height, hash)?;
+        self.local_votes.put(&vote)?;
 
         chain.pending = Some(Pending {
             verified,
@@ -766,6 +786,7 @@ impl Node {
         drop(mempool);
 
         self.votes.lock().prune_below(checkpoint.header.height + 1);
+        self.local_votes.prune_below(checkpoint.header.height + 1)?;
         Ok(())
     }
 
@@ -866,6 +887,7 @@ impl Node {
         drop(chain);
 
         self.votes.lock().prune_below(height + 1);
+        self.local_votes.prune_below(height + 1)?;
         info!(
             height,
             accounts = snapshot.accounts.len(),
@@ -1179,6 +1201,75 @@ mod tests {
         let response = f.node.handle_proposal(&rival).unwrap();
         assert!(!response.accepted);
         assert!(response.reason.unwrap().contains("already voted"));
+    }
+
+    #[test]
+    fn local_votes_survive_restart_and_block_equivocation() {
+        let f = solo_node();
+        let bob = Address([7u8; 32]);
+        f.node
+            .submit_transaction(transfer(&f.alice, bob, 1, 0))
+            .unwrap();
+        f.node
+            .submit_transaction(transfer(&f.alice, bob, 1, 1))
+            .unwrap();
+        let (proposal, original_vote) = f.node.try_propose().unwrap().unwrap();
+        let height = proposal.height();
+        let config = f.node.config().clone();
+        let votes_path = config.local_votes_path();
+        drop(f.node);
+
+        assert_eq!(
+            LocalVoteStore::open(&votes_path)
+                .unwrap()
+                .get(height)
+                .unwrap()
+                .as_ref(),
+            Some(&original_vote),
+            "vote must survive process exit on disk"
+        );
+
+        let reopened = Node::open(config).unwrap();
+        assert_eq!(reopened.height(), 0, "proposal was never finalized");
+
+        // A rival at the same height must be refused — the vote came back from disk.
+        let mut rival = proposal.clone();
+        rival.header.timestamp += 1;
+        let refused = reopened.handle_proposal(&rival).unwrap();
+        assert!(!refused.accepted);
+        assert!(refused.reason.unwrap().contains("already voted"));
+
+        // The original hash is idempotent: re-send the same vote.
+        let accepted = reopened.handle_proposal(&proposal).unwrap();
+        assert!(accepted.accepted);
+        let vote = accepted.vote.expect("same-hash retry returns the vote");
+        assert_eq!(vote, original_vote);
+        assert_eq!(vote.height, height);
+    }
+
+    #[test]
+    fn finalized_local_votes_are_pruned() {
+        let f = solo_node();
+        let bob = Address([7u8; 32]);
+        f.node
+            .submit_transaction(transfer(&f.alice, bob, 1, 0))
+            .unwrap();
+        f.node
+            .submit_transaction(transfer(&f.alice, bob, 1, 1))
+            .unwrap();
+        let (_, vote) = f.node.try_propose().unwrap().unwrap();
+        let height = vote.height;
+        let votes_path = f.node.config().local_votes_path();
+        f.node.handle_vote(vote).unwrap().unwrap();
+        assert_eq!(f.node.height(), height);
+        drop(f.node);
+
+        let stored = LocalVoteStore::open(votes_path).unwrap();
+        assert!(
+            stored.get(height).unwrap().is_none(),
+            "finalized heights must leave the durable vote store"
+        );
+        assert!(stored.load_above(0).unwrap().is_empty());
     }
 
     #[test]

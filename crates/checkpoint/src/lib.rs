@@ -7,6 +7,10 @@
 //!
 //! [`CHECKPOINT_HISTORY`]: sikka_common::constants::CHECKPOINT_HISTORY
 
+mod local_votes;
+
+pub use local_votes::LocalVoteStore;
+
 use std::path::Path;
 
 use redb::{Database, ReadableTable, ReadableTableMetadata, TableDefinition};

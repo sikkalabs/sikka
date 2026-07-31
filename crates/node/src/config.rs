@@ -138,6 +138,10 @@ impl NodeConfig {
     pub fn checkpoints_path(&self) -> PathBuf {
         self.data_dir.join("checkpoints.redb")
     }
+
+    pub fn local_votes_path(&self) -> PathBuf {
+        self.data_dir.join("local_votes.redb")
+    }
 }
 
 fn env(key: &str) -> Option<String> {
@@ -179,6 +183,10 @@ mod tests {
         assert_eq!(config.key_path, PathBuf::from("/data/node_key.json"));
         assert_eq!(config.genesis_path, PathBuf::from("/data/genesis.json"));
         assert_eq!(config.state_path(), PathBuf::from("/data/state.redb"));
+        assert_eq!(
+            config.local_votes_path(),
+            PathBuf::from("/data/local_votes.redb")
+        );
         assert_eq!(config.listen.port(), DEFAULT_PORT);
         assert!(
             config.listen.ip().is_unspecified(),
