@@ -9,6 +9,7 @@
 use serde::{Deserialize, Serialize};
 
 use sikka_common::bytes::Address;
+use sikka_common::codec::{Decode, Encode, Reader, Writer};
 use sikka_common::error::{Error, Result};
 use sikka_common::vote::Vote;
 
@@ -65,6 +66,25 @@ impl Equivocation {
         self.first.verify()?;
         self.second.verify()?;
         Ok(())
+    }
+}
+
+impl Encode for Equivocation {
+    fn encode(&self, w: &mut Writer) {
+        w.raw(self.validator.as_bytes()).u64(self.height);
+        self.first.encode(w);
+        self.second.encode(w);
+    }
+}
+
+impl Decode for Equivocation {
+    fn decode(r: &mut Reader<'_>) -> Result<Self> {
+        Ok(Self {
+            validator: Address::decode(r)?,
+            height: r.u64()?,
+            first: Vote::decode(r)?,
+            second: Vote::decode(r)?,
+        })
     }
 }
 
@@ -143,5 +163,9 @@ mod tests {
         let parsed: Equivocation = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed, evidence);
         parsed.verify().unwrap();
+
+        let decoded = Equivocation::from_bytes(&evidence.to_bytes()).unwrap();
+        assert_eq!(decoded, evidence);
+        decoded.verify().unwrap();
     }
 }

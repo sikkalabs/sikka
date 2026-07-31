@@ -13,7 +13,7 @@ use std::sync::Arc;
 use parking_lot::{Mutex, MutexGuard};
 use tracing::{debug, info, warn};
 
-use sikka_checkpoint::{CheckpointStore, LocalVoteStore};
+use sikka_checkpoint::{CheckpointStore, Commitment, CommitmentStore};
 use sikka_common::account::Account;
 use sikka_common::bytes::{Address, Hash, PublicKey};
 use sikka_common::checkpoint::Checkpoint;
@@ -30,7 +30,7 @@ use sikka_consensus::proposal::{
     VerifiedProposal,
 };
 use sikka_consensus::votes::{VoteOutcome, VoteTracker};
-use sikka_consensus::{proposer_for_round, round_at};
+use sikka_consensus::{proposer_for_round, round_at, PROPOSER_TIMEOUT_SECS};
 use sikka_p2p::bloom::BloomFilter;
 use sikka_p2p::mempool::{Admission, Mempool, DEFAULT_MAX_AGE_SECS};
 use sikka_p2p::peers::{Peer, PeerAnnounce, PeerBook};
@@ -75,10 +75,27 @@ impl Outbox {
 /// A proposal this node has replayed, signed, and is waiting on quorum for.
 struct Pending {
     verified: VerifiedProposal,
-    transactions: Vec<Transaction>,
+    /// Kept whole so an abandoned round can be offered again byte for byte.
+    proposal: CheckpointProposal,
     hash: Hash,
     height: u64,
     created_at: u64,
+}
+
+/// A checkpoint this node voted for and has not finalized.
+///
+/// The vote is durable and binds this node for as long as the height stays open:
+/// it may not sign a rival, so this is the only checkpoint it can still help
+/// commit there. Holding on to the proposal is what lets a later round offer it
+/// again — without it the vote would outlive every trace of what it was for, and
+/// the height could never close. It is stored next to the vote on disk, so a
+/// restart mid-round recovers both.
+struct Locked {
+    proposal: CheckpointProposal,
+    /// When it was last replayed and offered, to keep replay off the hot loop.
+    /// `None` until it has been offered, so a round that has already waited out
+    /// its timeout is retried at once.
+    offered_at: Option<u64>,
 }
 
 /// Consensus state that must move together.
@@ -88,6 +105,8 @@ struct Chain {
     /// At most one: a validator that has signed one checkpoint at a height must
     /// never sign another, or it slashes itself.
     pending: Option<Pending>,
+    /// The checkpoint an abandoned round left this node committed to, if any.
+    locked: Option<Locked>,
     /// When the last checkpoint was finalized, for the idle-timer that lets a
     /// quiet chain make progress without a full batch.
     last_progress: u64,
@@ -101,9 +120,10 @@ pub struct Node {
     chain: Mutex<Chain>,
     mempool: Mutex<Mempool>,
     votes: Mutex<VoteTracker>,
-    /// Our own signed votes for unfinalized heights. Survives restarts so we
-    /// cannot equivocate against ourselves after a reboot.
-    local_votes: LocalVoteStore,
+    /// Our own signed votes for unfinalized heights, each with the checkpoint it
+    /// was cast over. Survives restarts so we can neither equivocate against
+    /// ourselves after a reboot nor lose track of what we already signed.
+    commitments: CommitmentStore,
     peers: Mutex<PeerBook>,
     started_at: u64,
 }
@@ -131,7 +151,7 @@ impl Node {
 
         let (ledger, outcome) = Ledger::open(config.state_path(), &genesis)?;
         let checkpoints = CheckpointStore::open(config.checkpoints_path())?;
-        let local_votes = LocalVoteStore::open(config.local_votes_path())?;
+        let commitments = CommitmentStore::open(config.commitments_path())?;
 
         match &outcome {
             GenesisOutcome::Initialized(checkpoint) => {
@@ -149,15 +169,26 @@ impl Node {
             }
         }
 
+        // A vote already cast still binds this node at a height that is still
+        // open, and the checkpoint it was cast over is the only one it may help
+        // commit there. Both come back, so a restart mid-round can offer that
+        // checkpoint again instead of stranding the height.
         let mut votes = VoteTracker::new();
-        let restored = local_votes.load_above(ledger.height())?;
-        for vote in restored {
-            votes.record(vote)?;
+        let mut locked = None;
+        for commitment in commitments.load_above(ledger.height())? {
+            if commitment.height() == ledger.height() + 1 {
+                locked = Some(Locked {
+                    proposal: commitment.proposal,
+                    offered_at: None,
+                });
+            }
+            votes.record(commitment.vote)?;
         }
         if votes.tracked_heights() > 0 {
             info!(
                 heights = votes.tracked_heights(),
-                "restored local votes from disk"
+                can_reoffer = locked.is_some(),
+                "restored our own votes from disk"
             );
         }
 
@@ -178,11 +209,12 @@ impl Node {
                 ledger,
                 checkpoints,
                 pending: None,
+                locked,
                 last_progress: now,
             }),
             mempool: Mutex::new(mempool),
             votes: Mutex::new(votes),
-            local_votes,
+            commitments,
             peers: Mutex::new(peers),
             started_at: now,
             config,
@@ -484,16 +516,20 @@ impl Node {
         let timestamp = now.max(last_time + 1);
         let round = round_at(timestamp, last_time);
 
+        // A vote already cast binds us until this height closes: proposing a
+        // rival would be equivocation against ourselves, so the checkpoint we
+        // voted for is the only one left to push. Offering it again is what
+        // rescues a round whose quorum never arrived.
+        let own_vote = self.votes.lock().vote_by(height, &self.address).cloned();
+        if let Some(vote) = own_vote {
+            return Ok(self.reoffer_locked(chain, vote, now));
+        }
+
         let active = chain.ledger.active_validators_at(height)?;
         let Some(proposer) = proposer_for_round(height, round, &active) else {
             return Ok(None);
         };
         if proposer != self.address {
-            return Ok(None);
-        }
-        // If we already signed something at this height, proposing a rival would
-        // be equivocation against ourselves.
-        if self.votes.lock().vote_by(height, &self.address).is_some() {
             return Ok(None);
         }
 
@@ -532,10 +568,14 @@ impl Node {
 
         let hash = verified.hash();
         let vote = Vote::sign(&self.keypair, height, hash)?;
-        // Disk before broadcast: a crash after signing must not let us sign again.
-        self.local_votes.put(&vote)?;
+        // Disk before broadcast: a crash after signing must not let us sign again,
+        // and must not lose the checkpoint the signature commits us to.
+        self.commitments.put(&Commitment {
+            vote: vote.clone(),
+            proposal: proposal.clone(),
+        })?;
         chain.pending = Some(Pending {
-            transactions: proposal.transactions.clone(),
+            proposal: proposal.clone(),
             verified,
             hash,
             height,
@@ -553,6 +593,73 @@ impl Node {
             "proposing checkpoint"
         );
         Ok(Some((proposal, vote)))
+    }
+
+    /// Offer the checkpoint an abandoned round left us committed to.
+    ///
+    /// Whose turn it was and whether the clock agreed were settled when this
+    /// proposal was first signed, so neither is re-checked here: a header that
+    /// has aged past the tolerance window is still the only checkpoint this node
+    /// may help finalize, and refusing to replay it would strand the height for
+    /// good. Only the state transition is re-derived, and it still has to
+    /// reproduce the roots the header claims.
+    ///
+    /// A peer that already voted answers an identical proposal with the vote it
+    /// cast, which is what completes a quorum whose first answer was lost or
+    /// arrived after this node stopped waiting.
+    fn reoffer_locked(
+        &self,
+        mut chain: MutexGuard<'_, Chain>,
+        vote: Vote,
+        now: u64,
+    ) -> Option<(CheckpointProposal, Vote)> {
+        let locked = chain.locked.as_mut()?;
+        if locked
+            .offered_at
+            .is_some_and(|at| now.saturating_sub(at) < PROPOSER_TIMEOUT_SECS)
+        {
+            return None;
+        }
+        let proposal = locked.proposal.clone();
+        if proposal.hash() != vote.checkpoint_hash {
+            return None;
+        }
+        locked.offered_at = Some(now);
+
+        let height = proposal.height();
+        let verified_ids: HashSet<Hash> = self.mempool.lock().verified_ids();
+        let verified = match verify_proposal_with(
+            &mut chain.ledger,
+            &proposal,
+            now,
+            &verified_ids,
+            Authority::Finalized,
+        ) {
+            Ok(verified) => verified,
+            Err(error) => {
+                // Offer it anyway: a peer holding the matching staging can still
+                // finalize it, and its signed form will come back to us.
+                debug!(%error, height, "could not restage the checkpoint we voted for");
+                return Some((proposal, vote));
+            }
+        };
+
+        let hash = verified.hash();
+        chain.pending = Some(Pending {
+            proposal: proposal.clone(),
+            verified,
+            hash,
+            height,
+            created_at: now,
+        });
+        drop(chain);
+
+        info!(
+            height,
+            hash = %hash.short(),
+            "offering the checkpoint we voted for again"
+        );
+        Some((proposal, vote))
     }
 
     /// Evidence worth acting on: equivocation by validators still bonded.
@@ -594,7 +701,8 @@ impl Node {
         if let Some(previous) = self.votes.lock().vote_by(height, &self.address) {
             if previous.checkpoint_hash == hash {
                 // Idempotent: re-send the vote so a retrying proposer makes
-                // progress.
+                // progress. This is what lets an abandoned round be completed
+                // when it is offered again.
                 return Ok(ProposalResponse {
                     accepted: true,
                     vote: Some(previous.clone()),
@@ -613,11 +721,14 @@ impl Node {
         let verified_ids: HashSet<Hash> = self.mempool.lock().verified_ids();
         let verified = verify_proposal(&mut chain.ledger, proposal, now, &verified_ids)?;
         let vote = Vote::sign(&self.keypair, height, hash)?;
-        self.local_votes.put(&vote)?;
+        self.commitments.put(&Commitment {
+            vote: vote.clone(),
+            proposal: proposal.clone(),
+        })?;
 
         chain.pending = Some(Pending {
             verified,
-            transactions: proposal.transactions.clone(),
+            proposal: proposal.clone(),
             hash,
             height,
             created_at: now,
@@ -687,22 +798,18 @@ impl Node {
         }
         checkpoint.canonicalize();
 
-        self.commit(
-            &mut chain,
-            pending.verified,
-            &checkpoint,
-            &pending.transactions,
-        )?;
+        let transactions = pending.proposal.transactions;
+        self.commit(&mut chain, pending.verified, &checkpoint, &transactions)?;
         info!(
             height,
             hash = %hash.short(),
             signatures = checkpoint.validator_signatures.len(),
-            transactions = pending.transactions.len(),
+            transactions = transactions.len(),
             "finalized checkpoint"
         );
         Ok(Some(Finalized {
             checkpoint,
-            transactions: pending.transactions,
+            transactions,
         }))
     }
 
@@ -743,12 +850,8 @@ impl Node {
         let matches_pending = chain.pending.as_ref().is_some_and(|p| p.hash == hash);
         if matches_pending {
             let pending = chain.pending.take().expect("checked above");
-            self.commit(
-                &mut chain,
-                pending.verified,
-                checkpoint,
-                &pending.transactions,
-            )?;
+            let transactions = pending.proposal.transactions;
+            self.commit(&mut chain, pending.verified, checkpoint, &transactions)?;
             debug!(height, hash = %hash.short(), "adopted the finalized form of our pending checkpoint");
             return Ok(true);
         }
@@ -817,6 +920,8 @@ impl Node {
             warn!(%error, height, "could not prune checkpoint history");
         }
         chain.last_progress = now_secs();
+        // The height is closed, so nothing here binds us any more.
+        chain.locked = None;
 
         let ids: Vec<Hash> = transactions.iter().map(|tx| tx.id()).collect();
         let senders: Vec<Address> = transactions.iter().map(|tx| tx.from).collect();
@@ -830,7 +935,7 @@ impl Node {
         drop(mempool);
 
         self.votes.lock().prune_below(checkpoint.header.height + 1);
-        self.local_votes.prune_below(checkpoint.header.height + 1)?;
+        self.commitments.prune_below(checkpoint.header.height + 1)?;
         Ok(())
     }
 
@@ -839,7 +944,14 @@ impl Node {
     /// Only the *staged state* is released, never the vote: the vote is a
     /// signed commitment, and forgetting it would let this node sign a second
     /// checkpoint at the same height and slash itself. Releasing the staging
-    /// lets a later round be replayed and applied if it wins instead.
+    /// lets a later round be replayed and applied if it wins instead, and keeps
+    /// the ledger's Merkle roots equal to the last committed checkpoint while
+    /// the height stays open.
+    ///
+    /// The proposal is kept, because the vote by itself is a commitment with
+    /// nothing left to commit: this node may not sign a rival, so unless it can
+    /// offer this same checkpoint again the height can never close. See
+    /// [`Self::reoffer_locked`].
     pub fn expire_pending(&self, timeout_secs: u64) -> bool {
         let now = now_secs();
         let mut chain = self.chain();
@@ -852,9 +964,13 @@ impl Node {
         let pending = chain.pending.take().expect("checked above");
         let height = pending.height;
         chain.ledger.rollback(pending.verified.staged);
+        chain.locked = Some(Locked {
+            proposal: pending.proposal,
+            offered_at: None,
+        });
         warn!(
             height,
-            "pending checkpoint timed out without quorum; abandoning the round"
+            "pending checkpoint timed out without quorum; will offer it again"
         );
         true
     }
@@ -1004,6 +1120,7 @@ impl Node {
         if let Some(stale) = chain.pending.take() {
             chain.ledger.rollback(stale.verified.staged);
         }
+        chain.locked = None;
         chain.checkpoints.put_unpruned(&snapshot.checkpoint)?;
         if let Err(error) = chain.ledger.apply_snapshot(snapshot) {
             if let Err(remove_error) = chain.checkpoints.remove(height) {
@@ -1022,7 +1139,7 @@ impl Node {
         drop(chain);
 
         self.votes.lock().prune_below(height + 1);
-        self.local_votes.prune_below(height + 1)?;
+        self.commitments.prune_below(height + 1)?;
         info!(
             height,
             accounts = snapshot.accounts.len(),
@@ -1148,6 +1265,80 @@ mod tests {
             node,
             alice,
             _dir: dir,
+        }
+    }
+
+    struct Pair {
+        nodes: Vec<Arc<Node>>,
+        configs: Vec<NodeConfig>,
+        alice: sikka_crypto::Keypair,
+        _dirs: Vec<tempfile::TempDir>,
+    }
+
+    /// Two validators on one genesis, wired by hand rather than over HTTP.
+    ///
+    /// Quorum is both of them, so no checkpoint closes without a round completing
+    /// end to end — which is what makes an interrupted round observable.
+    fn validator_pair() -> Pair {
+        let alice = sikka_crypto::Keypair::generate().unwrap();
+        let keys: Vec<sikka_crypto::Keypair> = (0..2)
+            .map(|_| sikka_crypto::Keypair::generate().unwrap())
+            .collect();
+
+        let genesis = GenesisConfig {
+            chain_id: "sikka-pair".into(),
+            timestamp: now_secs() - 10,
+            checkpoint_tx_interval: Some(2),
+            allocations: keys
+                .iter()
+                .map(|kp| GenesisAllocation {
+                    to: Address(kp.address_bytes()),
+                    amount: 1_000_000 * CHILLAR_PER_SIKKA,
+                })
+                .chain(std::iter::once(GenesisAllocation {
+                    to: Address(alice.address_bytes()),
+                    amount: 1_000 * CHILLAR_PER_SIKKA,
+                }))
+                .collect(),
+            validators: keys
+                .iter()
+                .map(|kp| GenesisValidator {
+                    public_key: PublicKey::new(*kp.public_bytes()),
+                    bond: 500_000 * CHILLAR_PER_SIKKA,
+                    endpoint: None,
+                })
+                .collect(),
+        };
+        let json = genesis.to_json();
+
+        let mut dirs = Vec::new();
+        let mut configs = Vec::new();
+        for (index, kp) in keys.iter().enumerate() {
+            let dir = tempfile::tempdir().unwrap();
+            Keystore::from_keypair(kp)
+                .save(dir.path().join("node_key.json"))
+                .unwrap();
+            std::fs::write(dir.path().join("genesis.json"), &json).unwrap();
+            configs.push(NodeConfig {
+                data_dir: dir.path().to_path_buf(),
+                genesis_path: dir.path().join("genesis.json"),
+                key_path: dir.path().join("node_key.json"),
+                bootstrap: Vec::new(),
+                advertise: format!("http://pair-{index}:8080"),
+                ..NodeConfig::default()
+            });
+            dirs.push(dir);
+        }
+
+        let nodes = configs
+            .iter()
+            .map(|config| Node::open(config.clone()).unwrap())
+            .collect();
+        Pair {
+            nodes,
+            configs,
+            alice,
+            _dirs: dirs,
         }
     }
 
@@ -1289,7 +1480,7 @@ mod tests {
     }
 
     #[test]
-    fn a_stalled_round_expires_and_frees_the_node() {
+    fn a_stalled_round_is_offered_again_rather_than_stranding_the_height() {
         let f = solo_node();
         let bob = Address([7u8; 32]);
         f.node
@@ -1300,7 +1491,7 @@ mod tests {
             .unwrap();
         let root_before = f.node.chain_info().unwrap().state_root;
 
-        f.node.try_propose().unwrap().unwrap();
+        let (first, first_vote) = f.node.try_propose().unwrap().unwrap();
         assert!(!f.node.expire_pending(600), "not yet due");
         assert!(f.node.expire_pending(0), "an overdue round is abandoned");
 
@@ -1310,10 +1501,23 @@ mod tests {
             root_before,
             "abandoning a round must leave state exactly as it was"
         );
-        // The vote survives the abandoned staging, so the node will not propose a
-        // rival checkpoint at the same height and slash itself. On a real network
-        // the turn passes to another validator by round.
-        assert!(f.node.try_propose().unwrap().is_none());
+
+        // The vote survives the abandoned staging and binds this node for as long
+        // as the height is open, so the checkpoint it was cast for is offered
+        // again — never a rival, and never nothing, which would leave a height
+        // nobody can close while the vote sits on disk.
+        let (again, again_vote) = f
+            .node
+            .try_propose()
+            .unwrap()
+            .expect("the checkpoint we voted for is offered again");
+        assert_eq!(again.hash(), first.hash());
+        assert_eq!(again_vote, first_vote);
+
+        // A vote that turns up once the staging is back still closes the height.
+        let finalized = f.node.finalize_if_quorum().unwrap().unwrap();
+        assert_eq!(finalized.checkpoint.header.height, 1);
+        assert_eq!(f.node.height(), 1);
     }
 
     #[test]
@@ -1339,7 +1543,7 @@ mod tests {
     }
 
     #[test]
-    fn local_votes_survive_restart_and_block_equivocation() {
+    fn our_own_commitments_survive_restart_and_block_equivocation() {
         let f = solo_node();
         let bob = Address([7u8; 32]);
         f.node
@@ -1351,17 +1555,19 @@ mod tests {
         let (proposal, original_vote) = f.node.try_propose().unwrap().unwrap();
         let height = proposal.height();
         let config = f.node.config().clone();
-        let votes_path = config.local_votes_path();
+        let commitments_path = config.commitments_path();
         drop(f.node);
 
         assert_eq!(
-            LocalVoteStore::open(&votes_path)
+            CommitmentStore::open(&commitments_path)
                 .unwrap()
                 .get(height)
-                .unwrap()
-                .as_ref(),
-            Some(&original_vote),
-            "vote must survive process exit on disk"
+                .unwrap(),
+            Some(Commitment {
+                vote: original_vote.clone(),
+                proposal: proposal.clone(),
+            }),
+            "the vote and the checkpoint it commits us to must both survive exit"
         );
 
         let reopened = Node::open(config).unwrap();
@@ -1374,16 +1580,106 @@ mod tests {
         assert!(!refused.accepted);
         assert!(refused.reason.unwrap().contains("already voted"));
 
+        // The checkpoint came back with the vote, so this node can offer it again
+        // unaided. Were it restoring the vote alone it would be bound to a
+        // checkpoint it could not name, and only a peer re-sending that exact
+        // proposal could ever close the height.
+        let (again, again_vote) = reopened
+            .try_propose()
+            .unwrap()
+            .expect("the restored commitment is offered again");
+        assert_eq!(again, proposal);
+        assert_eq!(again_vote, original_vote);
+
         // The original hash is idempotent: re-send the same vote.
         let accepted = reopened.handle_proposal(&proposal).unwrap();
         assert!(accepted.accepted);
         let vote = accepted.vote.expect("same-hash retry returns the vote");
         assert_eq!(vote, original_vote);
         assert_eq!(vote.height, height);
+
+        assert_eq!(
+            reopened.finalize_if_quorum().unwrap().unwrap().checkpoint,
+            reopened.checkpoint(height).unwrap()
+        );
+        assert_eq!(reopened.height(), height);
+    }
+
+    /// Every validator restarts mid-round, before any of them has quorum.
+    ///
+    /// Both have signed, so neither may sign anything else at this height: the
+    /// checkpoint they signed is the only one that can ever close it. Restoring
+    /// the votes without it would leave the whole set bound to a checkpoint none
+    /// of them could name, and the chain would stop here for good.
+    #[test]
+    fn a_round_interrupted_by_restarting_every_validator_still_closes() {
+        let pair = validator_pair();
+        let bob = Address([7u8; 32]);
+        for node in &pair.nodes {
+            for nonce in 0..2 {
+                node.submit_transaction(transfer(&pair.alice, bob, 1, nonce))
+                    .unwrap();
+            }
+        }
+
+        // Whoever's turn it is proposes; asking the other costs nothing.
+        let (proposal, proposer_vote, proposer) = match pair.nodes[0].try_propose().unwrap() {
+            Some((proposal, vote)) => (proposal, vote, 0),
+            None => {
+                let (proposal, vote) = pair.nodes[1]
+                    .try_propose()
+                    .unwrap()
+                    .expect("one of the two holds the round");
+                (proposal, vote, 1)
+            }
+        };
+        let voter = 1 - proposer;
+        let voter_vote = pair.nodes[voter]
+            .handle_proposal(&proposal)
+            .unwrap()
+            .vote
+            .expect("the other validator agrees");
+
+        // Both go down before either has seen the other's vote.
+        drop(pair.nodes);
+        let restarted: Vec<Arc<Node>> = pair
+            .configs
+            .iter()
+            .map(|config| Node::open(config.clone()).unwrap())
+            .collect();
+        assert!(restarted.iter().all(|node| node.height() == 0));
+
+        // The proposer offers what it signed, byte for byte, straight off disk.
+        let (again, again_vote) = restarted[proposer]
+            .try_propose()
+            .unwrap()
+            .expect("the restored commitment is offered again");
+        assert_eq!(again, proposal);
+        assert_eq!(again_vote, proposer_vote);
+
+        // The other validator recognises it and answers with the vote it restored.
+        let answer = restarted[voter].handle_proposal(&again).unwrap();
+        assert!(answer.accepted);
+        assert_eq!(answer.vote, Some(voter_vote.clone()));
+
+        let finalized = restarted[proposer]
+            .handle_vote(voter_vote)
+            .unwrap()
+            .expect("both signatures are a quorum");
+        assert_eq!(finalized.checkpoint.header.height, 1);
+        assert_eq!(finalized.checkpoint.hash(), proposal.hash());
+
+        assert!(restarted[voter]
+            .handle_finalized(&finalized.checkpoint, &finalized.transactions)
+            .unwrap());
+        assert!(restarted.iter().all(|node| node.height() == 1));
+        assert!(restarted
+            .iter()
+            .all(|node| node.account(&bob).unwrap().balance == 2));
     }
 
     #[test]
-    fn finalized_local_votes_are_pruned() {
+    fn finalized_commitments_are_pruned() {
         let f = solo_node();
         let bob = Address([7u8; 32]);
         f.node
@@ -1394,17 +1690,17 @@ mod tests {
             .unwrap();
         let (_, vote) = f.node.try_propose().unwrap().unwrap();
         let height = vote.height;
-        let votes_path = f.node.config().local_votes_path();
+        let commitments_path = f.node.config().commitments_path();
         f.node.handle_vote(vote).unwrap().unwrap();
         assert_eq!(f.node.height(), height);
         drop(f.node);
 
-        let stored = LocalVoteStore::open(votes_path).unwrap();
+        let stored = CommitmentStore::open(commitments_path).unwrap();
         assert!(
             stored.get(height).unwrap().is_none(),
-            "finalized heights must leave the durable vote store"
+            "finalized heights must leave the durable commitment store"
         );
-        assert!(stored.load_above(0).unwrap().is_empty());
+        assert!(stored.is_empty().unwrap());
     }
 
     #[test]

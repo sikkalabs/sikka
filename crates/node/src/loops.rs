@@ -22,7 +22,8 @@ use crate::sync;
 ///
 /// A few proposer turns: by then the round-robin has moved on, and holding the
 /// staging only stops this node from replaying whichever checkpoint does win.
-/// The vote itself is never released, so nothing here risks equivocation.
+/// The vote itself is never released, so nothing here risks equivocation, and
+/// the proposal is kept so the round can be offered again.
 const ROUND_TIMEOUT_SECS: u64 = 3 * sikka_consensus::PROPOSER_TIMEOUT_SECS;
 
 /// Spawn every loop and return their handles.
@@ -53,6 +54,18 @@ async fn consensus_loop(node: Arc<Node>, gossip: Arc<Gossip>) {
     let mut ticker = ticker(node.config().propose_interval);
     loop {
         ticker.tick().await;
+
+        // A vote can arrive before the checkpoint it completes is staged — out of
+        // order, or during a round this node had already given up on — so the
+        // tally is worth re-checking even when nothing happened here.
+        match node.finalize_if_quorum() {
+            Ok(Some(finalized)) => {
+                gossip.finalized(finalized);
+                continue;
+            }
+            Ok(None) => {}
+            Err(e) => warn!(error = %e, "finalizing a staged checkpoint failed"),
+        }
 
         if node.expire_pending(ROUND_TIMEOUT_SECS) {
             continue;

@@ -20,3 +20,6 @@ genesis.json
 *.swp
 .idea/
 .vscode/
+
+
+.env

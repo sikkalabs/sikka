@@ -5,11 +5,14 @@
 //! and once a newer one has done that, the older attestation is redundant. This
 //! is why a ten-year-old chain is no larger than a new one.
 //!
+//! Alongside that history lives [`CommitmentStore`], the durable record of what
+//! this node itself has signed at heights that are still open.
+//!
 //! [`CHECKPOINT_HISTORY`]: sikka_common::constants::CHECKPOINT_HISTORY
 
-mod local_votes;
+mod commitment;
 
-pub use local_votes::LocalVoteStore;
+pub use commitment::{Commitment, CommitmentStore};
 
 use std::path::Path;
 

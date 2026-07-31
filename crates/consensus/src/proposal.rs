@@ -12,6 +12,7 @@ use serde::{Deserialize, Serialize};
 
 use sikka_common::bytes::{Address, Hash};
 use sikka_common::checkpoint::{Checkpoint, CheckpointHeader};
+use sikka_common::codec::{Decode, Encode, Reader, Writer};
 use sikka_common::constants::TX_TIME_TOLERANCE_SECS;
 use sikka_common::error::{Error, Result};
 use sikka_common::transaction::Transaction;
@@ -39,6 +40,24 @@ impl CheckpointProposal {
 
     pub fn hash(&self) -> Hash {
         self.header.hash()
+    }
+}
+
+impl Encode for CheckpointProposal {
+    fn encode(&self, w: &mut Writer) {
+        self.header.encode(w);
+        self.transactions.encode(w);
+        self.evidence.encode(w);
+    }
+}
+
+impl Decode for CheckpointProposal {
+    fn decode(r: &mut Reader<'_>) -> Result<Self> {
+        Ok(Self {
+            header: CheckpointHeader::decode(r)?,
+            transactions: Vec::<Transaction>::decode(r)?,
+            evidence: Vec::<Equivocation>::decode(r)?,
+        })
     }
 }
 
@@ -358,7 +377,41 @@ pub fn verify_proposal_with(
 mod tests {
     use super::*;
     use sikka_common::transaction::Transaction;
+    use sikka_common::vote::Vote;
     use sikka_crypto::Keypair;
+
+    #[test]
+    fn a_proposal_survives_a_codec_roundtrip() {
+        let kp = Keypair::generate().unwrap();
+        let proposal = CheckpointProposal {
+            header: CheckpointHeader {
+                height: 9,
+                prev_hash: Hash([1u8; 32]),
+                state_root: Hash([2u8; 32]),
+                validator_root: Hash([3u8; 32]),
+                tx_root: Hash([4u8; 32]),
+                tx_count: 2,
+                timestamp: 1_700_000_000,
+                proposer: Address([5u8; 32]),
+                round: 3,
+                total_supply: 1_000_000,
+                total_bonded: 1_000,
+            },
+            transactions: vec![
+                Transaction::transfer(&kp, Address([6u8; 32]), 1, 0, 1_700_000_000).unwrap(),
+                Transaction::transfer(&kp, Address([7u8; 32]), 2, 1, 1_700_000_000).unwrap(),
+            ],
+            evidence: vec![Equivocation::new(
+                Vote::sign(&kp, 9, Hash([8u8; 32])).unwrap(),
+                Vote::sign(&kp, 9, Hash([9u8; 32])).unwrap(),
+            )
+            .unwrap()],
+        };
+
+        let decoded = CheckpointProposal::from_bytes(&proposal.to_bytes()).unwrap();
+        assert_eq!(decoded, proposal);
+        assert_eq!(decoded.hash(), proposal.hash());
+    }
 
     #[test]
     fn canonical_order_sorts_and_deduplicates() {

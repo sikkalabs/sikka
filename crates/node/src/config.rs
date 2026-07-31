@@ -157,8 +157,8 @@ impl NodeConfig {
         self.data_dir.join("checkpoints.redb")
     }
 
-    pub fn local_votes_path(&self) -> PathBuf {
-        self.data_dir.join("local_votes.redb")
+    pub fn commitments_path(&self) -> PathBuf {
+        self.data_dir.join("commitments.redb")
     }
 
     pub fn snapshot_cache_path(&self) -> PathBuf {
@@ -224,8 +224,8 @@ mod tests {
         assert_eq!(config.genesis_path, PathBuf::from("/data/genesis.json"));
         assert_eq!(config.state_path(), PathBuf::from("/data/state.redb"));
         assert_eq!(
-            config.local_votes_path(),
-            PathBuf::from("/data/local_votes.redb")
+            config.commitments_path(),
+            PathBuf::from("/data/commitments.redb")
         );
         assert_eq!(
             config.snapshot_cache_path(),

@@ -1332,6 +1332,7 @@ version = "0.1.0"
 dependencies = [
  "redb",
  "sikka-common",
+ "sikka-consensus",
  "sikka-crypto",
  "tempfile",
  "tracing",
