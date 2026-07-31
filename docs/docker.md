@@ -5,7 +5,7 @@ Image: [`ghcr.io/sikkalabs/sikka:latest`](https://github.com/orgs/sikkalabs/pack
 **Peer mesh is Tor.** The image runs `tor` + `sikka-node`: a v3 onion is
 derived from the node key and published automatically. Users still use plain
 HTTP on port **64552** (wallet / RPC / landing page) on any node they can reach
-— localhost, LAN, or a clearnet gateway.
+— localhost or LAN HTTP on that node.
 
 Data in `/data`, key at `/data/node_key.json`, onion keys under `/data/tor/`.
 Genesis is baked in (supply **19,960,907 SIKKA** to `0x9949…447`).
@@ -47,9 +47,8 @@ curl -s http://127.0.0.1:64552/          # landing page
 open http://127.0.0.1:64552/wallet.html  # browser wallet on this node
 ```
 
-Joiners: different `--name`, volume, and seed. No clearnet DNS required for the
-mesh. Optional: `-e SIKKA_ADVERTISE=https://your.gateway` if this process is a
-user-facing clearnet front door **and** still peers over Tor (default).
+Joiners: different `--name`, volume, and seed. The entrypoint always advertises
+the onion derived from that key; peers find each other over Tor.
 
 ### Fund and bond (joiners)
 
@@ -104,11 +103,12 @@ docker exec sikka sikka help
 | Variable | Default in image | Meaning |
 | --- | --- | --- |
 | `SIKKA_PRIVATE_KEY` | unset | 32-byte seed or full secret (hex); else a key is created under `/data` |
-| `SIKKA_ADVERTISE` | `http://<derived>.onion` | URL peers dial (override for clearnet gateways) |
-| `SIKKA_TOR_PROXY` | `socks5h://127.0.0.1:9050` | outbound mesh via Tor |
 | `SIKKA_BOOTSTRAP` | two Tor onions (see `BOOTSTRAP_NODES`) | first peers |
 | `SIKKA_GENESIS` | baked-in if missing | optional custom genesis path |
 | `SIKKA_LOG` | `info` | tracing filter |
+
+`SIKKA_ADVERTISE` and `SIKKA_TOR_PROXY` are set by the entrypoint from the
+derived onion and local Tor SOCKS — do not set them.
 
 ---
 

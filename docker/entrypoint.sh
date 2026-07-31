@@ -23,11 +23,14 @@ if [ -z "$ONION" ]; then
   exit 1
 fi
 
-ADVERTISE_DEFAULT="http://${ONION}"
-export SIKKA_TOR_PROXY="${SIKKA_TOR_PROXY:-socks5h://${SOCKS_ADDR}}"
-# Operators may still override advertise (e.g. clearnet gateway), but the default
-# mesh identity is the onion derived from this node's key.
-export SIKKA_ADVERTISE="${SIKKA_ADVERTISE:-$ADVERTISE_DEFAULT}"
+ADVERTISE="http://${ONION}"
+# Mesh identity is always the onion from this node's key — ignore any host-set
+# SIKKA_ADVERTISE so an operator cannot advertise the wrong endpoint.
+if [ -n "${SIKKA_ADVERTISE:-}" ] && [ "$SIKKA_ADVERTISE" != "$ADVERTISE" ]; then
+  echo "entrypoint: ignoring SIKKA_ADVERTISE=${SIKKA_ADVERTISE} (using derived onion)" >&2
+fi
+export SIKKA_ADVERTISE="$ADVERTISE"
+export SIKKA_TOR_PROXY="socks5h://${SOCKS_ADDR}"
 export SIKKA_KEYSTORE="$KEYSTORE"
 
 cat > "$TOR_RC" <<EOF
