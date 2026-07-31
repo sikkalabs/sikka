@@ -17,8 +17,9 @@ use sikka_crypto::Keypair;
 /// Domain tag mixed into the KDF so Tor material is never the ML-DSA key.
 pub const TOR_ONION_KDF_TAG: &[u8] = b"SIKKA/tor-onion/v1";
 
-const HS_SECRET_PREFIX: &[u8] = b"== ed25519v1-secret: type0 ==\0";
-const HS_PUBLIC_PREFIX: &[u8] = b"== ed25519v1-public: type0 ==\0";
+// Tor pads these tags to exactly 32 bytes with trailing NULs.
+const HS_SECRET_PREFIX: &[u8] = b"== ed25519v1-secret: type0 ==\0\0\0";
+const HS_PUBLIC_PREFIX: &[u8] = b"== ed25519v1-public: type0 ==\0\0\0";
 
 /// Tor v3 onion identity for a SIKKA keypair.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -160,12 +161,26 @@ mod tests {
     }
 
     #[test]
+    fn tor_key_prefixes_are_32_bytes() {
+        assert_eq!(HS_SECRET_PREFIX.len(), 32);
+        assert_eq!(HS_PUBLIC_PREFIX.len(), 32);
+        assert_eq!(&HS_SECRET_PREFIX[29..], &[0, 0, 0]);
+        assert_eq!(&HS_PUBLIC_PREFIX[29..], &[0, 0, 0]);
+    }
+
+    #[test]
     fn writes_hidden_service_dir() {
         let dir = tempfile::tempdir().unwrap();
         let id = TorOnionId::from_keypair(&Keypair::from_seed(&[3u8; 32]).unwrap());
         id.write_hidden_service_dir(dir.path()).unwrap();
         assert!(dir.path().join("hostname").exists());
-        assert!(dir.path().join("hs_ed25519_secret_key").exists());
+        let secret = std::fs::read(dir.path().join("hs_ed25519_secret_key")).unwrap();
+        let public = std::fs::read(dir.path().join("hs_ed25519_public_key")).unwrap();
+        // Tor's on-disk format: 32-byte tag + 64-byte expanded secret / 32-byte pubkey.
+        assert_eq!(secret.len(), 96);
+        assert_eq!(public.len(), 64);
+        assert_eq!(&secret[..32], HS_SECRET_PREFIX);
+        assert_eq!(&public[..32], HS_PUBLIC_PREFIX);
         let hostname = std::fs::read_to_string(dir.path().join("hostname")).unwrap();
         assert_eq!(hostname.trim(), id.hostname);
     }
