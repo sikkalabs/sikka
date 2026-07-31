@@ -143,7 +143,6 @@
       <div class="live"><span class="dot" id="dot"></span><span id="status">Connecting…</span></div>
       <h2>Network</h2>
       <div class="grid">
-        <div><div class="label">Chain</div><div class="value" id="chain">—</div></div>
         <div><div class="label">Height</div><div class="value" id="height">—</div></div>
         <div><div class="label">Supply</div><div class="value" id="supply">—</div></div>
         <div><div class="label">Bonded</div><div class="value" id="bonded">—</div></div>
@@ -192,7 +191,6 @@
         const info = await rpc("chain.info");
         $("dot").className = "dot on";
         $("status").textContent = `online · height ${info.height}`;
-        $("chain").textContent = info.chain_id;
         $("height").textContent = String(info.height);
         $("supply").textContent = formatSikka(info.total_supply);
         $("bonded").textContent = formatSikka(info.total_bonded);

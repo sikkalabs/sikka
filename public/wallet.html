@@ -141,7 +141,6 @@
         <span class="status live" id="netDot"><span class="dot" id="dot"></span><span id="netStatus">…</span></span>
       </div>
       <div class="grid" id="netStats" style="margin-top:1rem" hidden>
-        <div><div class="stat-label">Chain</div><div class="stat-value" id="nChain">—</div></div>
         <div><div class="stat-label">Height</div><div class="stat-value" id="nHeight">—</div></div>
         <div><div class="stat-label">Supply</div><div class="stat-value" id="nSupply">—</div></div>
         <div><div class="stat-label">Bonded</div><div class="stat-value" id="nBonded">—</div></div>
@@ -363,7 +362,6 @@
       try {
         const info = await rpc("chain.info");
         $("netStats").hidden = false;
-        $("nChain").textContent = info.chain_id;
         $("nHeight").textContent = String(info.height);
         $("nSupply").textContent = `${formatSikka(info.total_supply)} SIKKA`;
         $("nBonded").textContent = `${formatSikka(info.total_bonded)} SIKKA`;
