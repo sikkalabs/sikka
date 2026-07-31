@@ -41,18 +41,6 @@ SIKKA does neither:
 
 ## Quick start
 
-```bash
-docker pull ghcr.io/sikkalabs/sikka:latest
-
-docker run -d --name sikka \
-  -p 64552:64552 -v sikka-data:/data \
-  -e SIKKA_PRIVATE_KEY=<seed> \
-  -e SIKKA_ADVERTISE=https://your.domain \
-  ghcr.io/sikkalabs/sikka:latest
-```
-
-Then open `http://localhost:64552/` or run `docker exec sikka sikka info`.
-
 Full runbook (join, fund, bond, CLI): **[`docs/docker.md`](docs/docker.md)**.  
 Build a wallet: **[`docs/wallets.md`](docs/wallets.md)**.  
 HTTP + JSON-RPC: **[`docs/api.md`](docs/api.md)**.
@@ -76,16 +64,3 @@ crates/
 public/       landing page + browser wallet
 docs/         docker + API guides
 ```
-
----
-
-## Develop
-
-```bash
-docker build -t sikka-test -f Dockerfile.test .
-docker run --rm sikka-test
-
-./dockerhub.sh    # multi-arch → ghcr.io/sikkalabs/sikka:latest + :0.1.0
-```
-
-Everything intended for production runs in Docker; there is no bare-metal path.
