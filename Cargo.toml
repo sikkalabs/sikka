@@ -50,6 +50,7 @@ tempfile = "3"
 ed25519-dalek = { version = "2.1", default-features = false, features = ["std", "zeroize"] }
 sha2 = "0.10"
 data-encoding = "2"
+zstd = "0.13.3"
 
 
 [profile.release]

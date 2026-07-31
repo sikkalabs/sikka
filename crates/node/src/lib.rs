@@ -17,7 +17,7 @@ pub mod loops;
 pub mod node;
 pub mod sync;
 
-pub use config::NodeConfig;
+pub use config::{NodeConfig, TrustedCheckpoint};
 pub use gossip::Gossip;
 pub use node::{Finalized, Node};
 

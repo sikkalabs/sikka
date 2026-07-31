@@ -7,6 +7,7 @@
 //! (there is no runtime involved) and makes deadlock structurally impossible.
 
 use std::collections::HashSet;
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use parking_lot::{Mutex, MutexGuard};
@@ -38,7 +39,7 @@ use sikka_rpc::types::{
     AccountInfo, AccountProof, ChainInfo, MempoolInfo, TxStatus, ValidatorInfo,
 };
 use sikka_state::ledger::GenesisOutcome;
-use sikka_state::{Ledger, StateSnapshot};
+use sikka_state::{Ledger, SnapshotArchive, SnapshotChunkMeta, SnapshotManifest, StateSnapshot};
 use sikka_wallet::Keystore;
 
 use crate::config::NodeConfig;
@@ -143,6 +144,7 @@ impl Node {
                 );
             }
             GenesisOutcome::Existing => {
+                checkpoints.reconcile(ledger.height())?;
                 info!(height = ledger.height(), "opened existing chain");
             }
         }
@@ -342,6 +344,28 @@ impl Node {
             .get(height)?
             .ok_or(Error::CheckpointNotFound(height))?;
         chain.ledger.snapshot(checkpoint)
+    }
+
+    /// Build or load the current chunked snapshot manifest.
+    pub fn snapshot_manifest(&self) -> Result<SnapshotManifest> {
+        let chain = self.chain();
+        let height = chain.ledger.height();
+        let checkpoint = chain
+            .checkpoints
+            .get(height)?
+            .ok_or(Error::CheckpointNotFound(height))?;
+        chain
+            .ledger
+            .snapshot_archive(checkpoint, self.config.snapshot_cache_path())
+    }
+
+    /// Resolve a cached chunk after validating its snapshot id and index.
+    pub fn snapshot_chunk(
+        &self,
+        snapshot_id: &Hash,
+        index: u32,
+    ) -> Result<(SnapshotChunkMeta, PathBuf)> {
+        SnapshotArchive::chunk_path(self.config.snapshot_cache_path(), snapshot_id, index)
     }
 
     pub fn height(&self) -> u64 {
@@ -777,8 +801,21 @@ impl Node {
         checkpoint: &Checkpoint,
         transactions: &[Transaction],
     ) -> Result<()> {
-        chain.ledger.commit(verified.staged, checkpoint)?;
-        chain.checkpoints.put(checkpoint)?;
+        let height = checkpoint.header.height;
+        chain.checkpoints.put_unpruned(checkpoint)?;
+        if let Err(error) = chain.ledger.commit(verified.staged, checkpoint) {
+            if let Err(remove_error) = chain.checkpoints.remove(height) {
+                warn!(
+                    %remove_error,
+                    height,
+                    "could not remove uncommitted write-ahead checkpoint"
+                );
+            }
+            return Err(error);
+        }
+        if let Err(error) = chain.checkpoints.prune_for_height(height) {
+            warn!(%error, height, "could not prune checkpoint history");
+        }
         chain.last_progress = now_secs();
 
         let ids: Vec<Hash> = transactions.iter().map(|tx| tx.id()).collect();
@@ -851,6 +888,84 @@ impl Node {
         self.mempool.lock().prune_expired(now_secs())
     }
 
+    fn validate_snapshot_target(
+        &self,
+        chain: &Chain,
+        chain_id: &str,
+        genesis_fingerprint: Hash,
+        checkpoint: &Checkpoint,
+    ) -> Result<bool> {
+        let height = checkpoint.header.height;
+        let local_height = chain.ledger.height();
+        if height <= local_height {
+            return Err(Error::Other(format!(
+                "snapshot at height {height} is not ahead of local height {local_height}"
+            )));
+        }
+        if genesis_fingerprint != chain.ledger.meta().genesis_fingerprint {
+            return Err(Error::GenesisMismatch);
+        }
+        if chain_id != chain.ledger.meta().chain_id {
+            return Err(Error::ChainIdMismatch {
+                expected: chain.ledger.meta().chain_id.clone(),
+                actual: chain_id.to_string(),
+            });
+        }
+
+        let checkpoint_hash = checkpoint.hash();
+        let pinned = match self.config.trusted_checkpoint {
+            Some(anchor) if anchor.height == height => {
+                if anchor.hash != checkpoint_hash {
+                    return Err(Error::Other(format!(
+                        "snapshot checkpoint {checkpoint_hash} does not match the trusted checkpoint {}",
+                        anchor.hash
+                    )));
+                }
+                true
+            }
+            _ => false,
+        };
+        let validators_changed = checkpoint.header.validator_root != chain.ledger.validator_root();
+        if height > local_height.saturating_add(1) && validators_changed && !pinned {
+            return Err(Error::Other(format!(
+                "snapshot changes validators across a gap from {local_height} to {height}; \
+                 set SIKKA_TRUSTED_CHECKPOINT={height}:{checkpoint_hash} after independently \
+                 verifying that checkpoint"
+            )));
+        }
+        Ok(pinned)
+    }
+
+    /// Validate a manifest's chain identity and trust anchor before downloading
+    /// its potentially large chunk set.
+    pub fn verify_snapshot_manifest(&self, manifest: &SnapshotManifest) -> Result<()> {
+        manifest.validate()?;
+        let chain = self.chain();
+        let pinned = self.validate_snapshot_target(
+            &chain,
+            &manifest.chain_id,
+            manifest.genesis_fingerprint,
+            &manifest.checkpoint,
+        )?;
+        if pinned {
+            return Ok(());
+        }
+        let height = manifest.checkpoint.header.height;
+        let validators = chain.ledger.validators()?;
+        let authorized: Vec<(Address, PublicKey)> = validators
+            .iter()
+            .filter(|validator| validator.is_active_at(height))
+            .map(|validator| (validator.address, validator.public_key.clone()))
+            .collect();
+        if authorized.is_empty() {
+            return Err(Error::NoActiveValidators);
+        }
+        manifest
+            .checkpoint
+            .verify_signatures(authorized.iter().map(|(address, key)| (address, key)))?;
+        Ok(())
+    }
+
     /// Replace local state with a snapshot from a peer.
     ///
     /// This is the only way to close a gap of more than one checkpoint: SIKKA
@@ -859,28 +974,29 @@ impl Node {
     pub fn apply_snapshot(&self, snapshot: &StateSnapshot) -> Result<u64> {
         let mut chain = self.chain();
         let height = snapshot.checkpoint.header.height;
-        if height <= chain.ledger.height() {
-            return Err(Error::Other(format!(
-                "snapshot at height {height} is not ahead of local height {}",
-                chain.ledger.height()
-            )));
-        }
+        let pinned = self.validate_snapshot_target(
+            &chain,
+            &snapshot.chain_id,
+            snapshot.genesis_fingerprint,
+            &snapshot.checkpoint,
+        )?;
 
-        // Trust anchor: the validator set we already know. A snapshot cannot
-        // introduce its own validators and then vouch for itself.
-        let known: Vec<Validator> = chain.ledger.validators()?;
-        let authorized: Vec<(Address, PublicKey)> = if known.is_empty() {
-            snapshot
-                .validators
-                .iter()
-                .map(|v| (v.address, v.public_key.clone()))
-                .collect()
+        // A one-height transition is authorized by the locally known active
+        // set. Across a larger unchanged-validator gap the same set remains the
+        // trust anchor. A pinned checkpoint may use its committed validator set.
+        let validators: Vec<Validator> = if pinned {
+            snapshot.validators.clone()
         } else {
-            known
-                .iter()
-                .map(|v| (v.address, v.public_key.clone()))
-                .collect()
+            chain.ledger.validators()?
         };
+        let authorized: Vec<(Address, PublicKey)> = validators
+            .iter()
+            .filter(|validator| validator.is_active_at(height))
+            .map(|validator| (validator.address, validator.public_key.clone()))
+            .collect();
+        if authorized.is_empty() {
+            return Err(Error::NoActiveValidators);
+        }
         snapshot
             .checkpoint
             .verify_signatures(authorized.iter().map(|(a, k)| (a, k)))?;
@@ -888,8 +1004,20 @@ impl Node {
         if let Some(stale) = chain.pending.take() {
             chain.ledger.rollback(stale.verified.staged);
         }
-        chain.ledger.apply_snapshot(snapshot)?;
-        chain.checkpoints.put(&snapshot.checkpoint)?;
+        chain.checkpoints.put_unpruned(&snapshot.checkpoint)?;
+        if let Err(error) = chain.ledger.apply_snapshot(snapshot) {
+            if let Err(remove_error) = chain.checkpoints.remove(height) {
+                warn!(
+                    %remove_error,
+                    height,
+                    "could not remove rejected write-ahead checkpoint"
+                );
+            }
+            return Err(error);
+        }
+        if let Err(error) = chain.checkpoints.prune_for_height(height) {
+            warn!(%error, height, "could not prune checkpoint history");
+        }
         chain.last_progress = now_secs();
         drop(chain);
 

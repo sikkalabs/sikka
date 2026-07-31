@@ -7,8 +7,11 @@ derived from the node key and published automatically. Users still use plain
 HTTP on port **64552** (wallet / RPC / landing page) on any node they can reach
 — localhost or LAN HTTP on that node.
 
-Data in `/data`, key at `/data/node_key.json`, onion keys under `/data/tor/`.
-Genesis is baked in (supply **19,960,907 SIKKA** to `0x9949…447`).
+Data in `/data`, key at `/data/node_key.json`, onion keys under `/data/tor/`,
+and resumable state snapshot chunks under `/data/snapshots/`. Snapshot sync is
+chunked and zstd-compressed so interrupted Tor downloads continue from the last
+verified chunk. Genesis is baked in (supply **19,960,907 SIKKA** to
+`0x9949…447`).
 
 ---
 
@@ -105,11 +108,16 @@ docker exec sikka sikka help
 | `SIKKA_PRIVATE_KEY` | unset | 32-byte seed or full secret (hex); else a key is created under `/data` |
 | `SIKKA_BOOTSTRAP` | two Tor onions (see `BOOTSTRAP_NODES`) | first peers |
 | `SIKKA_GENESIS` | baked-in if missing | optional custom genesis path |
+| `SIKKA_TRUSTED_CHECKPOINT` | unset | `<height>:<hash>` trust anchor required when fast-sync crosses multiple heights and the validator set changed |
 | `SIKKA_LOG` | `info` | tracing filter |
 | `SIKKA_TOR_READY_TIMEOUT_SECS` | `300` | how long to wait for Tor `Bootstrapped 100%` before starting the node |
 
 `SIKKA_ADVERTISE` and `SIKKA_TOR_PROXY` are set by the entrypoint from the
 derived onion and local Tor SOCKS — do not set them.
+
+Do not copy `SIKKA_TRUSTED_CHECKPOINT` from an untrusted peer. Verify the
+checkpoint hash independently through multiple operators or a release
+announcement first. Gaps with an unchanged validator root need no pin.
 
 Tor writes notices to `/data/tor/notice.log` (not container stdout). Inspect with:
 

@@ -658,6 +658,17 @@ fn tampered_snapshots_are_rejected() {
     tampered.accounts[0].1.balance += 1;
     assert!(tampered.verify().is_err());
 
+    let mut duplicate_account = snapshot.clone();
+    let first_account = duplicate_account.accounts[0];
+    duplicate_account.accounts.insert(1, first_account);
+    assert!(duplicate_account.verify().is_err());
+
+    let mut duplicate_validator = snapshot.clone();
+    duplicate_validator
+        .validators
+        .push(duplicate_validator.validators[0].clone());
+    assert!(duplicate_validator.verify().is_err());
+
     let mut inflated = snapshot;
     inflated.checkpoint.header.total_supply += 1;
     assert!(inflated.verify().is_err());

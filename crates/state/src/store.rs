@@ -151,6 +151,30 @@ impl StateStore {
         Ok(out)
     }
 
+    /// Visit every account in address order without collecting the full table.
+    ///
+    /// The read transaction gives snapshot generation a consistent view while
+    /// keeping memory bounded to the caller's current output chunk.
+    pub fn visit_accounts(
+        &self,
+        mut visit: impl FnMut(Address, Account) -> Result<()>,
+    ) -> Result<u64> {
+        let read = self.db.begin_read().map_err(storage_error)?;
+        let table = read.open_table(ACCOUNTS).map_err(storage_error)?;
+        let mut count = 0u64;
+        for entry in table.iter().map_err(storage_error)? {
+            let (key, value) = entry.map_err(storage_error)?;
+            visit(
+                Address::from_slice(key.value())?,
+                Account::from_bytes(value.value())?,
+            )?;
+            count = count
+                .checked_add(1)
+                .ok_or_else(|| Error::Storage("account count overflow".into()))?;
+        }
+        Ok(count)
+    }
+
     pub fn validator(&self, address: &Address) -> Result<Option<Validator>> {
         let read = self.db.begin_read().map_err(storage_error)?;
         let table = read.open_table(VALIDATORS).map_err(storage_error)?;
@@ -173,6 +197,21 @@ impl StateStore {
             out.push(Validator::from_bytes(value.value())?);
         }
         Ok(out)
+    }
+
+    /// Visit every validator in address order without collecting the table.
+    pub fn visit_validators(&self, mut visit: impl FnMut(Validator) -> Result<()>) -> Result<u64> {
+        let read = self.db.begin_read().map_err(storage_error)?;
+        let table = read.open_table(VALIDATORS).map_err(storage_error)?;
+        let mut count = 0u64;
+        for entry in table.iter().map_err(storage_error)? {
+            let (_, value) = entry.map_err(storage_error)?;
+            visit(Validator::from_bytes(value.value())?)?;
+            count = count
+                .checked_add(1)
+                .ok_or_else(|| Error::Storage("validator count overflow".into()))?;
+        }
+        Ok(count)
     }
 
     pub fn meta(&self) -> Result<Option<LedgerMeta>> {

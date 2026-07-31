@@ -5,6 +5,7 @@
 //! protocol itself needs no changes, because every message is already signed and
 //! there is nothing to protect in transit beyond metadata.
 
+use std::path::Path;
 use std::time::Duration;
 
 use sikka_common::bytes::Hash;
@@ -14,6 +15,11 @@ use sikka_common::error::{Error, Result};
 use sikka_common::transaction::Transaction;
 use sikka_common::vote::Vote;
 use sikka_consensus::proposal::CheckpointProposal;
+use sikka_state::{
+    SnapshotDownload, SnapshotManifest, StateSnapshot, SNAPSHOT_MAX_COMPRESSED_CHUNK_BYTES,
+    SNAPSHOT_MAX_MANIFEST_BYTES,
+};
+use tracing::{info, warn};
 
 use crate::bloom::BloomFilter;
 use crate::peers::{Peer, PeerAnnounce};
@@ -28,7 +34,7 @@ pub struct ClientConfig {
     /// Timeout for ordinary peer calls (health, votes, single transactions).
     pub timeout: Duration,
     /// Timeout for large transfers (proposals, finalized checkpoints, sync,
-    /// snapshots). Full JSON checkpoints can be hundreds of MiB over Tor.
+    /// and each independently resumable snapshot chunk).
     pub bulk_timeout: Duration,
     /// `socks5h://host:port`, typically a local Tor daemon. `socks5h` resolves
     /// names through the proxy, which is required for `.onion`.
@@ -126,14 +132,6 @@ impl PeerClient {
         self.get_timed(endpoint, path, self.timeout).await
     }
 
-    async fn get_bulk<R: serde::de::DeserializeOwned>(
-        &self,
-        endpoint: &str,
-        path: &str,
-    ) -> Result<R> {
-        self.get_timed(endpoint, path, self.bulk_timeout).await
-    }
-
     async fn get_timed<R: serde::de::DeserializeOwned>(
         &self,
         endpoint: &str,
@@ -148,6 +146,66 @@ impl PeerClient {
             .await
             .map_err(|e| Error::Network(format!("{path} from {endpoint}: {e}")))?;
         Self::decode(response, endpoint, path).await
+    }
+
+    async fn get_bytes_timed(
+        &self,
+        endpoint: &str,
+        path: &str,
+        timeout: Duration,
+        maximum: usize,
+    ) -> Result<Vec<u8>> {
+        let mut response = self
+            .http
+            .get(Self::url(endpoint, path))
+            .timeout(timeout)
+            .send()
+            .await
+            .map_err(|e| Error::Network(format!("{path} from {endpoint}: {e}")))?;
+        let status = response.status();
+        if !status.is_success() {
+            let mut body = Vec::new();
+            while let Some(chunk) = response
+                .chunk()
+                .await
+                .map_err(|e| Error::Network(format!("{path} from {endpoint}: {e}")))?
+            {
+                let remaining = 8 * 1024usize - body.len();
+                body.extend_from_slice(&chunk[..chunk.len().min(remaining)]);
+                if body.len() == 8 * 1024 {
+                    break;
+                }
+            }
+            return Err(Error::Network(format!(
+                "{endpoint}{path} returned {status}: {}",
+                String::from_utf8_lossy(&body)
+                    .chars()
+                    .take(200)
+                    .collect::<String>()
+            )));
+        }
+        if response
+            .content_length()
+            .is_some_and(|length| length > maximum as u64)
+        {
+            return Err(Error::Network(format!(
+                "{endpoint}{path} exceeds the {maximum}-byte response limit"
+            )));
+        }
+        let mut body = Vec::new();
+        while let Some(chunk) = response
+            .chunk()
+            .await
+            .map_err(|e| Error::Network(format!("{path} from {endpoint}: {e}")))?
+        {
+            if body.len().saturating_add(chunk.len()) > maximum {
+                return Err(Error::Network(format!(
+                    "{endpoint}{path} exceeds the {maximum}-byte response limit"
+                )));
+            }
+            body.extend_from_slice(&chunk);
+        }
+        Ok(body)
     }
 
     async fn decode<R: serde::de::DeserializeOwned>(
@@ -263,12 +321,114 @@ impl PeerClient {
         Ok(response.peers)
     }
 
-    /// Fetch a full state snapshot for fast sync.
+    pub async fn snapshot_manifest(&self, endpoint: &str) -> Result<SnapshotManifest> {
+        let manifest_bytes = self
+            .get_bytes_timed(
+                endpoint,
+                "state/snapshot/manifest",
+                self.bulk_timeout,
+                SNAPSHOT_MAX_MANIFEST_BYTES,
+            )
+            .await?;
+        let manifest: SnapshotManifest = serde_json::from_slice(&manifest_bytes).map_err(|e| {
+            Error::Network(format!(
+                "{endpoint} sent an unreadable snapshot manifest: {e}"
+            ))
+        })?;
+        manifest.validate()?;
+        Ok(manifest)
+    }
+
+    /// Download a chunked snapshot, resuming valid chunks already on disk.
     ///
-    /// Any node can serve this, validator or not: the snapshot is verified
-    /// against the checkpoint's signatures, so the source does not need trusting.
-    pub async fn snapshot(&self, endpoint: &str) -> Result<sikka_state::StateSnapshot> {
-        self.get_bulk(endpoint, "state/snapshot").await
+    /// The caller should validate checkpoint trust from the manifest first so
+    /// a malicious peer cannot waste bandwidth with unauthorised chunks.
+    pub async fn snapshot_from_manifest(
+        &self,
+        endpoint: &str,
+        download_root: impl AsRef<Path>,
+        manifest: SnapshotManifest,
+    ) -> Result<StateSnapshot> {
+        let download = SnapshotDownload::open(download_root, manifest)?;
+        info!(
+            snapshot = %download.manifest().snapshot_id,
+            chunks = download.manifest().chunks.len(),
+            accounts = download.manifest().account_count,
+            "downloading state snapshot"
+        );
+
+        for meta in download.manifest().chunks.clone() {
+            if download.has_chunk(&meta) {
+                info!(
+                    snapshot = %download.manifest().snapshot_id,
+                    chunk = meta.index + 1,
+                    total = download.manifest().chunks.len(),
+                    "reusing verified snapshot chunk"
+                );
+                continue;
+            }
+            let path = format!(
+                "state/snapshot/{}/chunk/{}",
+                download.manifest().snapshot_id.to_hex(),
+                meta.index
+            );
+            let mut last_error = None;
+            for attempt in 0..3u32 {
+                match self
+                    .get_bytes_timed(
+                        endpoint,
+                        &path,
+                        self.bulk_timeout,
+                        (meta.compressed_bytes as usize).min(SNAPSHOT_MAX_COMPRESSED_CHUNK_BYTES),
+                    )
+                    .await
+                    .and_then(|bytes| download.store_chunk(&meta, &bytes))
+                {
+                    Ok(()) => {
+                        last_error = None;
+                        break;
+                    }
+                    Err(error) => {
+                        warn!(
+                            peer = %endpoint,
+                            chunk = meta.index + 1,
+                            attempt = attempt + 1,
+                            %error,
+                            "snapshot chunk download failed"
+                        );
+                        last_error = Some(error);
+                        if attempt < 2 {
+                            tokio::time::sleep(Duration::from_secs(1u64 << attempt)).await;
+                        }
+                    }
+                }
+            }
+            if let Some(error) = last_error {
+                return Err(error);
+            }
+            info!(
+                snapshot = %download.manifest().snapshot_id,
+                chunk = meta.index + 1,
+                total = download.manifest().chunks.len(),
+                bytes = meta.compressed_bytes,
+                "downloaded snapshot chunk"
+            );
+        }
+
+        tokio::task::spawn_blocking(move || download.decode())
+            .await
+            .map_err(|e| Error::Other(format!("snapshot decode task failed: {e}")))?
+    }
+
+    /// Convenience wrapper for callers that validate trust after download.
+    pub async fn snapshot(
+        &self,
+        endpoint: &str,
+        download_root: impl AsRef<Path>,
+    ) -> Result<StateSnapshot> {
+        let manifest = self.snapshot_manifest(endpoint).await?;
+        self.snapshot_from_manifest(endpoint, download_root, manifest)
+            .await
     }
 
     /// Ask a peer whether it holds a transaction, used only by diagnostics.
@@ -288,7 +448,10 @@ mod tests {
 
     #[test]
     fn urls_join_without_doubling_slashes() {
-        assert_eq!(PeerClient::url("http://a:8080", "tx"), "http://a:8080/api/tx");
+        assert_eq!(
+            PeerClient::url("http://a:8080", "tx"),
+            "http://a:8080/api/tx"
+        );
         assert_eq!(
             PeerClient::url("http://a:8080/", "/tx"),
             "http://a:8080/api/tx"

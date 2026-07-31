@@ -22,10 +22,11 @@ Request bodies on ordinary endpoints are capped at Axum's default **2 MiB**.
 Bulk federation POSTs (`/api/checkpoint/proposal`, `/api/checkpoint/finalized`,
 `/api/tx/sync`) accept up to **256 MiB** so a full 10,000-transaction checkpoint
 (hex-encoded ML-DSA-87 material) can be gossiped. Clients should allow several
-minutes for those transfers, especially over Tor. Snapshot download is `GET`
-and is not subject to the request body limit; reverse proxies in front of a
-node still need a matching `client_max_body_size` (or equivalent) for the bulk
-POSTs.
+minutes for those transfers, especially over Tor. State snapshots use a
+manifest plus independently zstd-compressed 4 MiB chunks. Chunks are hashed,
+bounded, retried, and persisted so an interrupted Tor transfer resumes instead
+of restarting. Reverse proxies in front of a node still need a matching
+`client_max_body_size` (or equivalent) for the bulk POSTs.
 
 Errors on federation routes look like `{ "error": "…" }` with HTTP 4xx/5xx.
 JSON-RPC errors use `{ "jsonrpc":"2.0", "error":{ "code", "message" }, "id" }`.
@@ -50,7 +51,8 @@ JSON-RPC errors use `{ "jsonrpc":"2.0", "error":{ "code", "message" }, "id" }`.
 | `GET` | `/api/checkpoint/latest` | peers / clients |
 | `GET` | `/api/checkpoint/{height}` | peers / clients |
 | `POST` | `/api/peers` | peers |
-| `GET` | `/api/state/snapshot` | peers (fast sync) |
+| `GET` | `/api/state/snapshot/manifest` | peers (fast sync) |
+| `GET` | `/api/state/snapshot/{id}/chunk/{index}` | peers (fast sync) |
 
 ---
 
@@ -242,9 +244,28 @@ Same size budget as proposals when `transactions` is attached for replay.
 { "announce": { … } }
 ```
 
-### `GET /api/state/snapshot`
+### `GET /api/state/snapshot/manifest`
 
-Full ledger dump for fast sync.
+Versioned snapshot metadata: finalized checkpoint, chain/genesis identity,
+record counts, and the ordered chunk list. Each chunk entry includes its kind,
+record count, compressed and uncompressed sizes, and SHA3-256 hash.
+
+### `GET /api/state/snapshot/{id}/chunk/{index}`
+
+One independently zstd-compressed binary state chunk. The snapshot id is the
+checkpoint hash. Nodes retain valid chunks under `/data/snapshots/download`
+while syncing, verify every chunk before keeping it, and remove the completed
+download after the reconstructed state passes checkpoint and state-root
+verification. Serving nodes cache the two newest requested snapshots under
+`/data/snapshots/serve`.
+
+The old monolithic `GET /api/state/snapshot` JSON response no longer exists.
+
+Snapshot chunks prove their contents against the checkpoint roots, but they do
+not prove an arbitrary history of validator-set changes. A node accepts an
+unpinned multi-height snapshot only when its validator root is unchanged.
+Validator-changing gaps require an independently verified
+`SIKKA_TRUSTED_CHECKPOINT=<height>:<checkpoint-hash>` trust anchor.
 
 ---
 

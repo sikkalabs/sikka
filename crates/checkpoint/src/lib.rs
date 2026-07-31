@@ -83,6 +83,75 @@ impl CheckpointStore {
         Ok(())
     }
 
+    /// Persist a checkpoint without pruning history.
+    ///
+    /// Callers that commit state in a different database use this as a
+    /// write-ahead record. A crash may leave a harmless future checkpoint,
+    /// which [`CheckpointStore::reconcile`] removes on startup.
+    pub fn put_unpruned(&self, checkpoint: &Checkpoint) -> Result<()> {
+        let write = self.db.begin_write().map_err(storage_error)?;
+        {
+            let mut table = write.open_table(CHECKPOINTS).map_err(storage_error)?;
+            table
+                .insert(checkpoint.header.height, checkpoint.to_bytes().as_slice())
+                .map_err(storage_error)?;
+        }
+        write.commit().map_err(storage_error)
+    }
+
+    /// Apply normal retention after a write-ahead checkpoint is committed.
+    pub fn prune_for_height(&self, height: u64) -> Result<()> {
+        if height < self.retention {
+            return Ok(());
+        }
+        let cutoff = height - self.retention + 1;
+        let write = self.db.begin_write().map_err(storage_error)?;
+        {
+            let mut table = write.open_table(CHECKPOINTS).map_err(storage_error)?;
+            let stale: Vec<u64> = table
+                .range(1..cutoff)
+                .map_err(storage_error)?
+                .map(|entry| entry.map(|(key, _)| key.value()).map_err(storage_error))
+                .collect::<Result<Vec<_>>>()?;
+            for stale_height in stale {
+                table.remove(stale_height).map_err(storage_error)?;
+            }
+        }
+        write.commit().map_err(storage_error)
+    }
+
+    pub fn remove(&self, height: u64) -> Result<()> {
+        let write = self.db.begin_write().map_err(storage_error)?;
+        {
+            let mut table = write.open_table(CHECKPOINTS).map_err(storage_error)?;
+            table.remove(height).map_err(storage_error)?;
+        }
+        write.commit().map_err(storage_error)
+    }
+
+    /// Remove write-ahead checkpoints newer than the committed ledger and
+    /// verify that the ledger's current checkpoint is present.
+    pub fn reconcile(&self, ledger_height: u64) -> Result<()> {
+        let write = self.db.begin_write().map_err(storage_error)?;
+        {
+            let mut table = write.open_table(CHECKPOINTS).map_err(storage_error)?;
+            let future: Vec<u64> = table
+                .iter()
+                .map_err(storage_error)?
+                .map(|entry| entry.map(|(key, _)| key.value()).map_err(storage_error))
+                .collect::<Result<Vec<_>>>()?
+                .into_iter()
+                .filter(|height| *height > ledger_height)
+                .collect();
+            for height in future {
+                table.remove(height).map_err(storage_error)?;
+            }
+        }
+        write.commit().map_err(storage_error)?;
+        self.prune_for_height(ledger_height)?;
+        self.require(ledger_height).map(|_| ())
+    }
+
     pub fn get(&self, height: u64) -> Result<Option<Checkpoint>> {
         let read = self.db.begin_read().map_err(storage_error)?;
         let table = read.open_table(CHECKPOINTS).map_err(storage_error)?;
@@ -282,5 +351,27 @@ mod tests {
         assert!(store.get(50).unwrap().is_some());
         assert!(store.get(49).unwrap().is_none());
         assert!(store.get(0).unwrap().is_some());
+    }
+
+    #[test]
+    fn reconcile_removes_future_write_ahead_checkpoints() {
+        let (store, _dir) = store(3);
+        let all = fill(&store, 4);
+        store.put_unpruned(&checkpoint(9, Hash([8; 32]))).unwrap();
+        assert_eq!(store.latest_height().unwrap(), Some(9));
+
+        store.reconcile(3).unwrap();
+        assert_eq!(store.latest_height().unwrap(), Some(3));
+        assert_eq!(store.get(3).unwrap(), Some(all[3].clone()));
+    }
+
+    #[test]
+    fn reconcile_rejects_a_missing_committed_checkpoint() {
+        let (store, _dir) = store(3);
+        fill(&store, 2);
+        assert_eq!(
+            store.reconcile(2).unwrap_err(),
+            Error::CheckpointNotFound(2)
+        );
     }
 }

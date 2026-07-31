@@ -55,7 +55,11 @@ pub fn router(state: AppState) -> Router {
         .route("/checkpoint/latest", get(latest_checkpoint))
         .route("/checkpoint/{height}", get(get_checkpoint))
         .route("/peers", post(peers))
-        .route("/state/snapshot", get(snapshot))
+        .route("/state/snapshot/manifest", get(snapshot_manifest))
+        .route(
+            "/state/snapshot/{snapshot_id}/chunk/{index}",
+            get(snapshot_chunk),
+        )
         .route("/rpc", post(rpc))
         .merge(bulk);
 
@@ -147,7 +151,8 @@ async fn api_index(State(state): State<AppState>) -> HttpResult<Json<Value>> {
             "/api/health", "/api/rpc", "/api/tx", "/api/tx/sync", "/api/vote",
             "/api/checkpoint/proposal", "/api/checkpoint/finalized",
             "/api/checkpoint/latest", "/api/checkpoint/{height}",
-            "/api/peers", "/api/state/snapshot"
+            "/api/peers", "/api/state/snapshot/manifest",
+            "/api/state/snapshot/{snapshot_id}/chunk/{index}"
         ],
         "rpc_methods": method::ALL,
     })))
@@ -282,8 +287,57 @@ async fn peers(
     }))
 }
 
-async fn snapshot(State(state): State<AppState>) -> HttpResult<Json<sikka_state::StateSnapshot>> {
-    Ok(Json(state.node.snapshot()?))
+async fn snapshot_manifest(
+    State(state): State<AppState>,
+) -> HttpResult<Json<sikka_state::SnapshotManifest>> {
+    let node = state.node.clone();
+    let manifest = tokio::task::spawn_blocking(move || node.snapshot_manifest())
+        .await
+        .map_err(|e| Error::Other(format!("snapshot task failed: {e}")))??;
+    Ok(Json(manifest))
+}
+
+async fn snapshot_chunk(
+    State(state): State<AppState>,
+    Path((snapshot_id, index)): Path<(String, u32)>,
+) -> HttpResult<Response> {
+    let snapshot_id: Hash = snapshot_id.parse()?;
+    let (meta, path) = state.node.snapshot_chunk(&snapshot_id, index)?;
+    let file_meta = tokio::fs::metadata(&path)
+        .await
+        .map_err(|e| Error::Storage(format!("inspect snapshot chunk {}: {e}", path.display())))?;
+    if file_meta.len() != u64::from(meta.compressed_bytes) {
+        return Err(Error::Storage(format!(
+            "snapshot chunk {} changed size on disk",
+            path.display()
+        ))
+        .into());
+    }
+    let bytes = tokio::fs::read(&path)
+        .await
+        .map_err(|e| Error::Storage(format!("read snapshot chunk {}: {e}", path.display())))?;
+    if bytes.len() != meta.compressed_bytes as usize {
+        return Err(Error::Storage(format!(
+            "snapshot chunk {} changed size on disk",
+            path.display()
+        ))
+        .into());
+    }
+    let mut response = bytes.into_response();
+    response.headers_mut().insert(
+        header::CONTENT_TYPE,
+        HeaderValue::from_static("application/zstd"),
+    );
+    response.headers_mut().insert(
+        header::CACHE_CONTROL,
+        HeaderValue::from_static("public, max-age=31536000, immutable"),
+    );
+    response.headers_mut().insert(
+        header::ETAG,
+        HeaderValue::from_str(&format!("\"{}\"", meta.hash.to_hex()))
+            .map_err(|e| Error::Other(format!("invalid snapshot etag: {e}")))?,
+    );
+    Ok(response)
 }
 
 // ---- JSON-RPC ------------------------------------------------------------

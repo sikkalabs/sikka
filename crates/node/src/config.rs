@@ -9,8 +9,16 @@ use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::path::PathBuf;
 use std::time::Duration;
 
+use sikka_common::bytes::Hash;
 use sikka_common::constants::{BOOTSTRAP_NODES, BULK_REQUEST_TIMEOUT_SECS, DEFAULT_PORT};
 use sikka_common::error::{Error, Result};
+
+/// Operator-pinned trust anchor for a validator-changing snapshot gap.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TrustedCheckpoint {
+    pub height: u64,
+    pub hash: Hash,
+}
 
 /// How the node presents itself and where it keeps things.
 #[derive(Debug, Clone)]
@@ -48,6 +56,8 @@ pub struct NodeConfig {
     /// Timeout for large peer transfers (proposals, finalized checkpoints,
     /// mempool sync, snapshots).
     pub bulk_request_timeout: Duration,
+    /// Required trust anchor when a multi-height snapshot changes validators.
+    pub trusted_checkpoint: Option<TrustedCheckpoint>,
     /// Seal a checkpoint after this long even if the pool is short of a full
     /// batch, so a quiet chain still makes progress. Zero disables it.
     pub max_checkpoint_delay: Duration,
@@ -72,6 +82,7 @@ impl Default for NodeConfig {
             discovery_interval: Duration::from_secs(30),
             request_timeout: Duration::from_secs(10),
             bulk_request_timeout: Duration::from_secs(BULK_REQUEST_TIMEOUT_SECS),
+            trusted_checkpoint: None,
             max_checkpoint_delay: Duration::from_secs(30),
         }
     }
@@ -114,6 +125,9 @@ impl NodeConfig {
         if let Some(proxy) = env("SIKKA_TOR_PROXY").or_else(|| env("SIKKA_SOCKS5_PROXY")) {
             config.socks5_proxy = Some(proxy);
         }
+        if let Some(value) = env("SIKKA_TRUSTED_CHECKPOINT") {
+            config.trusted_checkpoint = Some(parse_trusted_checkpoint(&value)?);
+        }
         if let Some(capacity) = env("SIKKA_MEMPOOL_CAPACITY") {
             config.mempool_capacity = capacity.parse().map_err(|_| {
                 Error::Other(format!("SIKKA_MEMPOOL_CAPACITY '{capacity}' invalid"))
@@ -146,6 +160,14 @@ impl NodeConfig {
     pub fn local_votes_path(&self) -> PathBuf {
         self.data_dir.join("local_votes.redb")
     }
+
+    pub fn snapshot_cache_path(&self) -> PathBuf {
+        self.data_dir.join("snapshots").join("serve")
+    }
+
+    pub fn snapshot_download_path(&self) -> PathBuf {
+        self.data_dir.join("snapshots").join("download")
+    }
 }
 
 fn env(key: &str) -> Option<String> {
@@ -153,6 +175,20 @@ fn env(key: &str) -> Option<String> {
         Ok(value) if !value.trim().is_empty() => Some(value.trim().to_string()),
         _ => None,
     }
+}
+
+fn parse_trusted_checkpoint(value: &str) -> Result<TrustedCheckpoint> {
+    let (height, hash) = value.split_once(':').ok_or_else(|| {
+        Error::Other(
+            "SIKKA_TRUSTED_CHECKPOINT must be formatted as <height>:<checkpoint-hash>".into(),
+        )
+    })?;
+    let height = height
+        .parse::<u64>()
+        .map_err(|_| Error::Other(format!("invalid trusted checkpoint height '{height}'")))?;
+    let hash = Hash::from_hex(hash)
+        .map_err(|_| Error::Other(format!("invalid trusted checkpoint hash '{hash}'")))?;
+    Ok(TrustedCheckpoint { height, hash })
 }
 
 /// Give a bare `host:port` a scheme so it can be used as a URL.
@@ -191,6 +227,14 @@ mod tests {
             config.local_votes_path(),
             PathBuf::from("/data/local_votes.redb")
         );
+        assert_eq!(
+            config.snapshot_cache_path(),
+            PathBuf::from("/data/snapshots/serve")
+        );
+        assert_eq!(
+            config.snapshot_download_path(),
+            PathBuf::from("/data/snapshots/download")
+        );
         assert_eq!(config.listen.port(), DEFAULT_PORT);
         assert!(
             config.listen.ip().is_unspecified(),
@@ -198,5 +242,17 @@ mod tests {
         );
         assert!(config.validator);
         assert!(config.private_key.is_none());
+        assert!(config.trusted_checkpoint.is_none());
+    }
+
+    #[test]
+    fn trusted_checkpoint_requires_height_and_hash() {
+        let hash = Hash([7; 32]);
+        assert_eq!(
+            parse_trusted_checkpoint(&format!("42:{}", hash.to_hex())).unwrap(),
+            TrustedCheckpoint { height: 42, hash }
+        );
+        assert!(parse_trusted_checkpoint("42").is_err());
+        assert!(parse_trusted_checkpoint("nope:0x00").is_err());
     }
 }

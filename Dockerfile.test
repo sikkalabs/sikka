@@ -12,6 +12,7 @@ WORKDIR /work
 # does not re-compile ML-DSA and redb every time.
 COPY Cargo.toml Cargo.lock ./
 COPY crates ./crates
+COPY public ./public
 RUN cargo build --tests --locked
 
 ENV RUST_BACKTRACE=1 \

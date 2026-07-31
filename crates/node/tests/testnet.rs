@@ -18,7 +18,7 @@ use sikka_common::constants::CHILLAR_PER_SIKKA;
 use sikka_common::genesis::{GenesisAllocation, GenesisConfig, GenesisValidator};
 use sikka_common::time::now_secs;
 use sikka_crypto::Keypair;
-use sikka_node::{Node, NodeConfig};
+use sikka_node::{Node, NodeConfig, TrustedCheckpoint};
 use sikka_rpc::RpcClient;
 use sikka_wallet::{verify_account_proof, Keystore, Wallet};
 
@@ -402,6 +402,64 @@ async fn a_new_node_joins_and_fast_syncs_to_the_current_state() {
     // Being a non-validator, it never signs anything.
     assert!(!joiner.node.is_active_validator());
     assert_ne!(joiner.address(), net.nodes[0].address());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn validator_changing_gaps_require_a_pinned_checkpoint() {
+    let net = Testnet::start(4, 2).await;
+    net.await_peers(Duration::from_secs(10)).await;
+
+    let bond = 1_000 * CHILLAR_PER_SIKKA;
+    net.rpc(0)
+        .submit(&net.alice.bond(bond, 0, now_secs()).unwrap())
+        .await
+        .unwrap();
+    net.alice_pays(Address([0x44; 32]), CHILLAR_PER_SIKKA, 1, 1)
+        .await;
+    net.await_height(1, Duration::from_secs(30)).await;
+    net.alice_pays(Address([0x55; 32]), CHILLAR_PER_SIKKA, 2, 2)
+        .await;
+    net.await_height(2, Duration::from_secs(90)).await;
+
+    let snapshot = net.nodes[0].node.snapshot().unwrap();
+    let manifest = net.nodes[0].node.snapshot_manifest().unwrap();
+    let checkpoint_hash = snapshot.checkpoint.hash();
+    let open_observer = |trusted_checkpoint| {
+        let dir = tempfile::tempdir().unwrap();
+        let config = NodeConfig {
+            data_dir: dir.path().to_path_buf(),
+            genesis_path: net.genesis_path.clone(),
+            key_path: dir.path().join("node_key.json"),
+            bootstrap: Vec::new(),
+            validator: false,
+            trusted_checkpoint,
+            ..NodeConfig::default()
+        };
+        (Node::open(config).unwrap(), dir)
+    };
+
+    let (untrusted, _untrusted_dir) = open_observer(None);
+    assert!(untrusted.verify_snapshot_manifest(&manifest).is_err());
+    let error = untrusted.apply_snapshot(&snapshot).unwrap_err();
+    assert!(
+        error.to_string().contains("SIKKA_TRUSTED_CHECKPOINT"),
+        "unexpected error: {error}"
+    );
+    assert_eq!(untrusted.height(), 0);
+
+    let (trusted, _trusted_dir) = open_observer(Some(TrustedCheckpoint {
+        height: snapshot.checkpoint.header.height,
+        hash: checkpoint_hash,
+    }));
+    trusted.verify_snapshot_manifest(&manifest).unwrap();
+    assert_eq!(
+        trusted.apply_snapshot(&snapshot).unwrap(),
+        snapshot.checkpoint.header.height
+    );
+    assert_eq!(
+        trusted.chain_info().unwrap().state_root,
+        snapshot.checkpoint.header.state_root
+    );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

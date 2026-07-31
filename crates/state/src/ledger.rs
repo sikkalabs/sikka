@@ -25,6 +25,7 @@ use sikka_common::validator::Validator;
 use sikka_common::DEFAULT_CHECKPOINT_TX_INTERVAL;
 
 use crate::smt::{Proof, Smt, UndoLog};
+use crate::snapshot::{SnapshotArchive, SnapshotArchiveWriter, SnapshotHeader, SnapshotManifest};
 use crate::store::{LedgerMeta, StateStore, WriteBatch};
 
 /// Where a checkpoint is being built, and when.
@@ -826,6 +827,44 @@ impl Ledger {
 
     // ---- snapshots -------------------------------------------------------
 
+    /// Materialize the current state as a cached chunked snapshot archive.
+    ///
+    /// Records are read and compressed incrementally, so archive generation
+    /// never constructs the giant JSON value used by the old transport.
+    pub fn snapshot_archive(
+        &self,
+        checkpoint: Checkpoint,
+        root: impl AsRef<Path>,
+    ) -> Result<SnapshotManifest> {
+        if checkpoint.header.height != self.meta.height
+            || checkpoint.header.state_root != self.meta.state_root
+            || checkpoint.header.validator_root != self.meta.validator_root
+        {
+            return Err(Error::Other(
+                "checkpoint does not describe the ledger being snapshotted".into(),
+            ));
+        }
+        let root = root.as_ref();
+        let snapshot_id = checkpoint.hash();
+        if let Some(manifest) = SnapshotArchive::load_if_present(root, &snapshot_id)? {
+            return Ok(manifest);
+        }
+        let mut writer = SnapshotArchiveWriter::create(
+            root,
+            SnapshotHeader {
+                chain_id: self.meta.chain_id.clone(),
+                genesis_fingerprint: self.meta.genesis_fingerprint,
+                checkpoint_tx_interval: self.meta.checkpoint_tx_interval,
+                checkpoint,
+            },
+        )?;
+        self.store
+            .visit_accounts(|address, account| writer.push_account(address, account))?;
+        self.store
+            .visit_validators(|validator| writer.push_validator(&validator))?;
+        writer.finish()
+    }
+
     /// Full state dump for fast sync.
     pub fn snapshot(&self, checkpoint: Checkpoint) -> Result<StateSnapshot> {
         Ok(StateSnapshot {
@@ -964,6 +1003,20 @@ impl StateSnapshot {
     /// Also re-derives total supply from the dump, so a snapshot cannot smuggle
     /// in coins that the accounts do not account for.
     pub fn verify(&self) -> Result<()> {
+        if self.accounts.windows(2).any(|pair| pair[0].0 >= pair[1].0) {
+            return Err(Error::Other(
+                "snapshot accounts are not strictly ordered and unique".into(),
+            ));
+        }
+        if self
+            .validators
+            .windows(2)
+            .any(|pair| pair[0].address >= pair[1].address)
+        {
+            return Err(Error::Other(
+                "snapshot validators are not strictly ordered and unique".into(),
+            ));
+        }
         let accounts = Smt::from_leaves(
             self.accounts
                 .iter()

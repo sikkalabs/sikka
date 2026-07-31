@@ -15,6 +15,7 @@ use tracing::{debug, info, warn};
 
 use sikka_common::error::{Error, Result};
 use sikka_p2p::client::PeerClient;
+use sikka_state::SnapshotDownload;
 
 use crate::node::Node;
 
@@ -75,13 +76,42 @@ pub async fn fast_sync(node: &Arc<Node>, client: &PeerClient) -> Result<Option<u
 
     info!(from = local, to = best.height, peer = %best.endpoint, "fast syncing");
     let mut last_error = None;
-    // Any peer at the target height will do: the snapshot is verified against
-    // validator signatures, so a malicious source can waste our bandwidth and
-    // nothing more.
+    // Peers are untrusted. Validate checkpoint trust from the small manifest
+    // before spending bandwidth on chunks, then verify the reconstructed roots.
     for status in statuses.iter().filter(|s| s.height > local) {
-        match client.snapshot(&status.endpoint).await {
+        let manifest = match client.snapshot_manifest(&status.endpoint).await {
+            Ok(manifest) => manifest,
+            Err(e) => {
+                debug!(peer = %status.endpoint, error = %e, "snapshot manifest download failed");
+                node.record_peer_failure(&status.endpoint);
+                last_error = Some(e);
+                continue;
+            }
+        };
+        if let Err(e) = node.verify_snapshot_manifest(&manifest) {
+            warn!(peer = %status.endpoint, error = %e, "rejected a peer's snapshot manifest");
+            node.record_peer_failure(&status.endpoint);
+            last_error = Some(e);
+            continue;
+        }
+        match client
+            .snapshot_from_manifest(
+                &status.endpoint,
+                node.config().snapshot_download_path(),
+                manifest,
+            )
+            .await
+        {
             Ok(snapshot) => match node.apply_snapshot(&snapshot) {
-                Ok(height) => return Ok(Some(height)),
+                Ok(height) => {
+                    if let Err(error) = SnapshotDownload::remove_for(
+                        node.config().snapshot_download_path(),
+                        &snapshot.checkpoint.hash(),
+                    ) {
+                        debug!(%error, "could not remove completed snapshot download");
+                    }
+                    return Ok(Some(height));
+                }
                 Err(e) => {
                     warn!(peer = %status.endpoint, error = %e, "rejected a peer's snapshot");
                     node.record_peer_failure(&status.endpoint);
