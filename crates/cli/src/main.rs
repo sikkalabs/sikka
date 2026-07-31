@@ -6,6 +6,7 @@
 
 mod format;
 mod genesis;
+mod tor_onion;
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -16,8 +17,10 @@ use sikka_common::amount::{format_sikka, parse_sikka};
 use sikka_common::bytes::{Address, Hash};
 use sikka_common::error::{Error, Result};
 use sikka_common::time::now_secs;
+use sikka_crypto::{Keypair, SK_LEN};
 use sikka_rpc::RpcClient;
 use sikka_wallet::{verify_account_proof, Keystore, Wallet};
+use tor_onion::TorOnionId;
 
 const DEFAULT_NODE: &str = "http://localhost:64552";
 const DEFAULT_KEY: &str = "sikka_key.json";
@@ -98,6 +101,14 @@ enum Command {
     Status { id: Hash },
     /// Create a genesis file, and optionally the validator keys for it.
     Genesis(genesis::GenesisArgs),
+    /// Show the Tor v3 onion derived from this node's key.
+    TorId,
+    /// Write Tor hidden-service keys for this node (used by the container entrypoint).
+    TorPrepare {
+        /// HiddenServiceDir to populate (default: beside the keystore).
+        #[arg(long, default_value = "/data/tor/hs")]
+        dir: PathBuf,
+    },
 }
 
 #[tokio::main]
@@ -331,6 +342,66 @@ async fn run(cli: Cli) -> Result<()> {
         }
 
         Command::Genesis(args) => genesis::run(args, cli.json),
+
+        Command::TorId => {
+            let keypair = resolve_keypair(&cli)?;
+            let id = TorOnionId::from_keypair(&keypair);
+            if cli.json {
+                format::print_json(&serde_json::json!({
+                    "hostname": id.hostname,
+                    "advertise": id.advertise_url(),
+                    "address": Address(keypair.address_bytes()),
+                }))?;
+            } else {
+                println!("{}", id.hostname);
+                println!("advertise {}", id.advertise_url());
+            }
+            Ok(())
+        }
+
+        Command::TorPrepare { dir } => {
+            let keypair = resolve_keypair(&cli)?;
+            let id = TorOnionId::from_keypair(&keypair);
+            id.write_hidden_service_dir(dir)?;
+            if cli.json {
+                format::print_json(&serde_json::json!({
+                    "hostname": id.hostname,
+                    "advertise": id.advertise_url(),
+                    "dir": dir,
+                }))?;
+            } else {
+                println!("wrote Tor hidden service keys to {}", dir.display());
+                println!("{}", id.hostname);
+            }
+            Ok(())
+        }
+    }
+}
+
+/// Prefer `SIKKA_PRIVATE_KEY`, otherwise load/create the keystore at `--key`.
+fn resolve_keypair(cli: &Cli) -> Result<Keypair> {
+    if let Ok(hex) = std::env::var("SIKKA_PRIVATE_KEY") {
+        if !hex.trim().is_empty() {
+            let keypair = parse_private_key(&hex)?;
+            Keystore::from_keypair(&keypair).save(&cli.key)?;
+            return Ok(keypair);
+        }
+    }
+    Ok(Keystore::load_or_create(&cli.key)?.keypair()?)
+}
+
+fn parse_private_key(hex: &str) -> Result<Keypair> {
+    let clean = hex.trim().strip_prefix("0x").unwrap_or(hex.trim());
+    let bytes = ::hex::decode(clean).map_err(|_| Error::InvalidHex)?;
+    match bytes.len() {
+        32 => {
+            let seed: [u8; 32] = bytes.try_into().expect("length checked");
+            Ok(Keypair::from_seed(&seed)?)
+        }
+        SK_LEN => Ok(Keypair::from_private_bytes(&bytes)?),
+        n => Err(Error::Other(format!(
+            "SIKKA_PRIVATE_KEY must be a 32-byte seed or {SK_LEN}-byte secret, got {n} bytes"
+        ))),
     }
 }
 

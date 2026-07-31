@@ -47,6 +47,10 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 parking_lot = "0.12"
 tempfile = "3"
+ed25519-dalek = { version = "2.1", default-features = false, features = ["std", "zeroize"] }
+sha2 = "0.10"
+data-encoding = "2"
+
 
 [profile.release]
 opt-level = 3
