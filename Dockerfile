@@ -37,7 +37,7 @@ ENV SIKKA_LOG=info \
     SIKKA_NODE=http://127.0.0.1:64552 \
     SIKKA_DATA_DIR=/data
 
-HEALTHCHECK --interval=15s --timeout=5s --start-period=60s --retries=5 \
+HEALTHCHECK --interval=15s --timeout=5s --start-period=120s --retries=8 \
     CMD curl -fsS http://127.0.0.1:64552/api/health > /dev/null || exit 1
 
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]

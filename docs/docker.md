@@ -106,9 +106,16 @@ docker exec sikka sikka help
 | `SIKKA_BOOTSTRAP` | two Tor onions (see `BOOTSTRAP_NODES`) | first peers |
 | `SIKKA_GENESIS` | baked-in if missing | optional custom genesis path |
 | `SIKKA_LOG` | `info` | tracing filter |
+| `SIKKA_TOR_READY_TIMEOUT_SECS` | `300` | how long to wait for Tor `Bootstrapped 100%` before starting the node |
 
 `SIKKA_ADVERTISE` and `SIKKA_TOR_PROXY` are set by the entrypoint from the
 derived onion and local Tor SOCKS — do not set them.
+
+Tor writes notices to `/data/tor/notice.log` (not container stdout). Inspect with:
+
+```bash
+docker exec sikka tail -n 50 /data/tor/notice.log
+```
 
 ---
 
