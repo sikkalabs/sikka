@@ -11,7 +11,7 @@ every transfer ever made.
 [Website](https://sikkalabs.com/) ·
 [Live node](https://1.sikkalabs.com/) ·
 [Wallet](https://1.sikkalabs.com/wallet.html) ·
-[Image](https://github.com/orgs/sikkalabs/packages)
+[Image](https://github.com/sikkalabs/sikka/pkgs/container/sikka)
 
 ---
 
