@@ -1,0 +1,22 @@
+# Build output. Cargo.lock is committed on purpose: this workspace ships
+# binaries, so builds should be reproducible.
+/target/
+**/*.rs.bk
+
+# Node state. A node writes its databases and its key into its data directory;
+# none of it belongs to the repository, and the key must never leave the host.
+*.redb
+/data/
+/testnet/
+*_key.json
+keys/
+
+# A generated chain. Every node on a network needs a byte-identical genesis, so
+# a real one is distributed deliberately rather than committed by accident.
+genesis.json
+
+# Editor and OS noise.
+.DS_Store
+*.swp
+.idea/
+.vscode/
