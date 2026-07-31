@@ -60,6 +60,22 @@
       text-decoration: none;
     }
     .cta:hover { background: var(--accent); border-color: var(--accent); }
+    .links {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 1rem 1.35rem;
+      margin-top: 1.75rem;
+    }
+    .links .cta { margin-top: 0; }
+    .links a.secondary {
+      color: var(--muted);
+      font: 600 0.95rem/1 var(--sans);
+      text-decoration: none;
+      border-bottom: 1px solid var(--line);
+      padding-bottom: 0.15rem;
+    }
+    .links a.secondary:hover { color: var(--ink); border-color: var(--ink); }
     .stats {
       margin-top: 3.5rem;
       padding-top: 1.5rem;
@@ -118,7 +134,10 @@
     <p class="lead">
       Feeless, post-quantum payments. Balances stay; history does not.
     </p>
-    <a class="cta" href="/wallet.html">Open wallet</a>
+    <div class="links">
+      <a class="cta" href="/wallet.html">Open wallet</a>
+      <a class="secondary" href="https://github.com/sikkalabs/sikka">GitHub</a>
+    </div>
 
     <section class="stats" aria-live="polite">
       <div class="live"><span class="dot" id="dot"></span><span id="status">Connecting…</span></div>
