@@ -123,7 +123,7 @@ impl Testnet {
 
         let proposal = {
             let node = &mut self.nodes[index];
-            let (proposal, own) = build_proposal(
+            let (proposal, own, _) = build_proposal(
                 &mut node.ledger,
                 transactions,
                 Vec::new(),
@@ -282,7 +282,9 @@ fn tampered_proposals_are_refused() {
 
     let (proposal, verified) = {
         let node = &mut net.nodes[index];
-        build_proposal(&mut node.ledger, txs, Vec::new(), now, proposer, 0).unwrap()
+        let (proposal, verified, _) =
+            build_proposal(&mut node.ledger, txs, Vec::new(), now, proposer, 0).unwrap();
+        (proposal, verified)
     };
     // Give the proposer's ledger back its pre-proposal state.
     net.nodes[index].ledger.rollback(verified.staged);
@@ -372,7 +374,7 @@ fn an_absent_proposer_loses_its_turn_to_the_next_validator() {
 
     let (proposal, verified) = {
         let node = &mut net.nodes[taker];
-        build_proposal(
+        let (proposal, verified, _) = build_proposal(
             &mut node.ledger,
             txs,
             Vec::new(),
@@ -380,7 +382,8 @@ fn an_absent_proposer_loses_its_turn_to_the_next_validator() {
             taker_address,
             1,
         )
-        .unwrap()
+        .unwrap();
+        (proposal, verified)
     };
     assert_eq!(proposal.header.round, 1);
     net.nodes[taker].ledger.rollback(verified.staged);
@@ -417,7 +420,9 @@ fn a_validator_cannot_jump_the_queue_by_claiming_a_later_round() {
     let txs = vec![Transaction::transfer(net.alice(), bob, 1_000, 0, now).unwrap()];
     let (proposal, verified) = {
         let node = &mut net.nodes[impatient];
-        build_proposal(&mut node.ledger, txs, Vec::new(), now, round_one, 1).unwrap()
+        let (proposal, verified, _) =
+            build_proposal(&mut node.ledger, txs, Vec::new(), now, round_one, 1).unwrap();
+        (proposal, verified)
     };
     net.nodes[impatient].ledger.rollback(verified.staged);
 
@@ -462,7 +467,9 @@ fn a_finalized_checkpoint_is_applied_without_re_arguing_whose_turn_it_was() {
     let txs = vec![Transaction::transfer(net.alice(), bob, 2_000, 0, now).unwrap()];
     let (proposal, verified) = {
         let node = &mut net.nodes[index];
-        build_proposal(&mut node.ledger, txs, Vec::new(), now, proposer, 0).unwrap()
+        let (proposal, verified, _) =
+            build_proposal(&mut node.ledger, txs, Vec::new(), now, proposer, 0).unwrap();
+        (proposal, verified)
     };
     net.nodes[index].ledger.rollback(verified.staged);
 
@@ -551,7 +558,9 @@ fn quorum_is_two_thirds_and_a_stalled_vote_finalizes_nothing() {
     let txs = vec![Transaction::transfer(net.alice(), bob, 1_000, 0, now).unwrap()];
     let (proposal, verified) = {
         let node = &mut net.nodes[index];
-        build_proposal(&mut node.ledger, txs, Vec::new(), now, proposer, 0).unwrap()
+        let (proposal, verified, _) =
+            build_proposal(&mut node.ledger, txs, Vec::new(), now, proposer, 0).unwrap();
+        (proposal, verified)
     };
     let hash = proposal.hash();
 
@@ -619,7 +628,7 @@ fn equivocation_is_detected_and_slashed_in_the_next_checkpoint() {
 
     let (proposal, verified) = {
         let node = &mut net.nodes[index];
-        build_proposal(
+        let (proposal, verified, _) = build_proposal(
             &mut node.ledger,
             txs,
             vec![evidence.clone()],
@@ -627,7 +636,8 @@ fn equivocation_is_detected_and_slashed_in_the_next_checkpoint() {
             proposer,
             0,
         )
-        .unwrap()
+        .unwrap();
+        (proposal, verified)
     };
 
     // Another node reaches the same conclusion from the same evidence.

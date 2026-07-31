@@ -475,6 +475,10 @@ impl Node {
 
         let interval = chain.ledger.checkpoint_tx_interval() as usize;
         let evidence = self.collect_evidence(&chain);
+        {
+            let mut mempool = self.mempool.lock();
+            mempool.purge_nonce_gaps(&|address| chain.ledger.next_nonce(address));
+        }
         let pool_len = self.mempool.lock().len();
         let idle_deadline = self.config.max_checkpoint_delay.as_secs();
         let waited = now.saturating_sub(chain.last_progress);
@@ -490,7 +494,7 @@ impl Node {
             return Ok(None);
         }
 
-        let (proposal, verified) = build_proposal(
+        let (proposal, verified, drop_from_mempool) = build_proposal(
             &mut chain.ledger,
             candidates,
             evidence,
@@ -498,6 +502,9 @@ impl Node {
             self.address,
             round,
         )?;
+        if !drop_from_mempool.is_empty() {
+            self.mempool.lock().remove_all(&drop_from_mempool);
+        }
 
         let hash = verified.hash();
         let vote = Vote::sign(&self.keypair, height, hash)?;

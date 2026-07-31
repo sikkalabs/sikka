@@ -99,10 +99,20 @@ impl Mempool {
         }
 
         if self.entries.len() >= self.capacity {
-            // Full: make room by dropping the oldest, so a burst cannot lock the
-            // mempool permanently.
-            if !self.evict_oldest() {
+            // Full: drop the oldest *safe* run so a burst cannot lock the pool,
+            // without punching a hole under the transaction we are admitting.
+            if !self.evict_for_insert(&transaction.from, transaction.nonce) {
                 return Err(Error::Other("mempool is full".into()));
+            }
+            // Eviction may have removed earlier nonces of this sender; refuse
+            // rather than admit a gap.
+            let expected = self.next_nonce(&transaction.from, committed_nonce);
+            if transaction.nonce > expected {
+                return Err(Error::BadNonce {
+                    address: transaction.from,
+                    expected,
+                    actual: transaction.nonce,
+                });
             }
         }
 
@@ -257,19 +267,82 @@ impl Mempool {
         expired.len()
     }
 
-    fn evict_oldest(&mut self) -> bool {
+    /// Drop pending transactions that sit above a nonce gap.
+    ///
+    /// `committed_nonce` is the sender's next on-chain nonce. Anything below it
+    /// is stale; anything above the unbroken pending run cannot execute until
+    /// the hole is filled, and is removed so propose does not keep re-executing
+    /// it.
+    pub fn purge_nonce_gaps(
+        &mut self,
+        committed_nonce: &dyn Fn(&Address) -> Result<u64>,
+    ) -> usize {
+        let senders: Vec<Address> = self.by_sender.keys().copied().collect();
+        let mut dropped = 0;
+        for sender in senders {
+            let Ok(committed) = committed_nonce(&sender) else {
+                continue;
+            };
+            self.prune_stale_nonces(&sender, committed);
+            let Some(nonces) = self.by_sender.get(&sender) else {
+                continue;
+            };
+            let mut expected = committed;
+            let mut gap_from = None;
+            for &nonce in nonces.keys() {
+                if nonce > expected {
+                    gap_from = Some(nonce);
+                    break;
+                }
+                if nonce == expected {
+                    expected = nonce + 1;
+                }
+            }
+            let Some(from) = gap_from else {
+                continue;
+            };
+            let ids: Vec<Hash> = nonces.range(from..).map(|(_, id)| *id).collect();
+            for id in ids {
+                self.remove(&id);
+                dropped += 1;
+            }
+        }
+        dropped
+    }
+
+    /// Evict the oldest transaction that is not a predecessor of an incoming
+    /// insert, and every higher nonce of that same sender.
+    ///
+    /// Predecessors of the new transaction are preserved so admitting it cannot
+    /// create a hole. Higher nonces of the *victim* are dropped with it so
+    /// eviction never leaves an unexecutable tail in the pool.
+    fn evict_for_insert(&mut self, incoming_sender: &Address, incoming_nonce: u64) -> bool {
         let oldest = self
             .entries
             .iter()
+            .filter(|(_, e)| {
+                !(e.transaction.from == *incoming_sender && e.transaction.nonce < incoming_nonce)
+            })
             .min_by_key(|(id, e)| (e.received_at, **id))
-            .map(|(id, _)| *id);
-        match oldest {
-            Some(id) => {
-                self.remove(&id);
-                true
-            }
-            None => false,
+            .map(|(id, e)| (*id, e.transaction.from, e.transaction.nonce));
+        let Some((id, sender, nonce)) = oldest else {
+            return false;
+        };
+        let tail: Vec<Hash> = self
+            .by_sender
+            .get(&sender)
+            .map(|nonces| {
+                nonces
+                    .range(nonce + 1..)
+                    .map(|(_, id)| *id)
+                    .collect::<Vec<Hash>>()
+            })
+            .unwrap_or_default();
+        self.remove(&id);
+        for id in tail {
+            self.remove(&id);
         }
+        true
     }
 
     /// A filter summarising what this node already holds.
@@ -456,16 +529,63 @@ mod tests {
     }
 
     #[test]
-    fn a_full_pool_evicts_the_oldest() {
-        let kp = Keypair::generate().unwrap();
+    fn a_full_pool_evicts_the_oldest_run() {
+        let a = Keypair::generate().unwrap();
+        let b = Keypair::generate().unwrap();
         let mut pool = Mempool::new(2, 600);
-        let first = transfer(&kp, 0, 1);
-        pool.insert(first.clone(), 0, NOW).unwrap();
-        pool.insert(transfer(&kp, 1, 1), 0, NOW + 1).unwrap();
-        pool.insert(transfer(&kp, 2, 1), 0, NOW + 2).unwrap();
+        let a0 = transfer(&a, 0, 1);
+        let a1 = transfer(&a, 1, 1);
+        pool.insert(a0.clone(), 0, NOW).unwrap();
+        pool.insert(transfer(&b, 0, 1), 0, NOW + 1).unwrap();
 
+        // Incoming A:1 needs room; B:0 is the oldest safe victim (A:0 is a predecessor).
+        pool.insert(a1.clone(), 0, NOW + 2).unwrap();
         assert_eq!(pool.len(), 2);
-        assert!(!pool.contains(&first.id()), "the oldest entry made room");
+        assert!(pool.contains(&a0.id()));
+        assert!(pool.contains(&a1.id()));
+
+        // Same-sender overflow with no other victim: refuse rather than punch a hole.
+        let err = pool.insert(transfer(&a, 2, 1), 0, NOW + 3).unwrap_err();
+        assert!(matches!(err, Error::Other(_)));
+        assert_eq!(pool.len(), 2);
+    }
+
+    #[test]
+    fn eviction_drops_the_victims_higher_nonces() {
+        let a = Keypair::generate().unwrap();
+        let b = Keypair::generate().unwrap();
+        let mut pool = Mempool::new(3, 600);
+        let a0 = transfer(&a, 0, 1);
+        let a1 = transfer(&a, 1, 1);
+        pool.insert(a0.clone(), 0, NOW).unwrap();
+        pool.insert(a1.clone(), 0, NOW + 1).unwrap();
+        pool.insert(transfer(&b, 0, 1), 0, NOW + 2).unwrap();
+
+        // New B:1 needs a slot. Oldest safe is A:0; A:1 must leave with it.
+        let b1 = transfer(&b, 1, 1);
+        pool.insert(b1.clone(), 0, NOW + 3).unwrap();
+        assert!(!pool.contains(&a0.id()));
+        assert!(!pool.contains(&a1.id()), "higher nonces of the victim are evicted");
+        assert!(pool.contains(&b1.id()));
+    }
+
+    #[test]
+    fn purge_nonce_gaps_removes_unexecutable_tails() {
+        let kp = Keypair::generate().unwrap();
+        let mut pool = Mempool::new(10, 600);
+        // Manually create a gap the way a buggy eviction used to: remove nonce 0
+        // while leaving 1 and 2.
+        let t0 = transfer(&kp, 0, 1);
+        let t1 = transfer(&kp, 1, 1);
+        let t2 = transfer(&kp, 2, 1);
+        pool.insert(t0.clone(), 0, NOW).unwrap();
+        pool.insert(t1.clone(), 0, NOW + 1).unwrap();
+        pool.insert(t2.clone(), 0, NOW + 2).unwrap();
+        pool.remove(&t0.id());
+
+        let dropped = pool.purge_nonce_gaps(&|_| Ok(0));
+        assert_eq!(dropped, 2);
+        assert!(pool.is_empty());
     }
 
     #[test]

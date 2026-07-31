@@ -106,10 +106,14 @@ fn slashings(ledger: &Ledger, evidence: &[Equivocation]) -> Result<Vec<Address>>
 
 /// Build a proposal for the next height from `candidates`.
 ///
-/// Transactions that fail are silently dropped: they were invalid against the
-/// state at this height, and including them would make the checkpoint
-/// unverifiable. The returned [`Staged`] must be committed once the checkpoint
-/// reaches quorum, or rolled back.
+/// Transactions that fail are silently dropped from the checkpoint: they were
+/// invalid against the state at this height, and including them would make the
+/// checkpoint unverifiable. Ids that failed with [`Error::BadNonce`] are
+/// returned so the caller can purge them from the mempool — they can never
+/// apply until the gap is filled, and re-batching them only wastes CPU.
+///
+/// The returned [`Staged`] must be committed once the checkpoint reaches quorum,
+/// or rolled back.
 pub fn build_proposal(
     ledger: &mut Ledger,
     candidates: Vec<Transaction>,
@@ -117,18 +121,25 @@ pub fn build_proposal(
     timestamp: u64,
     proposer: Address,
     round: u32,
-) -> Result<(CheckpointProposal, VerifiedProposal)> {
+) -> Result<(CheckpointProposal, VerifiedProposal, Vec<Hash>)> {
     let height = ledger.height() + 1;
     let mut context = ExecutionContext::new(height, timestamp, proposer);
     context.slashings = slashings(ledger, &evidence)?;
 
     let ordered = canonical_order(candidates);
     let outcome = ledger.execute(&ordered, context)?;
+    let drop_from_mempool: Vec<Hash> = outcome
+        .rejected
+        .iter()
+        .filter(|(_, err)| matches!(err, Error::BadNonce { .. }))
+        .map(|(id, _)| *id)
+        .collect();
     let applied = outcome.applied.clone();
     if applied.is_empty() && evidence.is_empty() {
-        return Err(Error::Other(
-            "nothing to checkpoint: no transaction applied and no evidence to record".into(),
-        ));
+        return Err(Error::Other(format!(
+            "nothing to checkpoint: no transaction applied and no evidence to record ({} bad-nonce drop candidates)",
+            drop_from_mempool.len()
+        )));
     }
 
     let prev_hash = ledger.meta().last_checkpoint_hash;
@@ -144,7 +155,7 @@ pub fn build_proposal(
         checkpoint: Checkpoint::new(header),
         staged,
     };
-    Ok((proposal, verified))
+    Ok((proposal, verified, drop_from_mempool))
 }
 
 /// What gives a header the right to exist.
