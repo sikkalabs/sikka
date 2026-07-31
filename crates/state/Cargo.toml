@@ -1,0 +1,19 @@
+[package]
+name = "sikka-state"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "SIKKA state: Sparse Merkle Tree, account store, transaction execution"
+
+[dependencies]
+sikka-common.workspace = true
+sikka-crypto.workspace = true
+redb.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+hex.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

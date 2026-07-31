@@ -1,0 +1,106 @@
+//! Protocol constants.
+
+/// Smallest divisible unit per SIKKA: 1 SIKKA = 10^9 CHILLAR.
+pub const CHILLAR_PER_SIKKA: u64 = 1_000_000_000;
+
+/// Anti-spam quota ceiling per account.
+pub const MAX_CREDITS: u32 = 100;
+
+/// One credit regenerates every 60 seconds of signed transaction time.
+pub const CREDIT_REGEN_SECS: u64 = 60;
+
+/// Every transaction burns exactly one credit.
+pub const CREDIT_COST_PER_TX: u32 = 1;
+
+/// A checkpoint is produced every 10,000 confirmed transactions. There is no
+/// time-based fallback: an idle network produces no checkpoints.
+pub const DEFAULT_CHECKPOINT_TX_INTERVAL: u32 = 10_000;
+
+/// Transactions whose signed timestamp differs from a validator's wall clock by
+/// more than five minutes are rejected.
+pub const TX_TIME_TOLERANCE_SECS: u64 = 300;
+
+/// Minimum validator bond is 0.001% of current total supply, i.e. supply/100000.
+pub const MIN_BOND_SUPPLY_DIVISOR: u64 = 100_000;
+
+/// Unbonding cooldown: seven days without rewards, still slashable.
+pub const UNBONDING_SECS: u64 = 7 * 24 * 60 * 60;
+
+/// Number of recent checkpoints retained; older ones are pruned.
+pub const CHECKPOINT_HISTORY: u64 = 100;
+
+/// Seconds in a protocol year (365 days) used by the inflation schedule.
+pub const SECONDS_PER_YEAR: u64 = 31_536_000;
+
+/// Fixed annual inflation, 1.5%, expressed in basis points. Never changes.
+pub const ANNUAL_INFLATION_BPS: u64 = 150;
+
+/// Port every node listens on.
+pub const DEFAULT_PORT: u16 = 64552;
+
+/// Default chain identifier, mixed into genesis.
+pub const DEFAULT_CHAIN_ID: &str = "sikka";
+
+/// Hardcoded bootstrap peers used when no override is supplied.
+pub const BOOTSTRAP_NODES: &[&str] = &["https://1.sikkalabs.com"];
+
+/// Signatures required to finalize a checkpoint: `ceil(2/3 * validators)`.
+///
+/// ```
+/// use sikka_common::constants::quorum_threshold;
+/// assert_eq!(quorum_threshold(30), 20);
+/// assert_eq!(quorum_threshold(4), 3);
+/// assert_eq!(quorum_threshold(1), 1);
+/// ```
+pub const fn quorum_threshold(validator_count: usize) -> usize {
+    if validator_count == 0 {
+        return 0;
+    }
+    (2 * validator_count).div_ceil(3)
+}
+
+/// Minimum bond for the given total supply.
+pub const fn min_bond(total_supply: u64) -> u64 {
+    let bond = total_supply / MIN_BOND_SUPPLY_DIVISOR;
+    if bond == 0 {
+        1
+    } else {
+        bond
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn quorum_is_two_thirds_rounded_up() {
+        assert_eq!(quorum_threshold(0), 0);
+        assert_eq!(quorum_threshold(1), 1);
+        assert_eq!(quorum_threshold(2), 2);
+        assert_eq!(quorum_threshold(3), 2);
+        assert_eq!(quorum_threshold(4), 3);
+        assert_eq!(quorum_threshold(5), 4);
+        assert_eq!(quorum_threshold(6), 4);
+        assert_eq!(quorum_threshold(30), 20);
+        assert_eq!(quorum_threshold(100), 67);
+    }
+
+    #[test]
+    fn quorum_always_exceeds_two_thirds() {
+        for n in 1..500usize {
+            let q = quorum_threshold(n);
+            assert!(q * 3 >= n * 2, "quorum {q} too small for {n}");
+            assert!(
+                (q - 1) * 3 < n * 2,
+                "quorum {q} larger than necessary for {n}"
+            );
+        }
+    }
+
+    #[test]
+    fn min_bond_is_one_thousandth_of_a_percent() {
+        assert_eq!(min_bond(100_000_000), 1_000);
+        assert_eq!(min_bond(0), 1);
+    }
+}

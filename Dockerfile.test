@@ -1,0 +1,24 @@
+# Test image.
+#
+# `docker run --rm sikka-test` runs the whole suite: unit tests, ledger and
+# consensus integration tests, and a four-node HTTP testnet on loopback. Tests
+# never run on the host, so a green run means green on any machine.
+
+FROM rust:1.90-slim-trixie
+
+WORKDIR /work
+
+# Warm the dependency cache with a manifest-only build, so iterating on source
+# does not re-compile ML-DSA and redb every time.
+COPY Cargo.toml Cargo.lock ./
+COPY crates ./crates
+RUN cargo build --tests --locked
+
+ENV RUST_BACKTRACE=1 \
+    SIKKA_LOG=warn
+
+# Full parallelism on purpose. Every integration test spins up its own four-node
+# network on reserved ports, and each one waits on observable chain state rather
+# than on sleeps, so oversubscribing the CPU slows the suite down without making
+# it flaky. If a test only passes on an idle machine it is hiding a race.
+CMD ["cargo", "test", "--workspace", "--locked"]

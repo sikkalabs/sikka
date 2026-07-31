@@ -1,0 +1,16 @@
+[package]
+name = "sikka-checkpoint"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "SIKKA checkpoint storage and pruning"
+
+[dependencies]
+sikka-common.workspace = true
+redb.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+sikka-crypto.workspace = true
+tempfile.workspace = true

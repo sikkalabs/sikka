@@ -1,0 +1,27 @@
+[package]
+name = "sikka-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+description = "SIKKA command line wallet and chain inspector"
+
+[[bin]]
+name = "sikka"
+path = "src/main.rs"
+
+[dependencies]
+sikka-common = { workspace = true }
+sikka-crypto = { workspace = true }
+sikka-state = { workspace = true }
+sikka-rpc = { workspace = true }
+sikka-wallet = { workspace = true }
+clap = { workspace = true }
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+hex = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }

@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>SIKKA</title>
+  <style>
+    :root {
+      --ink: #1a1714;
+      --paper: #f3efe6;
+      --muted: #6b645a;
+      --line: #d4cdc0;
+      --accent: #0f6b4c;
+      --mono: "IBM Plex Mono", "SF Mono", ui-monospace, monospace;
+      --sans: "IBM Plex Sans", "Source Sans 3", system-ui, sans-serif;
+      --display: "Fraunces", "IBM Plex Serif", Georgia, serif;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      color: var(--ink);
+      background:
+        radial-gradient(1100px 520px at 8% -8%, #fff6e4 0%, transparent 55%),
+        radial-gradient(900px 480px at 100% 0%, #e4f0ea 0%, transparent 52%),
+        linear-gradient(180deg, #f7f2e8 0%, var(--paper) 40%, #ebe6db 100%);
+      font: 16px/1.5 var(--sans);
+    }
+    main {
+      max-width: 40rem;
+      margin: 0 auto;
+      padding: 4.5rem 1.25rem 4rem;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+    }
+    .brand {
+      font-family: var(--display);
+      font-size: clamp(3.2rem, 12vw, 5.2rem);
+      font-weight: 600;
+      letter-spacing: -0.045em;
+      line-height: 0.95;
+      margin: 0;
+    }
+    .lead {
+      margin: 1rem 0 0;
+      max-width: 28rem;
+      color: var(--muted);
+      font-size: 1.05rem;
+    }
+    .cta {
+      display: inline-block;
+      margin-top: 1.75rem;
+      padding: 0.85rem 1.35rem;
+      border: 1px solid var(--ink);
+      background: var(--ink);
+      color: var(--paper);
+      font: 600 0.95rem/1 var(--sans);
+      text-decoration: none;
+    }
+    .cta:hover { background: var(--accent); border-color: var(--accent); }
+    .stats {
+      margin-top: 3.5rem;
+      padding-top: 1.5rem;
+      border-top: 1px solid var(--line);
+    }
+    .stats h2 {
+      margin: 0 0 1rem;
+      font-size: 0.72rem;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--muted);
+      font-weight: 600;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 1rem 1.5rem;
+    }
+    @media (max-width: 520px) { .grid { grid-template-columns: 1fr; } }
+    .label {
+      font-size: 0.72rem;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+    .value {
+      margin-top: 0.2rem;
+      font: 600 1.05rem/1.3 var(--mono);
+      word-break: break-all;
+    }
+    .live {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.45rem;
+      margin-bottom: 1rem;
+      color: var(--muted);
+      font-size: 0.85rem;
+    }
+    .dot {
+      width: 0.5rem;
+      height: 0.5rem;
+      border-radius: 50%;
+      background: var(--line);
+    }
+    .dot.on { background: var(--accent); }
+    .dot.off { background: #a11; }
+    .err { color: #a11; font-size: 0.9rem; margin: 0.5rem 0 0; }
+  </style>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,600&family=IBM+Plex+Sans:wght@400;600&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet" />
+</head>
+<body>
+  <main>
+    <h1 class="brand">SIKKA</h1>
+    <p class="lead">
+      Feeless, post-quantum payments. Balances stay; history does not.
+    </p>
+    <a class="cta" href="/wallet.html">Open wallet</a>
+
+    <section class="stats" aria-live="polite">
+      <div class="live"><span class="dot" id="dot"></span><span id="status">Connecting…</span></div>
+      <h2>Network</h2>
+      <div class="grid">
+        <div><div class="label">Chain</div><div class="value" id="chain">—</div></div>
+        <div><div class="label">Height</div><div class="value" id="height">—</div></div>
+        <div><div class="label">Supply</div><div class="value" id="supply">—</div></div>
+        <div><div class="label">Bonded</div><div class="value" id="bonded">—</div></div>
+        <div><div class="label">Validators</div><div class="value" id="validators">—</div></div>
+        <div><div class="label">Peers / mempool</div><div class="value" id="peers">—</div></div>
+      </div>
+      <p class="err" id="error" hidden></p>
+    </section>
+  </main>
+
+  <script type="module">
+    import JSONBig from "https://esm.sh/json-bigint@1.0.0";
+
+    const CHILLAR = 1_000_000_000n;
+    const jsonBig = JSONBig({ useNativeBigInt: true });
+    const $ = (id) => document.getElementById(id);
+
+    function asBig(v) {
+      if (typeof v === "bigint") return v;
+      if (typeof v === "number") return BigInt(Math.trunc(v));
+      if (typeof v === "string") return BigInt(v);
+      return 0n;
+    }
+
+    function formatSikka(chillar) {
+      const c = asBig(chillar);
+      const whole = c / CHILLAR;
+      const frac = c % CHILLAR;
+      if (frac === 0n) return `${whole} SIKKA`;
+      return `${whole}.${frac.toString().padStart(9, "0").replace(/0+$/, "")} SIKKA`;
+    }
+
+    async function rpc(method, params = null) {
+      const res = await fetch("/api/rpc", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
+      });
+      const parsed = jsonBig.parse(await res.text());
+      if (parsed.error) throw new Error(parsed.error.message || "RPC error");
+      return parsed.result;
+    }
+
+    async function refresh() {
+      try {
+        const info = await rpc("chain.info");
+        $("dot").className = "dot on";
+        $("status").textContent = `online · height ${info.height}`;
+        $("chain").textContent = info.chain_id;
+        $("height").textContent = String(info.height);
+        $("supply").textContent = formatSikka(info.total_supply);
+        $("bonded").textContent = formatSikka(info.total_bonded);
+        $("validators").textContent = String(info.active_validators);
+        $("peers").textContent = `${info.peers} / ${info.mempool}`;
+        $("error").hidden = true;
+      } catch (e) {
+        $("dot").className = "dot off";
+        $("status").textContent = "unreachable";
+        $("error").hidden = false;
+        $("error").textContent = e.message || String(e);
+      }
+    }
+
+    refresh();
+    setInterval(refresh, 12_000);
+  </script>
+</body>
+</html>

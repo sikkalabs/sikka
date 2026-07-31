@@ -1,0 +1,22 @@
+[package]
+name = "sikka-p2p"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "SIKKA HTTP federation: mempool, peer discovery, transaction sync, Tor support"
+
+[dependencies]
+sikka-common.workspace = true
+sikka-crypto.workspace = true
+sikka-consensus.workspace = true
+sikka-state.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+hex.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
