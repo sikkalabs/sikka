@@ -16,6 +16,20 @@ pub const CREDIT_COST_PER_TX: u32 = 1;
 /// time-based fallback: an idle network produces no checkpoints.
 pub const DEFAULT_CHECKPOINT_TX_INTERVAL: u32 = 10_000;
 
+/// Maximum HTTP request body on bulk federation endpoints (checkpoint
+/// proposal/finalized, mempool sync).
+///
+/// ML-DSA-87 keys and signatures are hex on the wire (~15 KiB JSON per
+/// transaction), so a full [`DEFAULT_CHECKPOINT_TX_INTERVAL`] batch is about
+/// 150 MiB. 256 MiB leaves headroom for checkpoint metadata and evidence.
+/// Smaller routes keep Axum's 2 MiB default.
+pub const MAX_HTTP_BODY_BYTES: usize = 256 * 1024 * 1024;
+
+/// Outbound timeout for large peer transfers (proposals, finalized
+/// checkpoints, mempool sync, snapshots). Short timeouts are fine for votes
+/// and single transactions; bulk payloads over Tor need minutes.
+pub const BULK_REQUEST_TIMEOUT_SECS: u64 = 300;
+
 /// Transactions whose signed timestamp differs from a validator's wall clock by
 /// more than five minutes are rejected.
 pub const TX_TIME_TOLERANCE_SECS: u64 = 300;
@@ -105,5 +119,13 @@ mod tests {
     fn min_bond_is_one_thousandth_of_a_percent() {
         assert_eq!(min_bond(100_000_000), 1_000);
         assert_eq!(min_bond(0), 1);
+    }
+
+    #[test]
+    fn http_body_budget_covers_a_full_json_checkpoint() {
+        // ~15 KiB JSON per ML-DSA-87 transaction × 10_000 ≈ 150 MiB.
+        let approx_full_batch = DEFAULT_CHECKPOINT_TX_INTERVAL as usize * 15 * 1024;
+        assert!(MAX_HTTP_BODY_BYTES > approx_full_batch);
+        assert_eq!(BULK_REQUEST_TIMEOUT_SECS, 300);
     }
 }

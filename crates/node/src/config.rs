@@ -9,7 +9,7 @@ use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::path::PathBuf;
 use std::time::Duration;
 
-use sikka_common::constants::{BOOTSTRAP_NODES, DEFAULT_PORT};
+use sikka_common::constants::{BOOTSTRAP_NODES, BULK_REQUEST_TIMEOUT_SECS, DEFAULT_PORT};
 use sikka_common::error::{Error, Result};
 
 /// How the node presents itself and where it keeps things.
@@ -43,8 +43,11 @@ pub struct NodeConfig {
     pub gossip_interval: Duration,
     /// How often to re-announce and learn peers.
     pub discovery_interval: Duration,
-    /// Per-request timeout for outbound peer calls.
+    /// Per-request timeout for ordinary outbound peer calls.
     pub request_timeout: Duration,
+    /// Timeout for large peer transfers (proposals, finalized checkpoints,
+    /// mempool sync, snapshots).
+    pub bulk_request_timeout: Duration,
     /// Seal a checkpoint after this long even if the pool is short of a full
     /// batch, so a quiet chain still makes progress. Zero disables it.
     pub max_checkpoint_delay: Duration,
@@ -68,6 +71,7 @@ impl Default for NodeConfig {
             gossip_interval: Duration::from_secs(2),
             discovery_interval: Duration::from_secs(30),
             request_timeout: Duration::from_secs(10),
+            bulk_request_timeout: Duration::from_secs(BULK_REQUEST_TIMEOUT_SECS),
             max_checkpoint_delay: Duration::from_secs(30),
         }
     }

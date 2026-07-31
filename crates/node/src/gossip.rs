@@ -43,6 +43,7 @@ impl Gossip {
     pub fn start(node: Arc<Node>) -> sikka_common::error::Result<(Arc<Self>, PeerClient)> {
         let client = PeerClient::new(&ClientConfig {
             timeout: node.config().request_timeout,
+            bulk_timeout: node.config().bulk_request_timeout,
             socks_proxy: node.config().socks5_proxy.clone(),
         })?;
         let (jobs, receiver) = mpsc::unbounded_channel();

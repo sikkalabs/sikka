@@ -7,7 +7,7 @@
 
 use std::sync::Arc;
 
-use axum::extract::{Path, Request, State};
+use axum::extract::{DefaultBodyLimit, Path, Request, State};
 use axum::http::{header, HeaderValue, Method, StatusCode};
 use axum::middleware::{self, Next};
 use axum::response::{Html, IntoResponse, Response};
@@ -17,6 +17,7 @@ use serde_json::{json, Value};
 use tracing::{debug, warn};
 
 use sikka_common::bytes::{Address, Hash};
+use sikka_common::constants::MAX_HTTP_BODY_BYTES;
 use sikka_common::error::Error;
 use sikka_p2p::wire::{
     ErrorBody, PeersRequest, PeersResponse, SubmitCheckpoint, SubmitProposal, SubmitTransaction,
@@ -36,20 +37,27 @@ pub struct AppState {
 }
 
 pub fn router(state: AppState) -> Router {
+    // Full checkpoints are tens to hundreds of MiB of hex-encoded ML-DSA
+    // material. Raise the body limit only on those POSTs; everything else
+    // keeps Axum's 2 MiB default so wallets cannot force huge buffers.
+    let bulk = Router::new()
+        .route("/tx/sync", post(sync_transactions))
+        .route("/checkpoint/proposal", post(submit_proposal))
+        .route("/checkpoint/finalized", post(submit_checkpoint))
+        .layer(DefaultBodyLimit::max(MAX_HTTP_BODY_BYTES));
+
     let api = Router::new()
         .route("/", get(api_index))
         .route("/health", get(health))
         .route("/tx", post(submit_transaction))
-        .route("/tx/sync", post(sync_transactions))
         .route("/tx/{id}", get(has_transaction))
         .route("/vote", post(submit_vote))
-        .route("/checkpoint/proposal", post(submit_proposal))
-        .route("/checkpoint/finalized", post(submit_checkpoint))
         .route("/checkpoint/latest", get(latest_checkpoint))
         .route("/checkpoint/{height}", get(get_checkpoint))
         .route("/peers", post(peers))
         .route("/state/snapshot", get(snapshot))
-        .route("/rpc", post(rpc));
+        .route("/rpc", post(rpc))
+        .merge(bulk);
 
     Router::new()
         .nest("/api", api)

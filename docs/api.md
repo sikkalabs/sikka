@@ -18,6 +18,15 @@ keys and signatures are hex **without** a `0x` prefix.
 CORS is open (`Access-Control-Allow-Origin: *`). `OPTIONS` is accepted on every
 route.
 
+Request bodies on ordinary endpoints are capped at Axum's default **2 MiB**.
+Bulk federation POSTs (`/api/checkpoint/proposal`, `/api/checkpoint/finalized`,
+`/api/tx/sync`) accept up to **256 MiB** so a full 10,000-transaction checkpoint
+(hex-encoded ML-DSA-87 material) can be gossiped. Clients should allow several
+minutes for those transfers, especially over Tor. Snapshot download is `GET`
+and is not subject to the request body limit; reverse proxies in front of a
+node still need a matching `client_max_body_size` (or equivalent) for the bulk
+POSTs.
+
 Errors on federation routes look like `{ "error": "…" }` with HTTP 4xx/5xx.
 JSON-RPC errors use `{ "jsonrpc":"2.0", "error":{ "code", "message" }, "id" }`.
 
@@ -212,11 +221,16 @@ All under `/api/`. Wallets should prefer `/api/rpc`.
 { "proposal": { … } }
 ```
 
+Bodies may be large (up to 256 MiB): the proposal carries every transaction in
+the batch.
+
 ### `POST /api/checkpoint/finalized`
 
 ```json
 { "checkpoint": { … }, "transactions": [ … ] }
 ```
+
+Same size budget as proposals when `transactions` is attached for replay.
 
 ### `GET /api/checkpoint/latest`
 

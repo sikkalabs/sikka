@@ -9,6 +9,7 @@ use std::time::Duration;
 
 use sikka_common::bytes::Hash;
 use sikka_common::checkpoint::Checkpoint;
+use sikka_common::constants::BULK_REQUEST_TIMEOUT_SECS;
 use sikka_common::error::{Error, Result};
 use sikka_common::transaction::Transaction;
 use sikka_common::vote::Vote;
@@ -24,7 +25,11 @@ use crate::wire::{
 /// How a node reaches its peers.
 #[derive(Debug, Clone)]
 pub struct ClientConfig {
+    /// Timeout for ordinary peer calls (health, votes, single transactions).
     pub timeout: Duration,
+    /// Timeout for large transfers (proposals, finalized checkpoints, sync,
+    /// snapshots). Full JSON checkpoints can be hundreds of MiB over Tor.
+    pub bulk_timeout: Duration,
     /// `socks5h://host:port`, typically a local Tor daemon. `socks5h` resolves
     /// names through the proxy, which is required for `.onion`.
     pub socks_proxy: Option<String>,
@@ -34,6 +39,7 @@ impl Default for ClientConfig {
     fn default() -> Self {
         Self {
             timeout: Duration::from_secs(10),
+            bulk_timeout: Duration::from_secs(BULK_REQUEST_TIMEOUT_SECS),
             socks_proxy: None,
         }
     }
@@ -43,6 +49,8 @@ impl Default for ClientConfig {
 #[derive(Debug, Clone)]
 pub struct PeerClient {
     http: reqwest::Client,
+    timeout: Duration,
+    bulk_timeout: Duration,
 }
 
 impl PeerClient {
@@ -62,7 +70,11 @@ impl PeerClient {
         }
 
         let http = builder.build().map_err(|e| Error::Network(e.to_string()))?;
-        Ok(Self { http })
+        Ok(Self {
+            http,
+            timeout: config.timeout,
+            bulk_timeout: config.bulk_timeout,
+        })
     }
 
     fn url(endpoint: &str, path: &str) -> String {
@@ -79,9 +91,30 @@ impl PeerClient {
         path: &str,
         body: &B,
     ) -> Result<R> {
+        self.post_timed(endpoint, path, body, self.timeout).await
+    }
+
+    async fn post_bulk<B: serde::Serialize, R: serde::de::DeserializeOwned>(
+        &self,
+        endpoint: &str,
+        path: &str,
+        body: &B,
+    ) -> Result<R> {
+        self.post_timed(endpoint, path, body, self.bulk_timeout)
+            .await
+    }
+
+    async fn post_timed<B: serde::Serialize, R: serde::de::DeserializeOwned>(
+        &self,
+        endpoint: &str,
+        path: &str,
+        body: &B,
+        timeout: Duration,
+    ) -> Result<R> {
         let response = self
             .http
             .post(Self::url(endpoint, path))
+            .timeout(timeout)
             .json(body)
             .send()
             .await
@@ -90,9 +123,27 @@ impl PeerClient {
     }
 
     async fn get<R: serde::de::DeserializeOwned>(&self, endpoint: &str, path: &str) -> Result<R> {
+        self.get_timed(endpoint, path, self.timeout).await
+    }
+
+    async fn get_bulk<R: serde::de::DeserializeOwned>(
+        &self,
+        endpoint: &str,
+        path: &str,
+    ) -> Result<R> {
+        self.get_timed(endpoint, path, self.bulk_timeout).await
+    }
+
+    async fn get_timed<R: serde::de::DeserializeOwned>(
+        &self,
+        endpoint: &str,
+        path: &str,
+        timeout: Duration,
+    ) -> Result<R> {
         let response = self
             .http
             .get(Self::url(endpoint, path))
+            .timeout(timeout)
             .send()
             .await
             .map_err(|e| Error::Network(format!("{path} from {endpoint}: {e}")))?;
@@ -149,7 +200,7 @@ impl PeerClient {
         filter: BloomFilter,
         limit: usize,
     ) -> Result<TxSyncResponse> {
-        self.post(endpoint, "tx/sync", &TxSyncRequest { filter, limit })
+        self.post_bulk(endpoint, "tx/sync", &TxSyncRequest { filter, limit })
             .await
     }
 
@@ -165,7 +216,7 @@ impl PeerClient {
         endpoint: &str,
         proposal: &CheckpointProposal,
     ) -> Result<ProposalResponse> {
-        self.post(
+        self.post_bulk(
             endpoint,
             "checkpoint/proposal",
             &SubmitProposal {
@@ -185,7 +236,9 @@ impl PeerClient {
             checkpoint: checkpoint.clone(),
             transactions: transactions.to_vec(),
         };
-        let _: serde_json::Value = self.post(endpoint, "checkpoint/finalized", &body).await?;
+        let _: serde_json::Value = self
+            .post_bulk(endpoint, "checkpoint/finalized", &body)
+            .await?;
         Ok(())
     }
 
@@ -215,7 +268,7 @@ impl PeerClient {
     /// Any node can serve this, validator or not: the snapshot is verified
     /// against the checkpoint's signatures, so the source does not need trusting.
     pub async fn snapshot(&self, endpoint: &str) -> Result<sikka_state::StateSnapshot> {
-        self.get(endpoint, "state/snapshot").await
+        self.get_bulk(endpoint, "state/snapshot").await
     }
 
     /// Ask a peer whether it holds a transaction, used only by diagnostics.
@@ -251,6 +304,7 @@ mod tests {
         PeerClient::new(&ClientConfig::default()).unwrap();
         PeerClient::new(&ClientConfig {
             timeout: Duration::from_secs(5),
+            bulk_timeout: Duration::from_secs(60),
             socks_proxy: Some("socks5h://127.0.0.1:9050".into()),
         })
         .unwrap();
@@ -260,6 +314,7 @@ mod tests {
     fn an_invalid_proxy_is_reported() {
         let result = PeerClient::new(&ClientConfig {
             timeout: Duration::from_secs(5),
+            bulk_timeout: Duration::from_secs(60),
             socks_proxy: Some("not a url".into()),
         });
         assert!(result.is_err());
