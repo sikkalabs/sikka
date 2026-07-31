@@ -42,7 +42,10 @@ pub const DEFAULT_PORT: u16 = 64552;
 pub const DEFAULT_CHAIN_ID: &str = "sikka";
 
 /// Hardcoded bootstrap peers used when no override is supplied.
-pub const BOOTSTRAP_NODES: &[&str] = &["https://1.sikkalabs.com"];
+pub const BOOTSTRAP_NODES: &[&str] = &[
+    "https://1.sikkalabs.com",
+    "https://2.sikkalabs.com",
+];
 
 /// Signatures required to finalize a checkpoint: `ceil(2/3 * validators)`.
 ///

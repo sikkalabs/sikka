@@ -26,7 +26,7 @@ docker build -t ghcr.io/sikkalabs/sikka:latest .
 
 Same command for everyone. Admin (#1) uses the seed for `0x9949…447` and
 publishes `64552`; joiners pick their own seed and advertise URL. Bootstrap
-defaults to `https://1.sikkalabs.com`.
+defaults to `https://1.sikkalabs.com` and `https://2.sikkalabs.com`.
 
 ```bash
 docker run -d --name sikka \
@@ -103,7 +103,7 @@ Same pattern on a joiner: `docker exec sikka-2 sikka …`.
 | --- | --- | --- |
 | `SIKKA_PRIVATE_KEY` | unset | 32-byte seed or full secret (hex); else a key is created under `/data` |
 | `SIKKA_ADVERTISE` | from host + `64552` | public URL peers should dial |
-| `SIKKA_BOOTSTRAP` | `https://1.sikkalabs.com` | first peers |
+| `SIKKA_BOOTSTRAP` | `https://1.sikkalabs.com`, `https://2.sikkalabs.com` | first peers |
 | `SIKKA_GENESIS` | baked-in if missing | optional custom genesis path |
 | `SIKKA_TOR_PROXY` | unset | SOCKS5 for outbound (e.g. Tor) |
 | `SIKKA_LOG` | `info` | tracing filter |
