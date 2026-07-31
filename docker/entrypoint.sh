@@ -45,6 +45,10 @@ SocksPolicy accept 127.0.0.1
 SocksPolicy reject *
 AvoidDiskWrites 0
 HiddenServiceDir $TOR_HS
+# Advertised/bootstrap onion URLs intentionally omit a port, so clients dial
+# the HTTP default (virtual port 80). Keep 64552 as a compatibility alias for
+# operators that copied the node's local listen port into an onion URL.
+HiddenServicePort 80 127.0.0.1:64552
 HiddenServicePort 64552 127.0.0.1:64552
 Log notice file $TOR_LOG
 EOF
