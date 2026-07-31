@@ -23,14 +23,17 @@ every transfer ever made.
   latest checkpoint remain on-chain.
 - **Private by default** — without a permanent tx log, past payments are not
   publicly reconstructable. Optional Tor SOCKS for peer traffic.
-- **Built for micropayments** — feeless transfers and tiny spam credits make
-  high-frequency, low-value payments practical.
+- **Built for micropayments** — feeless transfers and regenerating spam credits (+1/min, cap 100) make high-frequency, low-value payments practical. Fresh accounts start at 0 credits to prevent funding-sybil attacks.
 - **Agent-ready** — plain HTTP + JSON-RPC. One endpoint to check balances,
   send, and bond — no heavy SDKs required.
 - **Post-quantum** — every signature is **ML-DSA-87** (FIPS 204); hashes are
   **SHA3-256**.
-- **Proofs, not trust** — wallets verify balances with Merkle proofs against
-  the checkpoint root.
+- **Proofs, not trust** — stateless light wallets verify inclusion and absence with Sparse Merkle Tree (SMT) proofs against the checkpoint root.
+- **Instant fast-sync** — new or returning nodes catch up in seconds via state snapshots verified against $\ge$ 2/3 validator signatures without replaying historical transactions.
+- **Deterministic inflation** — 1.5%/year inflation compounding is calculated using 128-bit integer fixed-point math (`expm1_fixed`), avoiding floating-point non-determinism across CPU architectures.
+- **Non-punitive consensus** — round-robin proposer rotation with automatic 10-second timeout fallbacks. Zero downtime penalties; validators are only slashed for double-signing (equivocation).
+- **Efficient mempool sync** — nodes exchange compact Bloom filters during peer reconciliation to request only missing transactions, minimizing network bandwidth.
+- **Pure-Rust storage** — built on `redb` (ACID key-value store) with 3 fixed tables (`accounts`, `validators`, `meta`), requiring zero C/C++ database dependencies.
 - **Simple ops** — one container, one port. Docker is the production path.
 
 ---
