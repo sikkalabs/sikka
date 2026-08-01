@@ -53,6 +53,7 @@ pub fn router(state: AppState) -> Router {
         .route("/tx/{id}", get(has_transaction))
         .route("/vote", post(submit_vote))
         .route("/checkpoint/latest", get(latest_checkpoint))
+        .route("/checkpoint/pending", get(pending_proposal))
         .route("/checkpoint/{height}", get(get_checkpoint))
         .route("/peers", post(peers))
         .route("/state/snapshot/manifest", get(snapshot_manifest))
@@ -150,7 +151,8 @@ async fn api_index(State(state): State<AppState>) -> HttpResult<Json<Value>> {
         "endpoints": [
             "/api/health", "/api/rpc", "/api/tx", "/api/tx/sync", "/api/vote",
             "/api/checkpoint/proposal", "/api/checkpoint/finalized",
-            "/api/checkpoint/latest", "/api/checkpoint/{height}",
+            "/api/checkpoint/latest", "/api/checkpoint/pending",
+            "/api/checkpoint/{height}",
             "/api/peers", "/api/state/snapshot/manifest",
             "/api/state/snapshot/{snapshot_id}/chunk/{index}"
         ],
@@ -263,6 +265,14 @@ async fn latest_checkpoint(
     State(state): State<AppState>,
 ) -> HttpResult<Json<sikka_common::checkpoint::Checkpoint>> {
     Ok(Json(state.node.latest_checkpoint()?))
+}
+
+async fn pending_proposal(
+    State(state): State<AppState>,
+) -> HttpResult<Json<sikka_p2p::wire::PendingProposalResponse>> {
+    Ok(Json(sikka_p2p::wire::PendingProposalResponse {
+        proposal: state.node.open_proposal(),
+    }))
 }
 
 async fn get_checkpoint(

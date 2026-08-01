@@ -147,6 +147,16 @@ impl VoteTracker {
         self.heights.get(&height)?.by_validator.get(validator)
     }
 
+    /// Whether any validator has cast a vote at `height`.
+    ///
+    /// Used to refuse inventing a rival checkpoint once the height already has
+    /// a signed commitment somewhere on the network.
+    pub fn has_votes(&self, height: u64) -> bool {
+        self.heights
+            .get(&height)
+            .is_some_and(|h| !h.by_validator.is_empty())
+    }
+
     /// All checkpoint hashes seen at a height, with their vote counts.
     pub fn candidates(&self, height: u64) -> Vec<(Hash, usize)> {
         let Some(votes) = self.heights.get(&height) else {

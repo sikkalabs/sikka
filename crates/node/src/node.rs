@@ -107,6 +107,12 @@ struct Chain {
     pending: Option<Pending>,
     /// The checkpoint an abandoned round left this node committed to, if any.
     locked: Option<Locked>,
+    /// Best (lowest-round) open proposal seen for the height still being decided.
+    ///
+    /// Later proposers adopt this instead of inventing a rival, which is what
+    /// would lock two honest validators onto different hashes when a third is
+    /// offline.
+    known: Option<CheckpointProposal>,
     /// When the last checkpoint was finalized, for the idle-timer that lets a
     /// quiet chain make progress without a full batch.
     last_progress: u64,
@@ -175,8 +181,10 @@ impl Node {
         // checkpoint again instead of stranding the height.
         let mut votes = VoteTracker::new();
         let mut locked = None;
+        let mut known = None;
         for commitment in commitments.load_above(ledger.height())? {
             if commitment.height() == ledger.height() + 1 {
+                known = Some(commitment.proposal.clone());
                 locked = Some(Locked {
                     proposal: commitment.proposal,
                     offered_at: None,
@@ -210,6 +218,7 @@ impl Node {
                 checkpoints,
                 pending: None,
                 locked,
+                known,
                 last_progress: now,
             }),
             mempool: Mutex::new(mempool),
@@ -500,6 +509,12 @@ impl Node {
     /// Propose the next checkpoint, if it is our turn and there is work.
     ///
     /// Returns the proposal to broadcast together with our own vote for it.
+    ///
+    /// Later rounds adopt a known open proposal (or wait once any vote for the
+    /// height exists) rather than inventing a rival. Two honest validators each
+    /// inventing a different hash at the same height is a permanent deadlock
+    /// under one-vote-per-height, which is exactly what happens when a third
+    /// validator is offline and rounds advance.
     pub fn try_propose(&self) -> Result<Option<(CheckpointProposal, Vote)>> {
         if !self.config.validator {
             return Ok(None);
@@ -523,6 +538,35 @@ impl Node {
         let own_vote = self.votes.lock().vote_by(height, &self.address).cloned();
         if let Some(vote) = own_vote {
             return Ok(self.reoffer_locked(chain, vote, now));
+        }
+
+        // Prefer an earlier proposal we already hold over inventing a new one —
+        // but only if the network has not already committed votes to a different
+        // hash. Adopting against an existing vote is how committees split.
+        if let Some(proposal) = chain.known.clone() {
+            if proposal.height() == height {
+                let agrees_with_votes = {
+                    let votes = self.votes.lock();
+                    let candidates = votes.candidates(height);
+                    candidates.is_empty()
+                        || candidates
+                            .iter()
+                            .any(|(hash, _)| *hash == proposal.hash())
+                };
+                if agrees_with_votes {
+                    return self.adopt_proposal(chain, proposal, now);
+                }
+                chain.known = None;
+            } else {
+                chain.known = None;
+            }
+        }
+
+        // Someone else has already signed at this height. Inventing a different
+        // checkpoint would leave two locked votes on different hashes. Wait for
+        // the proposal body (gossip or peer fetch) and adopt it instead.
+        if self.votes.lock().has_votes(height) {
+            return Ok(None);
         }
 
         let active = chain.ledger.active_validators_at(height)?;
@@ -574,6 +618,7 @@ impl Node {
             vote: vote.clone(),
             proposal: proposal.clone(),
         })?;
+        remember_proposal(&mut chain.known, &proposal);
         chain.pending = Some(Pending {
             proposal: proposal.clone(),
             verified,
@@ -593,6 +638,97 @@ impl Node {
             "proposing checkpoint"
         );
         Ok(Some((proposal, vote)))
+    }
+
+    /// Vote for an open proposal we already hold, instead of inventing a rival.
+    fn adopt_proposal(
+        &self,
+        mut chain: MutexGuard<'_, Chain>,
+        proposal: CheckpointProposal,
+        now: u64,
+    ) -> Result<Option<(CheckpointProposal, Vote)>> {
+        let height = proposal.height();
+        if height != chain.ledger.height() + 1 {
+            return Ok(None);
+        }
+        if chain.pending.is_some() {
+            return Ok(None);
+        }
+        if self.votes.lock().vote_by(height, &self.address).is_some() {
+            return Ok(None);
+        }
+
+        let verified_ids: HashSet<Hash> = self.mempool.lock().verified_ids();
+        let verified = match verify_proposal(&mut chain.ledger, &proposal, now, &verified_ids) {
+            Ok(verified) => verified,
+            Err(error) => {
+                debug!(%error, height, "could not adopt the known open proposal");
+                // Drop a proposal we cannot verify so a later round can invent
+                // once peers agree there is nothing better.
+                if chain.known.as_ref().is_some_and(|known| known.hash() == proposal.hash()) {
+                    chain.known = None;
+                }
+                return Ok(None);
+            }
+        };
+
+        let hash = verified.hash();
+        let vote = Vote::sign(&self.keypair, height, hash)?;
+        self.commitments.put(&Commitment {
+            vote: vote.clone(),
+            proposal: proposal.clone(),
+        })?;
+        remember_proposal(&mut chain.known, &proposal);
+        chain.pending = Some(Pending {
+            proposal: proposal.clone(),
+            verified,
+            hash,
+            height,
+            created_at: now,
+        });
+        drop(chain);
+
+        self.votes.lock().record(vote.clone())?;
+        info!(
+            height,
+            round = proposal.header.round,
+            hash = %hash.short(),
+            "adopting an open proposal instead of inventing a rival"
+        );
+        Ok(Some((proposal, vote)))
+    }
+
+    /// The proposal this node is currently trying to finalize, if any.
+    ///
+    /// Peers poll this before inventing a later-round checkpoint so they can
+    /// adopt the same hash rather than locking onto a rival.
+    pub fn open_proposal(&self) -> Option<CheckpointProposal> {
+        let chain = self.chain();
+        if let Some(pending) = &chain.pending {
+            return Some(pending.proposal.clone());
+        }
+        if let Some(locked) = &chain.locked {
+            return Some(locked.proposal.clone());
+        }
+        chain.known.clone()
+    }
+
+    /// Remember an open proposal from a peer without voting yet.
+    ///
+    /// The next [`Self::try_propose`] will adopt it (or [`Self::handle_proposal`]
+    /// will vote immediately when called). Storing it first is what stops a
+    /// later-round proposer inventing a rival while the body is in flight.
+    pub fn note_open_proposal(&self, proposal: &CheckpointProposal) {
+        let mut chain = self.chain();
+        if proposal.height() == chain.ledger.height() + 1 {
+            remember_proposal(&mut chain.known, proposal);
+        }
+    }
+
+    /// Whether this node has already cast a vote for the height still open.
+    pub fn has_voted_for_open_height(&self) -> bool {
+        let height = self.height() + 1;
+        self.votes.lock().vote_by(height, &self.address).is_some()
     }
 
     /// Offer the checkpoint an abandoned round left us committed to.
@@ -703,6 +839,7 @@ impl Node {
                 // Idempotent: re-send the vote so a retrying proposer makes
                 // progress. This is what lets an abandoned round be completed
                 // when it is offered again.
+                remember_proposal(&mut chain.known, proposal);
                 return Ok(ProposalResponse {
                     accepted: true,
                     vote: Some(previous.clone()),
@@ -726,6 +863,7 @@ impl Node {
             proposal: proposal.clone(),
         })?;
 
+        remember_proposal(&mut chain.known, proposal);
         chain.pending = Some(Pending {
             verified,
             proposal: proposal.clone(),
@@ -777,19 +915,44 @@ impl Node {
     }
 
     /// Commit the pending checkpoint once ≥2/3 of the active set has signed it.
+    ///
+    /// Only the proposal's proposer assembles and commits the finalized
+    /// artifact immediately. That makes the embedded signature set unique: if
+    /// every node finalized locally with whichever quorum subset it had seen,
+    /// two committees of three out of four would commit different
+    /// `last_signers` for the same transactions, and the next height's reward
+    /// payout would fork the state root. Everyone else applies the proposer's
+    /// artifact via [`Self::handle_finalized`].
+    ///
+    /// If the proposer never seals (it died after votes arrived), any voter may
+    /// finalize once a proposer timeout has passed, using the lexicographically
+    /// first quorum of signatures so two late finalizers still agree.
     pub fn finalize_if_quorum(&self) -> Result<Option<Finalized>> {
+        let now = now_secs();
         let mut chain = self.chain();
         let Some(pending) = &chain.pending else {
             return Ok(None);
         };
         let (height, hash) = (pending.height, pending.hash);
+        let proposer = pending.proposal.header.proposer;
+        let created_at = pending.created_at;
+        let is_proposer = proposer == self.address;
+        let proposer_missed = now.saturating_sub(created_at) >= PROPOSER_TIMEOUT_SECS;
+        if !is_proposer && !proposer_missed {
+            return Ok(None);
+        }
 
         let active = chain.ledger.active_validators_at(height)?;
         let addresses: Vec<Address> = active.iter().map(|v| v.address).collect();
-        let signatures = self.votes.lock().signatures(height, &hash, &addresses);
-        if signatures.len() < quorum_threshold(addresses.len()) {
+        let needed = quorum_threshold(addresses.len());
+        let mut signatures = self.votes.lock().signatures(height, &hash, &addresses);
+        if signatures.len() < needed {
             return Ok(None);
         }
+        // Always seal with the lexicographically first quorum of voters. That
+        // way a late fallback finalizer embeds the same last_signers the
+        // proposer would have, as long as both have seen those voters.
+        signatures.truncate(needed);
 
         let pending = chain.pending.take().expect("checked above");
         let mut checkpoint = pending.verified.checkpoint.clone();
@@ -922,6 +1085,7 @@ impl Node {
         chain.last_progress = now_secs();
         // The height is closed, so nothing here binds us any more.
         chain.locked = None;
+        chain.known = None;
 
         let ids: Vec<Hash> = transactions.iter().map(|tx| tx.id()).collect();
         let senders: Vec<Address> = transactions.iter().map(|tx| tx.from).collect();
@@ -964,6 +1128,7 @@ impl Node {
         let pending = chain.pending.take().expect("checked above");
         let height = pending.height;
         chain.ledger.rollback(pending.verified.staged);
+        remember_proposal(&mut chain.known, &pending.proposal);
         chain.locked = Some(Locked {
             proposal: pending.proposal,
             offered_at: None,
@@ -1121,6 +1286,7 @@ impl Node {
             chain.ledger.rollback(stale.verified.staged);
         }
         chain.locked = None;
+        chain.known = None;
         chain.checkpoints.put_unpruned(&snapshot.checkpoint)?;
         if let Err(error) = chain.ledger.apply_snapshot(snapshot) {
             if let Err(remove_error) = chain.checkpoints.remove(height) {
@@ -1163,6 +1329,16 @@ fn refused(reason: impl Into<String>) -> ProposalResponse {
         accepted: false,
         vote: None,
         reason: Some(reason.into()),
+    }
+}
+
+/// Keep the lowest-round open proposal for the height still being decided.
+fn remember_proposal(known: &mut Option<CheckpointProposal>, proposal: &CheckpointProposal) {
+    match known {
+        Some(existing)
+            if existing.height() == proposal.height()
+                && existing.header.round <= proposal.header.round => {}
+        _ => *known = Some(proposal.clone()),
     }
 }
 
@@ -1676,6 +1852,87 @@ mod tests {
         assert!(restarted
             .iter()
             .all(|node| node.account(&bob).unwrap().balance == 2));
+    }
+
+    #[test]
+    fn foreign_votes_block_inventing_a_rival_checkpoint() {
+        let pair = validator_pair();
+        let bob = Address([7u8; 32]);
+        for node in &pair.nodes {
+            for nonce in 0..2 {
+                node.submit_transaction(transfer(&pair.alice, bob, 1, nonce))
+                    .unwrap();
+            }
+        }
+
+        let (proposal, vote, proposer) = match pair.nodes[0].try_propose().unwrap() {
+            Some((proposal, vote)) => (proposal, vote, 0),
+            None => {
+                let (proposal, vote) = pair.nodes[1]
+                    .try_propose()
+                    .unwrap()
+                    .expect("one of the two holds the round");
+                (proposal, vote, 1)
+            }
+        };
+        let other = 1 - proposer;
+
+        // The other validator learns only that a vote exists — not the body.
+        // Inventing a different checkpoint here is the deadlock that freezes a
+        // 2-of-3 committee when the third validator is offline.
+        pair.nodes[other].handle_vote(vote.clone()).unwrap();
+        assert!(
+            pair.nodes[other].try_propose().unwrap().is_none(),
+            "must not invent a rival once any vote exists at this height"
+        );
+
+        let accepted = pair.nodes[other].handle_proposal(&proposal).unwrap();
+        assert!(accepted.accepted);
+        let finalized = pair.nodes[proposer]
+            .handle_vote(accepted.vote.unwrap())
+            .unwrap()
+            .expect("both signatures are a quorum");
+        assert_eq!(finalized.checkpoint.hash(), proposal.hash());
+    }
+
+    #[test]
+    fn a_known_open_proposal_is_adopted_instead_of_inventing_a_rival() {
+        let pair = validator_pair();
+        let bob = Address([7u8; 32]);
+        for node in &pair.nodes {
+            for nonce in 0..2 {
+                node.submit_transaction(transfer(&pair.alice, bob, 1, nonce))
+                    .unwrap();
+            }
+        }
+
+        let (proposal, proposer_vote, proposer) = match pair.nodes[0].try_propose().unwrap() {
+            Some((proposal, vote)) => (proposal, vote, 0),
+            None => {
+                let (proposal, vote) = pair.nodes[1]
+                    .try_propose()
+                    .unwrap()
+                    .expect("one of the two holds the round");
+                (proposal, vote, 1)
+            }
+        };
+        let other = 1 - proposer;
+
+        // Simulate learning the open proposal via peer fetch before our turn to
+        // invent: remember it, then try_propose must adopt that hash.
+        pair.nodes[other].note_open_proposal(&proposal);
+        let (adopted, adopted_vote) = pair.nodes[other]
+            .try_propose()
+            .unwrap()
+            .expect("the known proposal is adopted");
+        assert_eq!(adopted.hash(), proposal.hash());
+        assert_ne!(adopted_vote.validator, proposer_vote.validator);
+
+        let finalized = pair.nodes[proposer]
+            .handle_vote(adopted_vote)
+            .unwrap()
+            .expect("both signatures are a quorum");
+        assert_eq!(finalized.checkpoint.hash(), proposal.hash());
     }
 
     #[test]

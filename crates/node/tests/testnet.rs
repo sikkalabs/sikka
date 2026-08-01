@@ -28,6 +28,22 @@ struct TestNode {
     endpoint: String,
     rpc: RpcClient,
     _dir: tempfile::TempDir,
+    /// Dropping the node must stop its server and consensus loops; otherwise a
+    /// "killed" validator keeps inventing checkpoints on loopback and the
+    /// remaining committee deadlocks under one-vote-per-height.
+    shutdown: Option<tokio::sync::oneshot::Sender<()>>,
+    server: Option<tokio::task::JoinHandle<()>>,
+}
+
+impl Drop for TestNode {
+    fn drop(&mut self) {
+        if let Some(shutdown) = self.shutdown.take() {
+            let _ = shutdown.send(());
+        }
+        if let Some(server) = self.server.take() {
+            server.abort();
+        }
+    }
 }
 
 impl TestNode {
@@ -36,8 +52,9 @@ impl TestNode {
     }
 }
 
-/// Reserve a loopback port. Nodes must know their own endpoint before they bind,
-/// so the port is chosen up front rather than by the kernel at bind time.
+/// Unused — tests bind on port 0 now. Kept so older snippets still compile if
+/// revived.
+#[allow(dead_code)]
 fn reserve_port() -> u16 {
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let port = listener.local_addr().unwrap().port();
@@ -55,12 +72,18 @@ struct Testnet {
 impl Testnet {
     /// Start `count` validators that all know about each other.
     async fn start(count: usize, tx_interval: u32) -> Self {
+        Self::start_with_offline(count, 0, tx_interval).await
+    }
+
+    /// Start `validator_count - offline` nodes on a genesis that still lists
+    /// every validator. Quorum is computed from the full set, so this is the
+    /// live case of a bonded validator that is simply unreachable.
+    async fn start_with_offline(validator_count: usize, offline: usize, tx_interval: u32) -> Self {
+        assert!(offline < validator_count);
+        let running = validator_count - offline;
         let alice = Wallet::generate().unwrap();
-        let keys: Vec<Keypair> = (0..count).map(|_| Keypair::generate().unwrap()).collect();
-        let ports: Vec<u16> = (0..count).map(|_| reserve_port()).collect();
-        let endpoints: Vec<String> = ports
-            .iter()
-            .map(|port| format!("http://127.0.0.1:{port}"))
+        let keys: Vec<Keypair> = (0..validator_count)
+            .map(|_| Keypair::generate().unwrap())
             .collect();
 
         let bond = 100_000 * CHILLAR_PER_SIKKA;
@@ -69,7 +92,7 @@ impl Testnet {
             amount: 10_000 * CHILLAR_PER_SIKKA,
         }];
         let mut validators = Vec::new();
-        for (index, key) in keys.iter().enumerate() {
+        for key in &keys {
             allocations.push(GenesisAllocation {
                 to: Address(key.address_bytes()),
                 amount: 1_000_000 * CHILLAR_PER_SIKKA,
@@ -77,7 +100,8 @@ impl Testnet {
             validators.push(GenesisValidator {
                 public_key: PublicKey::new(*key.public_bytes()),
                 bond,
-                endpoint: Some(endpoints[index].clone()),
+                // Endpoints are learned over the test mesh, not baked into genesis.
+                endpoint: None,
             });
         }
 
@@ -95,21 +119,29 @@ impl Testnet {
         std::fs::write(&genesis_path, genesis.to_json()).unwrap();
         // The genesis file has to outlive the temp dir guard for later joiners.
         let genesis_path = {
-            let persisted =
-                std::env::temp_dir().join(format!("sikka-genesis-{}.json", reserve_port()));
+            let persisted = std::env::temp_dir().join(format!(
+                "sikka-genesis-{}.json",
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_nanos()
+            ));
             std::fs::copy(&genesis_path, &persisted).unwrap();
             persisted
         };
 
+        // Bind on port 0 so each node gets a fresh kernel port — no race with
+        // TIME_WAIT from a previous test's aborted listener.
         let mut nodes = Vec::new();
-        for (index, key) in keys.iter().enumerate() {
-            let bootstrap: Vec<String> = endpoints
-                .iter()
-                .enumerate()
-                .filter(|(other, _)| *other != index)
-                .map(|(_, endpoint)| endpoint.clone())
-                .collect();
-            nodes.push(spawn_node(&genesis_path, Some(key), ports[index], bootstrap, true).await);
+        for key in keys.iter().take(running) {
+            nodes.push(spawn_node(&genesis_path, Some(key), Vec::new(), true).await);
+        }
+        for i in 0..nodes.len() {
+            for j in 0..nodes.len() {
+                if i != j {
+                    nodes[i].node.add_peer_endpoint(&nodes[j].endpoint);
+                }
+            }
         }
 
         let validator_keys = keys
@@ -133,7 +165,7 @@ impl Testnet {
     /// Add a node that is not a validator and has no state at all.
     async fn join_observer(&self) -> TestNode {
         let bootstrap: Vec<String> = self.nodes.iter().map(|n| n.endpoint.clone()).collect();
-        spawn_node(&self.genesis_path, None, reserve_port(), bootstrap, false).await
+        spawn_node(&self.genesis_path, None, bootstrap, false).await
     }
 
     fn rpc(&self, index: usize) -> &RpcClient {
@@ -144,17 +176,25 @@ impl Testnet {
         self.nodes.iter().map(|n| n.node.height()).collect()
     }
 
-    /// Wait until every node reaches `height`, or fail with what they did reach.
+    /// Wait until every node reaches `height` with a shared state root.
     async fn await_height(&self, height: u64, within: Duration) {
         let deadline = Instant::now() + within;
         loop {
-            if self.heights().iter().all(|h| *h >= height) {
+            let heights = self.heights();
+            let roots: Vec<_> = self
+                .nodes
+                .iter()
+                .map(|n| n.node.chain_info().unwrap().state_root)
+                .collect();
+            let same_root = roots.windows(2).all(|pair| pair[0] == pair[1]);
+            if heights.iter().all(|h| *h >= height) && same_root {
                 return;
             }
             if Instant::now() > deadline {
                 panic!(
-                    "timed out waiting for height {height}; nodes reached {:?}",
-                    self.heights()
+                    "timed out waiting for height {height}; nodes reached {:?}; roots {:?}",
+                    heights,
+                    roots.iter().map(|r| r.short()).collect::<Vec<_>>()
                 );
             }
             tokio::time::sleep(Duration::from_millis(100)).await;
@@ -215,7 +255,6 @@ impl Testnet {
 async fn spawn_node(
     genesis: &Path,
     key: Option<&Keypair>,
-    port: u16,
     bootstrap: Vec<String>,
     validator: bool,
 ) -> TestNode {
@@ -225,13 +264,12 @@ async fn spawn_node(
         Keystore::from_keypair(key).save(&key_path).unwrap();
     }
 
-    let endpoint = format!("http://127.0.0.1:{port}");
     let config = NodeConfig {
         data_dir: dir.path().to_path_buf(),
         genesis_path: genesis.to_path_buf(),
         key_path,
-        listen: format!("127.0.0.1:{port}").parse().unwrap(),
-        advertise: endpoint.clone(),
+        listen: "127.0.0.1:0".parse().unwrap(),
+        advertise: "http://127.0.0.1:0".into(),
         bootstrap,
         validator,
         mempool_capacity: 10_000,
@@ -245,9 +283,15 @@ async fn spawn_node(
     };
 
     let running = sikka_node::start(config).await.unwrap();
+    let endpoint = running.node.config().advertise.clone();
     let node = running.node.clone();
-    tokio::spawn(async move {
-        let _ = running.serve_until(std::future::pending()).await;
+    let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
+    let server = tokio::spawn(async move {
+        let _ = running
+            .serve_until(async move {
+                let _ = shutdown_rx.await;
+            })
+            .await;
     });
 
     let rpc = RpcClient::with_timeout(&endpoint, Duration::from_secs(5)).unwrap();
@@ -264,6 +308,8 @@ async fn spawn_node(
         endpoint,
         rpc,
         _dir: dir,
+        shutdown: Some(shutdown_tx),
+        server: Some(server),
     }
 }
 
@@ -501,6 +547,36 @@ async fn the_chain_keeps_going_when_a_validator_disappears() {
         .unwrap();
     assert!(!dead_record.slashed);
     assert!(dead_record.active);
+}
+
+/// Regression for the competing-round deadlock: with 3 bonded validators and
+/// only 2 online, quorum is 2. If each online validator invents its own
+/// checkpoint as rounds advance, they lock onto different hashes and the
+/// height never closes. They must adopt one shared proposal instead.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn two_of_three_validators_finalize_while_one_stays_offline() {
+    let net = Testnet::start_with_offline(3, 1, 2).await;
+    net.await_peers(Duration::from_secs(10)).await;
+    assert_eq!(net.nodes.len(), 2);
+    assert_eq!(net.validator_keys.len(), 3);
+
+    let bob = Address([0x2f; 32]);
+    // Several heights, so proposer rounds rotate through the missing validator.
+    for round in 0..4u64 {
+        net.alice_pays(bob, CHILLAR_PER_SIKKA, 2, round * 2).await;
+        net.await_height(round + 1, Duration::from_secs(90))
+            .await;
+    }
+
+    assert_eq!(net.nodes[0].node.height(), net.nodes[1].node.height());
+    assert!(net.nodes[0].node.height() >= 4);
+    assert_eq!(
+        net.rpc(0).account(&bob).await.unwrap().balance,
+        8 * CHILLAR_PER_SIKKA
+    );
+    let root_a = net.rpc(0).chain_info().await.unwrap().state_root;
+    let root_b = net.rpc(1).chain_info().await.unwrap().state_root;
+    assert_eq!(root_a, root_b);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

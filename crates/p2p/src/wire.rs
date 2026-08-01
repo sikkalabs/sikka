@@ -105,6 +105,14 @@ pub struct PeersResponse {
     pub peers: Vec<Peer>,
 }
 
+/// `GET /api/checkpoint/pending` — open proposal this node would still like
+/// the network to finalize, if any.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PendingProposalResponse {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub proposal: Option<CheckpointProposal>,
+}
+
 /// `GET /api/health`
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Health {

@@ -284,6 +284,17 @@ impl PeerClient {
         .await
     }
 
+    /// Fetch a peer's open (pending or locked) proposal for the height still
+    /// being decided, if it has one.
+    pub async fn pending_proposal(
+        &self,
+        endpoint: &str,
+    ) -> Result<Option<CheckpointProposal>> {
+        let response: crate::wire::PendingProposalResponse =
+            self.get(endpoint, "checkpoint/pending").await?;
+        Ok(response.proposal)
+    }
+
     pub async fn submit_checkpoint(
         &self,
         endpoint: &str,

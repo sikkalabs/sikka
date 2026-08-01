@@ -33,7 +33,7 @@ pub fn spawn_all(
     client: PeerClient,
 ) -> Vec<tokio::task::JoinHandle<()>> {
     vec![
-        tokio::spawn(consensus_loop(node.clone(), gossip.clone())),
+        tokio::spawn(consensus_loop(node.clone(), gossip.clone(), client.clone())),
         tokio::spawn(mempool_loop(node.clone(), client.clone())),
         tokio::spawn(discovery_loop(node.clone(), client.clone())),
         tokio::spawn(catchup_loop(node.clone(), gossip, client)),
@@ -50,7 +50,7 @@ fn ticker(period: Duration) -> tokio::time::Interval {
 }
 
 /// Propose when it is our turn, and give up on rounds that stall.
-async fn consensus_loop(node: Arc<Node>, gossip: Arc<Gossip>) {
+async fn consensus_loop(node: Arc<Node>, gossip: Arc<Gossip>, client: PeerClient) {
     let mut ticker = ticker(node.config().propose_interval);
     loop {
         ticker.tick().await;
@@ -71,6 +71,11 @@ async fn consensus_loop(node: Arc<Node>, gossip: Arc<Gossip>) {
             continue;
         }
 
+        // Before inventing a later-round checkpoint, learn whether a peer already
+        // holds one. Adopting that hash is what keeps 2-of-3 live when one
+        // validator is offline; inventing a rival deadlocks the height.
+        adopt_peer_proposals(&node, &gossip, &client).await;
+
         match node.try_propose() {
             Ok(Some((proposal, vote))) => {
                 gossip.proposal(proposal);
@@ -82,8 +87,62 @@ async fn consensus_loop(node: Arc<Node>, gossip: Arc<Gossip>) {
                     Err(e) => warn!(error = %e, "finalizing our own proposal failed"),
                 }
             }
-            Ok(None) => {}
+            Ok(None) => {
+                // An adopt/reoffer may have restaged while votes already sat in
+                // the tracker; check again before the next tick.
+                match node.finalize_if_quorum() {
+                    Ok(Some(finalized)) => gossip.finalized(finalized),
+                    Ok(None) => {}
+                    Err(e) => warn!(error = %e, "finalizing a restaged checkpoint failed"),
+                }
+            }
             Err(e) => warn!(error = %e, "proposing failed"),
+        }
+    }
+}
+
+/// Pull any open proposal peers are already committed to and adopt it locally.
+async fn adopt_peer_proposals(node: &Node, gossip: &Gossip, client: &PeerClient) {
+    if !node.config().validator || node.has_voted_for_open_height() {
+        return;
+    }
+    // Already holding a body for this height — try_propose will adopt or wait.
+    if node.open_proposal().is_some() {
+        return;
+    }
+
+    for endpoint in node.peer_endpoints() {
+        match client.pending_proposal(&endpoint).await {
+            Ok(Some(proposal)) => {
+                node.note_open_proposal(&proposal);
+                match node.handle_proposal(&proposal) {
+                    Ok(response) => {
+                        if let Some(vote) = response.vote {
+                            node.record_peer_success(&endpoint);
+                            gossip.proposal(proposal);
+                            match node.finalize_if_quorum() {
+                                Ok(Some(finalized)) => gossip.finalized(finalized),
+                                Ok(None) => gossip.vote(vote),
+                                Err(e) => {
+                                    warn!(error = %e, "finalizing an adopted proposal failed")
+                                }
+                            }
+                            return;
+                        }
+                        if let Some(reason) = response.reason {
+                            debug!(peer = %endpoint, %reason, "peer open proposal not adopted");
+                        }
+                    }
+                    Err(e) => {
+                        debug!(peer = %endpoint, error = %e, "could not verify peer open proposal");
+                    }
+                }
+            }
+            Ok(None) => node.record_peer_success(&endpoint),
+            Err(e) => {
+                debug!(peer = %endpoint, error = %e, "pending-proposal fetch failed");
+                node.record_peer_failure(&endpoint);
+            }
         }
     }
 }
@@ -126,9 +185,10 @@ async fn catchup_loop(node: Arc<Node>, gossip: Arc<Gossip>, client: PeerClient) 
         ticker.tick().await;
         let local = node.height();
         let statuses = sync::survey(&node, &client).await;
-        // One behind is normal: the finalized checkpoint carrying its own
-        // transactions is on its way and can simply be replayed.
-        if statuses.first().is_some_and(|best| best.height > local + 1) {
+        // Finalized gossip can miss a peer. A node that stayed one height behind
+        // across this interval (or fell further) recovers from a snapshot rather
+        // than waiting forever while reoffering a rival it locked onto.
+        if statuses.first().is_some_and(|best| best.height > local) {
             info!(
                 local,
                 network = statuses[0].height,

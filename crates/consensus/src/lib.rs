@@ -1,9 +1,15 @@
 //! Checkpoint voting consensus.
 //!
 //! Consensus here is deliberately small. It does not order transactions, it does
-//! not vote on them individually, and it has no view-change protocol. It answers
-//! one question: *do at least two thirds of the bonded validators agree that
-//! this is the state?*
+//! not vote on them individually, and it has no Tendermint prevote/precommit
+//! rounds. It answers one question: *do at least two thirds of the bonded
+//! validators agree that this is the state?*
+//!
+//! Round-robin proposer takeover still exists: after [`PROPOSER_TIMEOUT_SECS`]
+//! the next validator may act. A validator that has already signed at a height
+//! must never sign a rival (equivocation), so later rounds **adopt** a known
+//! open proposal rather than inventing a new one. Inventing rivals is what
+//! deadlocks a 2-of-3 committee when one validator is offline.
 //!
 //! The pieces:
 //!

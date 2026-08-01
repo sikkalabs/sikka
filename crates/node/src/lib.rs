@@ -39,18 +39,23 @@ pub struct Running {
 ///
 /// Binding before serving means a port conflict is reported at startup instead
 /// of silently leaving the node unreachable, and lets tests learn the port the
-/// OS picked.
-pub async fn start(config: NodeConfig) -> Result<Running> {
-    let node = Node::open(config)?;
-    let (gossip, client) = Gossip::start(node.clone())?;
-
-    let listener = tokio::net::TcpListener::bind(node.config().listen)
+/// OS picked. Listening on port `0` rewrites [`NodeConfig::listen`] and
+/// [`NodeConfig::advertise`] to the kernel-chosen address before the node
+/// opens, so peer announces carry a reachable URL.
+pub async fn start(mut config: NodeConfig) -> Result<Running> {
+    let listener = tokio::net::TcpListener::bind(config.listen)
         .await
-        .map_err(|e| Error::Network(format!("cannot bind {}: {e}", node.config().listen)))?;
+        .map_err(|e| Error::Network(format!("cannot bind {}: {e}", config.listen)))?;
     let local_addr = listener
         .local_addr()
         .map_err(|e| Error::Network(format!("cannot read the bound address: {e}")))?;
+    if config.listen.port() == 0 {
+        config.listen = local_addr;
+        config.advertise = format!("http://127.0.0.1:{}", local_addr.port());
+    }
 
+    let node = Node::open(config)?;
+    let (gossip, client) = Gossip::start(node.clone())?;
     let tasks = loops::spawn_all(node.clone(), gossip.clone(), client);
 
     info!(
