@@ -11,8 +11,8 @@ RPC / landing page) locally, or your reverse-proxied HTTPS hostname.
 Data in `/data`, key at `/data/node_key.json`, and resumable state snapshot
 chunks under `/data/snapshots/`. Snapshot sync is chunked and zstd-compressed so
 interrupted downloads continue from the last verified chunk. Genesis is baked in
-(supply **19,960,907 SIKKA**: cold admin mint at `0x9949…447`, three validators
-each with **20,000 bonded** + **20,000 liquid**).
+(supply **19,960,907 SIKKA**: cold admin mint at `0x9949…447`, two validators
+with **10,000** and **4,000** bonded plus **20,000 liquid** each).
 
 ---
 
