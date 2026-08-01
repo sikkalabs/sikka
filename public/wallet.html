@@ -228,7 +228,7 @@
     const PK_LEN = 2592;
     const SIG_LEN = 4627;
     const CHILLAR_PER_SIKKA = 1_000_000_000n;
-    const TX_SIGNING_TAG = new TextEncoder().encode("SIKKA/tx/v1");
+    const TX_SIGNING_TAG = new TextEncoder().encode("SIKKA/tx/v2");
     const SIGNING_CONTEXT = new TextEncoder().encode("SIKKA-v1");
     const DEFAULT_NODE = location.protocol.startsWith("http")
       ? location.origin
@@ -239,6 +239,8 @@
     $("node").value = DEFAULT_NODE;
     let wallet = null;
     let rpcId = 1;
+    /** @type {string|null} hex genesis fingerprint from chain.info */
+    let genesisFingerprint = null;
 
     function hex(bytes) {
       return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
@@ -361,6 +363,10 @@
     async function refreshNetwork() {
       try {
         const info = await rpc("chain.info");
+        if (!info.genesis_fingerprint) {
+          throw new Error("node did not return genesis_fingerprint");
+        }
+        genesisFingerprint = String(info.genesis_fingerprint);
         $("netStats").hidden = false;
         $("nHeight").textContent = String(info.height);
         $("nSupply").textContent = `${formatSikka(info.total_supply)} SIKKA`;
@@ -370,6 +376,7 @@
         setNet(true, `online · height ${info.height}`);
         fail("");
       } catch (e) {
+        genesisFingerprint = null;
         $("netStats").hidden = true;
         setNet(false, e.message || String(e));
       }
@@ -391,30 +398,56 @@
       }
     }
 
-    function signingBytes({ kind, from, to, amount, nonce, timestamp }) {
+    async function ensureGenesisFingerprint() {
+      if (genesisFingerprint) return genesisFingerprint;
+      const info = await rpc("chain.info");
+      if (!info.genesis_fingerprint) {
+        throw new Error("node did not return genesis_fingerprint");
+      }
+      genesisFingerprint = String(info.genesis_fingerprint);
+      return genesisFingerprint;
+    }
+
+    // Matches Transaction::signing_bytes (v2):
+    // tag || genesis_fingerprint || kind || from || to || amount || nonce || timestamp || public_key
+    function signingBytes({
+      genesisFingerprint: fp,
+      kind,
+      from,
+      to,
+      amount,
+      nonce,
+      timestamp,
+      publicKey,
+    }) {
       return concat(
         TX_SIGNING_TAG,
+        unhex(fp),
         Uint8Array.of(kind),
         from,
         to,
         u64le(amount),
         u64le(nonce),
-        u64le(timestamp)
+        u64le(timestamp),
+        publicKey
       );
     }
 
-    function signTransfer(toHex, amountChillar, nonce) {
+    function signTransfer(toHex, amountChillar, nonce, fp) {
       const from = unhex(wallet.address);
       const to = unhex(toHex);
       if (to.length !== 32) throw new Error("recipient must be a 32-byte address");
+      const fingerprint = fp.startsWith("0x") ? fp : `0x${fp}`;
       const timestamp = BigInt(Math.floor(Date.now() / 1000));
       const msg = signingBytes({
+        genesisFingerprint: fingerprint,
         kind: 0,
         from,
         to,
         amount: amountChillar,
         nonce,
         timestamp,
+        publicKey: wallet.publicKey,
       });
       const signature = ml_dsa87.sign(msg, wallet.secretKey, {
         context: SIGNING_CONTEXT,
@@ -429,6 +462,7 @@
         amount: amountChillar,
         nonce,
         timestamp,
+        genesis_fingerprint: fingerprint,
         public_key: hex(wallet.publicKey),
         signature: hex(signature),
       };
@@ -543,6 +577,7 @@
     $("refreshNet").onclick = () => refreshNetwork();
     $("refreshBal").onclick = () => refreshBalance();
     $("node").addEventListener("change", () => {
+      genesisFingerprint = null;
       refreshNetwork();
       if (wallet) refreshBalance();
     });
@@ -559,7 +594,8 @@
 
         const account = await rpc("account.get", { address: wallet.address });
         const nonce = asBig(account.next_nonce);
-        const tx = signTransfer(to, amount, nonce);
+        const fp = await ensureGenesisFingerprint();
+        const tx = signTransfer(to, amount, nonce, fp);
         const receipt = await rpc("tx.submit", { transaction: tx });
         $("sendOk").hidden = false;
         $("sendOk").textContent =
