@@ -10,8 +10,8 @@ HTTP on port **64552** (wallet / RPC / landing page) on any node they can reach
 Data in `/data`, key at `/data/node_key.json`, onion keys under `/data/tor/`,
 and resumable state snapshot chunks under `/data/snapshots/`. Snapshot sync is
 chunked and zstd-compressed so interrupted Tor downloads continue from the last
-verified chunk. Genesis is baked in (supply **19,960,907 SIKKA** to
-`0x9949…447`).
+verified chunk. Genesis is baked in (supply **19,960,907 SIKKA**: cold admin mint at
+`0x9949…447`, three validators bonded with **20,000 SIKKA** each).
 
 ---
 
@@ -55,8 +55,8 @@ the onion derived from that key; peers find each other over Tor.
 
 ### Fund and bond (joiners)
 
-Genesis already stakes the admin. A new node needs coins, then a bond (at least
-~0.001% of supply ≈ **200 SIKKA** on the default mint):
+Genesis already stakes three operators. A new node needs coins, then a bond (at
+least ~0.001% of supply ≈ **200 SIKKA** on the default mint):
 
 ```bash
 docker exec sikka-2 sikka address

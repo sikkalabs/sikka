@@ -1809,8 +1809,7 @@ mod tests {
             node.account(&sikka_common::admin_address())
                 .unwrap()
                 .balance,
-            sikka_common::DEFAULT_GENESIS_SUPPLY_SIKKA * CHILLAR_PER_SIKKA
-                - sikka_common::default_genesis_bond_chillar()
+            sikka_common::admin_allocation_chillar()
         );
     }
 }
