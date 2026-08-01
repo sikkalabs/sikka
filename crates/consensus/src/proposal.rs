@@ -5,12 +5,15 @@
 //! along with the transactions themselves. Every other validator replays exactly
 //! the same list in exactly the same order. If their root matches, they sign; if
 //! it does not, they refuse — there is nothing to negotiate.
+//!
+//! Proposals carry the proposer's ML-DSA signature over the header hash so peers
+//! can reject forgeries before verifying a bulk of transaction signatures.
 
 use std::collections::HashSet;
 
 use serde::{Deserialize, Serialize};
 
-use sikka_common::bytes::{Address, Hash};
+use sikka_common::bytes::{Address, Hash, PublicKey, Signature};
 use sikka_common::checkpoint::{Checkpoint, CheckpointHeader};
 use sikka_common::codec::{Decode, Encode, Reader, Writer};
 use sikka_common::constants::TX_TIME_TOLERANCE_SECS;
@@ -22,6 +25,20 @@ use sikka_state::Ledger;
 use crate::equivocation::Equivocation;
 use crate::{proposer_for_round, PROPOSER_TIMEOUT_SECS};
 
+/// Domain tag for the proposer's signature over a proposal.
+pub const PROPOSAL_TAG: &[u8] = b"SIKKA/proposal/v1";
+
+/// Bytes the proposer signs: domain tag + checkpoint header hash.
+///
+/// The header already commits to `tx_root`, evidence-affecting state roots, and
+/// round/proposer, so one signature authenticates the whole body without hashing
+/// every transaction again up front.
+pub fn proposal_signing_bytes(header_hash: &Hash) -> Vec<u8> {
+    let mut w = Writer::with_capacity(40);
+    w.raw(PROPOSAL_TAG).raw(header_hash.as_bytes());
+    w.finish()
+}
+
 /// A proposed checkpoint, with everything needed to check it independently.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CheckpointProposal {
@@ -31,6 +48,12 @@ pub struct CheckpointProposal {
     /// Equivocation proofs justifying any bonds burned by this checkpoint.
     #[serde(default)]
     pub evidence: Vec<Equivocation>,
+    /// Proposer's signature over [`proposal_signing_bytes`] of the header hash.
+    ///
+    /// Checked before any per-transaction ML-DSA work when the proposal is
+    /// still only a request to vote (`Authority::Proposed`).
+    #[serde(default)]
+    pub proposer_signature: Signature,
 }
 
 impl CheckpointProposal {
@@ -41,6 +64,35 @@ impl CheckpointProposal {
     pub fn hash(&self) -> Hash {
         self.header.hash()
     }
+
+    /// Sign this proposal as its header proposer.
+    pub fn sign(&mut self, keypair: &sikka_crypto::Keypair) -> Result<()> {
+        let public_key = PublicKey::new(*keypair.public_bytes());
+        if public_key.address() != self.header.proposer {
+            return Err(Error::WrongProposer {
+                expected: self.header.proposer,
+                actual: public_key.address(),
+            });
+        }
+        self.proposer_signature = Signature::new(keypair.sign(&proposal_signing_bytes(&self.hash()))?);
+        Ok(())
+    }
+
+    /// Verify the proposer's signature against their known public key.
+    pub fn verify_proposer_signature(&self, public_key: &PublicKey) -> Result<()> {
+        if public_key.address() != self.header.proposer {
+            return Err(Error::AddressKeyMismatch);
+        }
+        let payload = proposal_signing_bytes(&self.hash());
+        if !sikka_crypto::verify(
+            public_key.as_slice(),
+            &payload,
+            self.proposer_signature.as_slice(),
+        ) {
+            return Err(Error::InvalidSignature);
+        }
+        Ok(())
+    }
 }
 
 impl Encode for CheckpointProposal {
@@ -48,6 +100,7 @@ impl Encode for CheckpointProposal {
         self.header.encode(w);
         self.transactions.encode(w);
         self.evidence.encode(w);
+        w.raw(self.proposer_signature.as_slice());
     }
 }
 
@@ -57,6 +110,7 @@ impl Decode for CheckpointProposal {
             header: CheckpointHeader::decode(r)?,
             transactions: Vec::<Transaction>::decode(r)?,
             evidence: Vec::<Equivocation>::decode(r)?,
+            proposer_signature: Signature::decode(r)?,
         })
     }
 }
@@ -169,6 +223,7 @@ pub fn build_proposal(
         header: header.clone(),
         transactions: applied,
         evidence,
+        proposer_signature: Signature::default(),
     };
     let verified = VerifiedProposal {
         checkpoint: Checkpoint::new(header),
@@ -289,6 +344,16 @@ pub fn verify_proposal_with(
                 actual: header.proposer,
             });
         }
+
+        // Authenticate the proposer before any per-transaction ML-DSA work.
+        // Without this, anyone could POST a bulk of forged txs claiming the
+        // current proposer's address and burn CPU on signature checks.
+        let proposer_key = active
+            .iter()
+            .find(|v| v.address == expected_proposer)
+            .map(|v| &v.public_key)
+            .ok_or(Error::NoActiveValidators)?;
+        proposal.verify_proposer_signature(proposer_key)?;
     }
 
     if proposal.transactions.is_empty() && proposal.evidence.is_empty() {
@@ -383,7 +448,7 @@ mod tests {
     #[test]
     fn a_proposal_survives_a_codec_roundtrip() {
         let kp = Keypair::generate().unwrap();
-        let proposal = CheckpointProposal {
+        let mut proposal = CheckpointProposal {
             header: CheckpointHeader {
                 height: 9,
                 prev_hash: Hash([1u8; 32]),
@@ -392,7 +457,7 @@ mod tests {
                 tx_root: Hash([4u8; 32]),
                 tx_count: 2,
                 timestamp: 1_700_000_000,
-                proposer: Address([5u8; 32]),
+                proposer: PublicKey::new(*kp.public_bytes()).address(),
                 round: 3,
                 total_supply: 1_000_000,
                 total_bonded: 1_000,
@@ -406,11 +471,47 @@ mod tests {
                 Vote::sign(&kp, 9, Hash([9u8; 32])).unwrap(),
             )
             .unwrap()],
+            proposer_signature: Signature::default(),
         };
+        proposal.sign(&kp).unwrap();
 
         let decoded = CheckpointProposal::from_bytes(&proposal.to_bytes()).unwrap();
         assert_eq!(decoded, proposal);
         assert_eq!(decoded.hash(), proposal.hash());
+        decoded
+            .verify_proposer_signature(&PublicKey::new(*kp.public_bytes()))
+            .unwrap();
+    }
+
+    #[test]
+    fn an_unsigned_proposal_is_rejected_before_tx_work() {
+        // Covered structurally: verify_proposer_signature fails on a default
+        // signature. The full verify_proposal path uses a live ledger in the
+        // integration suite; this keeps the cheap check honest in unit tests.
+        let kp = Keypair::generate().unwrap();
+        let pk = PublicKey::new(*kp.public_bytes());
+        let proposal = CheckpointProposal {
+            header: CheckpointHeader {
+                height: 1,
+                prev_hash: Hash::ZERO,
+                state_root: Hash([1u8; 32]),
+                validator_root: Hash([2u8; 32]),
+                tx_root: Hash([3u8; 32]),
+                tx_count: 0,
+                timestamp: 1,
+                proposer: pk.address(),
+                round: 0,
+                total_supply: 1,
+                total_bonded: 1,
+            },
+            transactions: Vec::new(),
+            evidence: Vec::new(),
+            proposer_signature: Signature::default(),
+        };
+        assert_eq!(
+            proposal.verify_proposer_signature(&pk).unwrap_err(),
+            Error::InvalidSignature
+        );
     }
 
     #[test]

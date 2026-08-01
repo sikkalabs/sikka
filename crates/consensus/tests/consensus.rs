@@ -21,6 +21,11 @@ const ALLOCATION: u64 = 10_000_000_000;
 const BOND: u64 = 1_000_000_000;
 const VALIDATORS: usize = 4;
 
+fn sign_as(node: &Node, mut proposal: CheckpointProposal) -> CheckpointProposal {
+    proposal.sign(&node.key).unwrap();
+    proposal
+}
+
 struct Node {
     ledger: Ledger,
     key: Keypair,
@@ -123,7 +128,7 @@ impl Testnet {
 
         let proposal = {
             let node = &mut self.nodes[index];
-            let (proposal, own, _) = build_proposal(
+            let (mut proposal, own, _) = build_proposal(
                 &mut node.ledger,
                 transactions,
                 Vec::new(),
@@ -132,6 +137,7 @@ impl Testnet {
                 0,
             )
             .unwrap();
+            proposal.sign(&node.key).unwrap();
             verified[index] = Some(own);
             proposal
         };
@@ -285,18 +291,20 @@ fn tampered_proposals_are_refused() {
         let node = &mut net.nodes[index];
         let (proposal, verified, _) =
             build_proposal(&mut node.ledger, txs, Vec::new(), now, proposer, 0).unwrap();
-        (proposal, verified)
+        (sign_as(node, proposal), verified)
     };
     // Give the proposer's ledger back its pre-proposal state.
     net.nodes[index].ledger.rollback(verified.staged);
 
+    // A different state root than the transactions produce. Re-sign so the
+    // failure is the state mismatch, not a missing proposer signature.
+    let mut forged = proposal.clone();
+    forged.header.state_root = Hash([0x11u8; 32]);
+    forged = sign_as(&net.nodes[index], forged);
+
     let verifier = (index + 1) % net.nodes.len();
     let verifier_address = net.nodes[verifier].address;
     let ledger = &mut net.nodes[verifier].ledger;
-
-    // A different state root than the transactions produce.
-    let mut forged = proposal.clone();
-    forged.header.state_root = Hash([0x11u8; 32]);
     assert!(matches!(
         verify_proposal(ledger, &forged, now, &HashSet::new()),
         Err(Error::StateRootMismatch { .. })
@@ -384,7 +392,7 @@ fn an_absent_proposer_loses_its_turn_to_the_next_validator() {
             1,
         )
         .unwrap();
-        (proposal, verified)
+        (sign_as(node, proposal), verified)
     };
     assert_eq!(proposal.header.round, 1);
     net.nodes[taker].ledger.rollback(verified.staged);
@@ -423,7 +431,7 @@ fn a_validator_cannot_jump_the_queue_by_claiming_a_later_round() {
         let node = &mut net.nodes[impatient];
         let (proposal, verified, _) =
             build_proposal(&mut node.ledger, txs, Vec::new(), now, round_one, 1).unwrap();
-        (proposal, verified)
+        (sign_as(node, proposal), verified)
     };
     net.nodes[impatient].ledger.rollback(verified.staged);
 
@@ -470,7 +478,7 @@ fn a_finalized_checkpoint_is_applied_without_re_arguing_whose_turn_it_was() {
         let node = &mut net.nodes[index];
         let (proposal, verified, _) =
             build_proposal(&mut node.ledger, txs, Vec::new(), now, proposer, 0).unwrap();
-        (proposal, verified)
+        (sign_as(node, proposal), verified)
     };
     net.nodes[index].ledger.rollback(verified.staged);
 
@@ -527,11 +535,13 @@ fn a_proposal_that_double_spends_is_refused() {
         total_supply: net.nodes[index].ledger.total_supply(),
         total_bonded: net.nodes[index].ledger.total_bonded(),
     };
-    let proposal = CheckpointProposal {
+    let mut proposal = CheckpointProposal {
         header,
         transactions,
         evidence: Vec::new(),
+        proposer_signature: Default::default(),
     };
+    proposal = sign_as(&net.nodes[index], proposal);
 
     let verifier = (index + 1) % net.nodes.len();
     let error = verify_proposal(
@@ -561,7 +571,7 @@ fn quorum_is_two_thirds_and_a_stalled_vote_finalizes_nothing() {
         let node = &mut net.nodes[index];
         let (proposal, verified, _) =
             build_proposal(&mut node.ledger, txs, Vec::new(), now, proposer, 0).unwrap();
-        (proposal, verified)
+        (sign_as(node, proposal), verified)
     };
     let hash = proposal.hash();
 
@@ -638,7 +648,7 @@ fn equivocation_is_detected_and_slashed_in_the_next_checkpoint() {
             0,
         )
         .unwrap();
-        (proposal, verified)
+        (sign_as(node, proposal), verified)
     };
 
     // Another node reaches the same conclusion from the same evidence.

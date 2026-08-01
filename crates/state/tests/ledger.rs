@@ -527,7 +527,7 @@ fn inflation_is_split_by_bond_share() {
 }
 
 #[test]
-fn inflation_skips_validators_who_missed_the_previous_checkpoint() {
+fn inflation_pays_every_active_validator_not_just_prior_signers() {
     use sikka_common::vote::Vote;
 
     let mut f = Fixture::new();
@@ -543,7 +543,9 @@ fn inflation_skips_validators_who_missed_the_previous_checkpoint() {
     assert_eq!(f.ledger.active_validators_at(f.ledger.height() + 1).unwrap().len(), 2);
 
     // Finalize a checkpoint signed only by the genesis validator — Alice was
-    // "offline" for that round.
+    // "offline" for that round. Rewards at the next height must still include
+    // her: paying only `last_signers` would let two valid certificates for the
+    // same header fork H+1.
     let height = f.ledger.height() + 1;
     let context = ExecutionContext::new(height, now + 10, validator);
     let outcome = f.ledger.execute(&[], context).unwrap();
@@ -568,14 +570,11 @@ fn inflation_skips_validators_who_missed_the_previous_checkpoint() {
 
     let alice_after = f.ledger.account(&alice).unwrap().balance;
     let validator_after = f.ledger.account(&validator).unwrap().balance;
+    assert!(alice_after > alice_before, "active alice still earns inflation");
+    assert!(validator_after > validator_before);
     assert_eq!(
-        alice_after, alice_before,
-        "offline alice must not receive inflation"
-    );
-    assert_eq!(
-        validator_after,
-        validator_before + paid.minted,
-        "the sole prior signer receives the whole reward"
+        (alice_after - alice_before) + (validator_after - validator_before),
+        paid.minted
     );
     assert!(paid.minted > 0);
 }

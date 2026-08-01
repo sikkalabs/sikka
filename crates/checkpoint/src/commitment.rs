@@ -177,7 +177,7 @@ mod tests {
                 tx_root: Hash([fill; 32]),
                 tx_count: 1,
                 timestamp: 1_700_000_000 + height,
-                proposer: Address([fill; 32]),
+                proposer: Address(kp.address_bytes()),
                 round: 0,
                 total_supply: 1_000_000,
                 total_bonded: 1_000,
@@ -186,7 +186,10 @@ mod tests {
                 Transaction::transfer(kp, Address([fill; 32]), 1, 0, 1_700_000_000).unwrap(),
             ],
             evidence: Vec::new(),
+            proposer_signature: sikka_common::bytes::Signature::default(),
         };
+        let mut proposal = proposal;
+        proposal.sign(kp).unwrap();
         let vote = Vote::sign(kp, height, proposal.hash()).unwrap();
         Commitment { vote, proposal }
     }

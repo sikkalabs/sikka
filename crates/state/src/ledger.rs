@@ -557,37 +557,23 @@ impl Ledger {
             }
         }
 
-        // 4. Mint inflation for the elapsed period and pay validators that
-        // signed the previous checkpoint (still active). Offline bonded stake
-        // is not burned — it simply earns nothing this round. An empty signer
-        // list (genesis) pays the whole active set; if every prior signer has
-        // since left, fall back to the active set so inflation still lands.
+        // 4. Mint inflation for the elapsed period and pay every validator
+        // active at this height, weighted by bond. Rewards must not depend on
+        // which exact ≥2/3 signature subset was embedded in the previous
+        // checkpoint: the checkpoint hash ignores signatures, so two valid
+        // certificates for the same header would otherwise fork H+1 state via
+        // divergent `last_signers`. Downtime still never burns stake; only
+        // equivocation does.
         let elapsed = context
             .timestamp
             .saturating_sub(self.meta.last_checkpoint_time);
         let minted = checkpoint_inflation(outcome.total_supply, elapsed);
-        let active: Vec<(Address, u64)> = overlay
+        let eligible: Vec<(Address, u64)> = overlay
             .all_validators()?
             .into_iter()
             .filter(|v| v.is_active_at(context.height))
             .map(|v| (v.address, v.bond))
             .collect();
-        let eligible: Vec<(Address, u64)> = if self.meta.last_signers.is_empty() {
-            active
-        } else {
-            let paid: std::collections::HashSet<Address> =
-                self.meta.last_signers.iter().copied().collect();
-            let filtered: Vec<(Address, u64)> = active
-                .iter()
-                .copied()
-                .filter(|(address, _)| paid.contains(address))
-                .collect();
-            if filtered.is_empty() {
-                active
-            } else {
-                filtered
-            }
-        };
         let rewards = distribute_rewards(minted, &eligible, &context.proposer);
         for (address, amount) in &rewards {
             overlay.credit(*address, *amount, context.timestamp)?;

@@ -9,13 +9,14 @@
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use parking_lot::{Mutex, MutexGuard};
 use tracing::{debug, info, warn};
 
 use sikka_checkpoint::{CheckpointStore, Commitment, CommitmentStore};
 use sikka_common::account::Account;
-use sikka_common::bytes::{Address, Hash, PublicKey};
+use sikka_common::bytes::{Address, Hash, PublicKey, Signature};
 use sikka_common::checkpoint::Checkpoint;
 use sikka_common::constants::quorum_bond;
 use sikka_common::error::{Error, Result};
@@ -133,6 +134,10 @@ pub struct Node {
     /// ourselves after a reboot nor lose track of what we already signed.
     commitments: CommitmentStore,
     peers: Mutex<PeerBook>,
+    /// Last time we ran bulk tx-signature verification for a (proposer, height).
+    /// One expensive verify per scheduled proposal stops a key-holder from
+    /// repeatedly forcing hundreds of MiB of ML-DSA work on the same turn.
+    proposal_admit: Mutex<HashMap<(Address, u64), Instant>>,
     started_at: u64,
 }
 
@@ -227,6 +232,7 @@ impl Node {
             votes: Mutex::new(votes),
             commitments,
             peers: Mutex::new(peers),
+            proposal_admit: Mutex::new(HashMap::new()),
             started_at: now,
             config,
         }))
@@ -599,7 +605,7 @@ impl Node {
             return Ok(None);
         }
 
-        let (proposal, verified, drop_from_mempool) = build_proposal(
+        let (mut proposal, verified, drop_from_mempool) = build_proposal(
             &mut chain.ledger,
             candidates,
             evidence,
@@ -607,6 +613,7 @@ impl Node {
             self.address,
             round,
         )?;
+        proposal.sign(&self.keypair)?;
         if !drop_from_mempool.is_empty() {
             self.mempool.lock().remove_all(&drop_from_mempool);
         }
@@ -856,6 +863,27 @@ impl Node {
             return Ok(refused("a checkpoint is already staged at this height"));
         }
 
+        // Proposer signature before any per-tx ML-DSA work, then admit at most
+        // one expensive verify per proposer per timeout window.
+        let active = chain.ledger.active_validators_at(height)?;
+        let expected = proposer_for_round(height, proposal.header.round, &active)
+            .ok_or(Error::NoActiveValidators)?;
+        if proposal.header.proposer != expected {
+            return Err(Error::WrongProposer {
+                expected,
+                actual: proposal.header.proposer,
+            });
+        }
+        let proposer_key = active
+            .iter()
+            .find(|v| v.address == expected)
+            .map(|v| &v.public_key)
+            .ok_or(Error::NoActiveValidators)?;
+        proposal.verify_proposer_signature(proposer_key)?;
+        if !self.admit_proposal_verify(expected, height) {
+            return Ok(refused("proposal rate limited"));
+        }
+
         let verified_ids: HashSet<Hash> = self.mempool.lock().verified_ids();
         let verified = verify_proposal(&mut chain.ledger, proposal, now, &verified_ids)?;
         let vote = Vote::sign(&self.keypair, height, hash)?;
@@ -881,6 +909,22 @@ impl Node {
             vote: Some(vote),
             reason: None,
         })
+    }
+
+    /// Admit one bulk proposal verification per (proposer, height) per timeout.
+    fn admit_proposal_verify(&self, proposer: Address, height: u64) -> bool {
+        let mut gate = self.proposal_admit.lock();
+        let now = Instant::now();
+        let window = Duration::from_secs(PROPOSER_TIMEOUT_SECS);
+        gate.retain(|_, at| now.duration_since(*at) < window);
+        let key = (proposer, height);
+        match gate.get(&key) {
+            Some(at) if now.duration_since(*at) < window => false,
+            _ => {
+                gate.insert(key, now);
+                true
+            }
+        }
     }
 
     /// Record a vote, and finalize if it completes a super-majority.
@@ -919,16 +963,15 @@ impl Node {
     /// signed it.
     ///
     /// Only the proposal's proposer assembles and commits the finalized
-    /// artifact immediately. That makes the embedded signature set unique: if
-    /// every node finalized locally with whichever quorum subset it had seen,
-    /// two committees would commit different `last_signers` for the same
-    /// transactions, and the next height's reward payout would fork the state
-    /// root. Everyone else applies the proposer's artifact via
-    /// [`Self::handle_finalized`].
+    /// artifact immediately. Everyone else applies that artifact via
+    /// [`Self::handle_finalized`]. Rewards at the next height are paid to the
+    /// whole active set (bond-weighted), so divergent signature subsets cannot
+    /// fork state even if two certificates briefly coexist.
     ///
     /// If the proposer never seals (it died after votes arrived), any voter may
     /// finalize once a proposer timeout has passed, using the lexicographically
-    /// first quorum of bonded stake so two late finalizers still agree.
+    /// first quorum of bonded stake so two late finalizers still agree when they
+    /// share the same vote view.
     pub fn finalize_if_quorum(&self) -> Result<Option<Finalized>> {
         let now = now_secs();
         let mut chain = self.chain();
@@ -998,7 +1041,19 @@ impl Node {
         let local = chain.ledger.height();
         let height = checkpoint.header.height;
 
-        if height <= local {
+        if height < local {
+            return Ok(false);
+        }
+        if height == local {
+            if let Some(existing) = chain.checkpoints.get(height)? {
+                if existing.hash() == checkpoint.hash()
+                    && existing.validator_signatures != checkpoint.validator_signatures
+                {
+                    return Err(Error::Other(
+                        "alternate signer set for an already-finalized checkpoint".into(),
+                    ));
+                }
+            }
             return Ok(false);
         }
         if height != local + 1 {
@@ -1041,6 +1096,7 @@ impl Node {
             header: checkpoint.header.clone(),
             transactions: transactions.to_vec(),
             evidence: evidence.to_vec(),
+            proposer_signature: Signature::default(),
         };
         let verified_ids: HashSet<Hash> = self.mempool.lock().verified_ids();
         let verified = match verify_proposal_with(
