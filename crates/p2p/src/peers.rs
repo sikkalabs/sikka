@@ -11,13 +11,13 @@ use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
-use sikka_common::bytes::{Address, Hash, PublicKey, Signature};
+use sikka_common::bytes::{Address, PublicKey, Signature};
 use sikka_common::codec::Writer;
 use sikka_common::constants::TX_TIME_TOLERANCE_SECS;
 use sikka_common::error::{Error, Result};
 
 /// Domain tag for signed peer announcements.
-pub const ANNOUNCE_TAG: &[u8] = b"SIKKA/peer-announce/v2";
+pub const ANNOUNCE_TAG: &[u8] = b"SIKKA/peer-announce/v3";
 
 /// Maximum peers tracked, so discovery cannot exhaust memory.
 pub const DEFAULT_MAX_PEERS: usize = 512;
@@ -36,10 +36,10 @@ pub struct PeerAnnounce {
 }
 
 impl PeerAnnounce {
-    pub fn signing_bytes(endpoint: &str, timestamp: u64, genesis_fingerprint: &Hash) -> Vec<u8> {
+    pub fn signing_bytes(endpoint: &str, timestamp: u64, chain_id: &str) -> Vec<u8> {
         let mut w = Writer::new();
         w.raw(ANNOUNCE_TAG)
-            .raw(genesis_fingerprint.as_bytes())
+            .str(chain_id)
             .str(endpoint)
             .u64(timestamp);
         w.finish()
@@ -49,9 +49,9 @@ impl PeerAnnounce {
         keypair: &sikka_crypto::Keypair,
         endpoint: &str,
         timestamp: u64,
-        genesis_fingerprint: Hash,
+        chain_id: &str,
     ) -> Result<Self> {
-        let payload = Self::signing_bytes(endpoint, timestamp, &genesis_fingerprint);
+        let payload = Self::signing_bytes(endpoint, timestamp, chain_id);
         Ok(Self {
             public_key: PublicKey::new(*keypair.public_bytes()),
             endpoint: endpoint.to_string(),
@@ -68,7 +68,7 @@ impl PeerAnnounce {
     ///
     /// Stale announcements are rejected so an old endpoint cannot be replayed
     /// after a node has moved.
-    pub fn verify(&self, now: u64, genesis_fingerprint: &Hash) -> Result<()> {
+    pub fn verify(&self, now: u64, chain_id: &str) -> Result<()> {
         if self.endpoint.is_empty() || self.endpoint.len() > 256 {
             return Err(Error::Network("implausible peer endpoint".into()));
         }
@@ -84,7 +84,7 @@ impl PeerAnnounce {
                 tolerance: TX_TIME_TOLERANCE_SECS,
             });
         }
-        let payload = Self::signing_bytes(&self.endpoint, self.timestamp, genesis_fingerprint);
+        let payload = Self::signing_bytes(&self.endpoint, self.timestamp, chain_id);
         if !sikka_crypto::verify(
             self.public_key.as_slice(),
             &payload,
@@ -145,9 +145,9 @@ impl PeerBook {
         &mut self,
         announce: &PeerAnnounce,
         now: u64,
-        genesis_fingerprint: &Hash,
+        chain_id: &str,
     ) -> Result<bool> {
-        announce.verify(now, genesis_fingerprint)?;
+        announce.verify(now, chain_id)?;
         let address = announce.address();
         if address == self.self_address {
             return Ok(false);
@@ -277,19 +277,19 @@ mod tests {
 
     const NOW: u64 = 1_700_000_000;
 
-    fn fp() -> Hash {
-        Hash([0x42u8; 32])
+    fn chain_id() -> &'static str {
+        "sikka-test"
     }
 
     fn announce(kp: &Keypair, endpoint: &str, timestamp: u64) -> PeerAnnounce {
-        PeerAnnounce::sign(kp, endpoint, timestamp, fp()).unwrap()
+        PeerAnnounce::sign(kp, endpoint, timestamp, chain_id()).unwrap()
     }
 
     #[test]
     fn signed_announcements_verify() {
         let kp = Keypair::generate().unwrap();
         let a = announce(&kp, "http://sikka-1:8080", NOW);
-        a.verify(NOW, &fp()).unwrap();
+        a.verify(NOW, chain_id()).unwrap();
         assert_eq!(a.address(), PublicKey::new(*kp.public_bytes()).address());
     }
 
@@ -298,7 +298,7 @@ mod tests {
         let kp = Keypair::generate().unwrap();
         let mut a = announce(&kp, "http://sikka-1:8080", NOW);
         a.endpoint = "http://attacker:8080".into();
-        assert_eq!(a.verify(NOW, &fp()).unwrap_err(), Error::InvalidSignature);
+        assert_eq!(a.verify(NOW, chain_id()).unwrap_err(), Error::InvalidSignature);
     }
 
     #[test]
@@ -306,12 +306,12 @@ mod tests {
         let kp = Keypair::generate().unwrap();
         let a = announce(&kp, "http://sikka-1:8080", NOW);
         assert!(matches!(
-            a.verify(NOW + 10_000, &fp()),
+            a.verify(NOW + 10_000, chain_id()),
             Err(Error::TimestampOutOfRange { .. })
         ));
 
         let bad = announce(&kp, "sikka-1:8080", NOW);
-        assert!(matches!(bad.verify(NOW, &fp()), Err(Error::Network(_))));
+        assert!(matches!(bad.verify(NOW, chain_id()), Err(Error::Network(_))));
     }
 
     #[test]
@@ -321,17 +321,17 @@ mod tests {
         let mut book = PeerBook::new(PublicKey::new(*me.public_bytes()).address());
 
         assert!(book
-            .record(&announce(&peer, "http://a:8080", NOW), NOW, &fp())
+            .record(&announce(&peer, "http://a:8080", NOW), NOW, chain_id())
             .unwrap());
         assert_eq!(book.len(), 1);
 
         // Same endpoint again is not news.
         assert!(!book
-            .record(&announce(&peer, "http://a:8080", NOW + 1), NOW + 1, &fp())
+            .record(&announce(&peer, "http://a:8080", NOW + 1), NOW + 1, chain_id())
             .unwrap());
         // A move is.
         assert!(book
-            .record(&announce(&peer, "http://b:8080", NOW + 2), NOW + 2, &fp())
+            .record(&announce(&peer, "http://b:8080", NOW + 2), NOW + 2, chain_id())
             .unwrap());
         assert_eq!(book.len(), 1);
         assert_eq!(book.all()[0].endpoint, "http://b:8080");
@@ -343,7 +343,7 @@ mod tests {
         let address = PublicKey::new(*me.public_bytes()).address();
         let mut book = PeerBook::new(address);
         assert!(!book
-            .record(&announce(&me, "http://me:8080", NOW), NOW, &fp())
+            .record(&announce(&me, "http://me:8080", NOW), NOW, chain_id())
             .unwrap());
         assert!(book.is_empty());
     }
@@ -364,7 +364,7 @@ mod tests {
         let mut book = PeerBook::new(PublicKey::new(*me.public_bytes()).address());
 
         book.add_endpoint("http://a:8080", NOW);
-        book.record(&announce(&peer, "http://a:8080", NOW), NOW, &fp())
+        book.record(&announce(&peer, "http://a:8080", NOW), NOW, chain_id())
             .unwrap();
 
         assert_eq!(book.len(), 1, "the placeholder must not linger");
@@ -376,7 +376,7 @@ mod tests {
         let me = Keypair::generate().unwrap();
         let peer = Keypair::generate().unwrap();
         let mut book = PeerBook::new(PublicKey::new(*me.public_bytes()).address());
-        book.record(&announce(&peer, "http://a:8080", NOW), NOW, &fp())
+        book.record(&announce(&peer, "http://a:8080", NOW), NOW, chain_id())
             .unwrap();
 
         for _ in 0..MAX_FAILURES - 1 {

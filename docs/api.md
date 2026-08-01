@@ -180,12 +180,14 @@ Only the last 100 heights are retained.
 | `amount` | u64 | CHILLAR; `0` for unbond |
 | `nonce` | u64 | must match `next_nonce` |
 | `timestamp` | u64 | unix seconds; ±5 minutes of node clock |
+| `chain_id` | string | must match `chain.info.chain_id` |
 | `public_key` | hex (2592 bytes) | ML-DSA-87 |
 | `signature` | hex (4627 bytes) | context `SIKKA-v1` |
 
-Signing payload (little-endian u64s):  
-`SIKKA/tx/v1` ‖ kind_tag ‖ from ‖ to ‖ amount ‖ nonce ‖ timestamp  
-(`transfer=0`, `bond=1`, `unbond=2`).
+Signing payload:  
+`SIKKA/tx/v3` ‖ `str(chain_id)` ‖ kind_tag ‖ from ‖ to ‖ amount ‖ nonce ‖ timestamp ‖ public_key  
+(`str` = u32 LE length + UTF-8; integers are little-endian u64;  
+`transfer=0`, `bond=1`, `unbond=2`).
 
 ---
 

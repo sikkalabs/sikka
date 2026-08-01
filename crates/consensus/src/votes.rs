@@ -41,15 +41,15 @@ struct HeightVotes {
 /// Votes for checkpoints that are not yet final.
 #[derive(Debug)]
 pub struct VoteTracker {
-    genesis_fingerprint: Hash,
+    chain_id: String,
     heights: HashMap<u64, HeightVotes>,
     equivocations: Vec<Equivocation>,
 }
 
 impl VoteTracker {
-    pub fn new(genesis_fingerprint: Hash) -> Self {
+    pub fn new(chain_id: impl Into<String>) -> Self {
         Self {
-            genesis_fingerprint,
+            chain_id: chain_id.into(),
             heights: HashMap::new(),
             equivocations: Vec::new(),
         }
@@ -57,7 +57,7 @@ impl VoteTracker {
 
     /// Record a vote, verifying its signature first.
     pub fn record(&mut self, vote: Vote) -> Result<VoteOutcome> {
-        vote.verify(&self.genesis_fingerprint)?;
+        vote.verify(&self.chain_id)?;
         let height = self.heights.entry(vote.height).or_default();
         let step = height
             .steps
@@ -69,7 +69,7 @@ impl VoteTracker {
                 return Ok(VoteOutcome::Duplicate);
             }
             let evidence =
-                Equivocation::new(existing.clone(), vote, &self.genesis_fingerprint)?;
+                Equivocation::new(existing.clone(), vote, &self.chain_id)?;
             self.equivocations.push(evidence.clone());
             return Ok(VoteOutcome::Equivocated(Box::new(evidence)));
         }
@@ -283,8 +283,8 @@ mod tests {
         keys: Vec<Keypair>,
     }
 
-    fn fp() -> Hash {
-        Hash([0x42u8; 32])
+    fn chain_id() -> &'static str {
+        "sikka-test"
     }
 
     impl Committee {
@@ -308,7 +308,7 @@ mod tests {
         fn prevote(&self, index: usize, height: u64, round: u32, hash: Hash) -> Vote {
             Vote::sign(
                 &self.keys[index],
-                fp(),
+                chain_id(),
                 height,
                 round,
                 VoteKind::Prevote,
@@ -320,7 +320,7 @@ mod tests {
         fn precommit(&self, index: usize, height: u64, round: u32, hash: Hash) -> Vote {
             Vote::sign(
                 &self.keys[index],
-                fp(),
+                chain_id(),
                 height,
                 round,
                 VoteKind::Precommit,
@@ -336,7 +336,7 @@ mod tests {
         let authorized = committee.bonds();
         let addresses = committee.addresses();
         let hash = Hash([1u8; 32]);
-        let mut tracker = VoteTracker::new(fp());
+        let mut tracker = VoteTracker::new(chain_id());
 
         tracker
             .record(committee.precommit(0, 1, 0, hash))
@@ -356,7 +356,7 @@ mod tests {
     #[test]
     fn different_rounds_may_prevote_different_hashes() {
         let committee = Committee::new(3);
-        let mut tracker = VoteTracker::new(fp());
+        let mut tracker = VoteTracker::new(chain_id());
         tracker
             .record(committee.prevote(0, 1, 0, Hash([1u8; 32])))
             .unwrap();
@@ -372,7 +372,7 @@ mod tests {
     #[test]
     fn same_round_conflicting_prevotes_are_equivocation() {
         let committee = Committee::new(3);
-        let mut tracker = VoteTracker::new(fp());
+        let mut tracker = VoteTracker::new(chain_id());
         tracker
             .record(committee.prevote(0, 1, 0, Hash([1u8; 32])))
             .unwrap();
@@ -385,7 +385,7 @@ mod tests {
     #[test]
     fn a_precommit_is_a_lock_at_the_height() {
         let committee = Committee::new(2);
-        let mut tracker = VoteTracker::new(fp());
+        let mut tracker = VoteTracker::new(chain_id());
         let hash = Hash([9u8; 32]);
         tracker
             .record(committee.precommit(0, 3, 2, hash))
@@ -399,7 +399,7 @@ mod tests {
 
     #[test]
     fn empty_validator_set_never_reaches_quorum() {
-        let tracker = VoteTracker::new(fp());
+        let tracker = VoteTracker::new(chain_id());
         assert!(!tracker.has_quorum(1, 0, VoteKind::Precommit, &Hash([1u8; 32]), &[]));
     }
 }

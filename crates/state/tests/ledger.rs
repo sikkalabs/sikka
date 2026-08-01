@@ -72,8 +72,8 @@ impl Fixture {
         PublicKey::new(*kp.public_bytes()).address()
     }
 
-    fn fp(&self) -> Hash {
-        self.ledger.meta().genesis_fingerprint
+    fn chain_id(&self) -> &str {
+        &self.ledger.meta().chain_id
     }
 
     /// Execute, stage, wrap in a checkpoint and commit — the happy path a
@@ -168,7 +168,7 @@ fn transfer_moves_value_and_advances_nonce() {
     let bob = Fixture::address(&f.bob);
     let now = GENESIS_TIME + 600;
 
-    let tx = Transaction::transfer(&f.alice, bob, 5_000, 0, now, f.fp()).unwrap();
+    let tx = Transaction::transfer(&f.alice, bob, 5_000, 0, now, f.chain_id()).unwrap();
     let outcome = f.apply(&[tx], now);
 
     assert_eq!(outcome.applied.len(), 1);
@@ -194,7 +194,7 @@ fn credits_are_spent_and_regenerate() {
     let now = GENESIS_TIME + 600;
 
     let txs: Vec<Transaction> = (0..3)
-        .map(|nonce| Transaction::transfer(&f.alice, bob, 10, nonce, now, f.fp()).unwrap())
+        .map(|nonce| Transaction::transfer(&f.alice, bob, 10, nonce, now, f.chain_id()).unwrap())
         .collect();
     f.apply(&txs, now);
 
@@ -218,11 +218,11 @@ fn spending_more_than_the_credit_quota_is_rejected() {
 
     // Bob receives funds, so he exists but has zero credits.
     f.apply(
-        &[Transaction::transfer(&f.alice, bob, 1_000, 0, now, f.fp()).unwrap()],
+        &[Transaction::transfer(&f.alice, bob, 1_000, 0, now, f.chain_id()).unwrap()],
         now,
     );
 
-    let tx = Transaction::transfer(&f.bob, Address([7u8; 32]), 10, 0, now, f.fp()).unwrap();
+    let tx = Transaction::transfer(&f.bob, Address([7u8; 32]), 10, 0, now, f.chain_id()).unwrap();
     let height = f.ledger.height() + 1;
     let context = ExecutionContext::new(height, now, Fixture::address(&f.validator));
     let outcome = f.ledger.execute(&[tx], context).unwrap();
@@ -235,7 +235,7 @@ fn spending_more_than_the_credit_quota_is_rejected() {
 
     // One minute later Bob has exactly one credit and can spend.
     let later = now + 60;
-    let tx = Transaction::transfer(&f.bob, Address([7u8; 32]), 10, 0, later, f.fp()).unwrap();
+    let tx = Transaction::transfer(&f.bob, Address([7u8; 32]), 10, 0, later, f.chain_id()).unwrap();
     let outcome = f.apply(&[tx], later);
     assert_eq!(outcome.applied.len(), 1);
 }
@@ -250,15 +250,15 @@ fn invalid_transactions_are_rejected_without_touching_state() {
 
     let cases = vec![
         // Wrong nonce.
-        Transaction::transfer(&f.alice, bob, 10, 5, now, f.fp()).unwrap(),
+        Transaction::transfer(&f.alice, bob, 10, 5, now, f.chain_id()).unwrap(),
         // More than the balance.
-        Transaction::transfer(&f.alice, bob, ALLOCATION * 2, 0, now, f.fp()).unwrap(),
+        Transaction::transfer(&f.alice, bob, ALLOCATION * 2, 0, now, f.chain_id()).unwrap(),
         // Timestamp far outside the tolerance window.
-        Transaction::transfer(&f.alice, bob, 10, 0, now + 3_600, f.fp()).unwrap(),
+        Transaction::transfer(&f.alice, bob, 10, 0, now + 3_600, f.chain_id()).unwrap(),
         // Unknown sender.
-        Transaction::transfer(&f.bob, alice, 10, 0, now, f.fp()).unwrap(),
+        Transaction::transfer(&f.bob, alice, 10, 0, now, f.chain_id()).unwrap(),
         // Unbond from a non-validator.
-        Transaction::unbond(&f.alice, 0, now, f.fp()).unwrap(),
+        Transaction::unbond(&f.alice, 0, now, f.chain_id()).unwrap(),
     ];
 
     for tx in cases {
@@ -280,9 +280,9 @@ fn a_rejected_transaction_does_not_stop_the_batch() {
     let bob = Fixture::address(&f.bob);
     let now = GENESIS_TIME + 600;
 
-    let good = Transaction::transfer(&f.alice, bob, 100, 0, now, f.fp()).unwrap();
-    let bad = Transaction::transfer(&f.alice, bob, 100, 9, now, f.fp()).unwrap();
-    let also_good = Transaction::transfer(&f.alice, bob, 100, 1, now, f.fp()).unwrap();
+    let good = Transaction::transfer(&f.alice, bob, 100, 0, now, f.chain_id()).unwrap();
+    let bad = Transaction::transfer(&f.alice, bob, 100, 9, now, f.chain_id()).unwrap();
+    let also_good = Transaction::transfer(&f.alice, bob, 100, 1, now, f.chain_id()).unwrap();
 
     let outcome = f.apply(&[good, bad, also_good], now);
     assert_eq!(outcome.applied.len(), 2);
@@ -298,7 +298,7 @@ fn staging_is_reversible() {
     let root_before = f.ledger.state_root();
     let validator_root_before = f.ledger.validator_root();
 
-    let tx = Transaction::transfer(&f.alice, bob, 1_000, 0, now, f.fp()).unwrap();
+    let tx = Transaction::transfer(&f.alice, bob, 1_000, 0, now, f.chain_id()).unwrap();
     let context = ExecutionContext::new(1, now, Fixture::address(&f.validator));
     let outcome = f.ledger.execute(&[tx], context).unwrap();
 
@@ -343,7 +343,7 @@ fn execution_is_deterministic_across_two_ledgers() {
 
     let bob = Fixture::address(&a.bob);
     let txs: Vec<Transaction> = (0..5)
-        .map(|nonce| Transaction::transfer(&a.alice, bob, 100 + nonce, nonce, now, a.fp()).unwrap())
+        .map(|nonce| Transaction::transfer(&a.alice, bob, 100 + nonce, nonce, now, a.chain_id()).unwrap())
         .collect();
 
     let proposer = Fixture::address(&a.validator);
@@ -371,7 +371,7 @@ fn bonding_makes_a_validator_at_the_next_boundary() {
     let alice = Fixture::address(&f.alice);
     let now = GENESIS_TIME + 600;
 
-    let tx = Transaction::bond(&f.alice, BOND, 0, now, f.fp()).unwrap();
+    let tx = Transaction::bond(&f.alice, BOND, 0, now, f.chain_id()).unwrap();
     f.apply(&[tx], now);
 
     let validator = f.ledger.validator(&alice).unwrap().unwrap();
@@ -405,12 +405,12 @@ fn bond_below_the_minimum_is_rejected() {
     let minimum = f.ledger.total_supply() / 100_000;
     assert_eq!(minimum, 200_000);
 
-    let tx = Transaction::bond(&f.alice, minimum - 1, 0, now, f.fp()).unwrap();
+    let tx = Transaction::bond(&f.alice, minimum - 1, 0, now, f.chain_id()).unwrap();
     let context = ExecutionContext::new(1, now, Fixture::address(&f.validator));
     let outcome = f.ledger.execute(&[tx], context).unwrap();
     assert!(matches!(outcome.rejected[0].1, Error::BondTooSmall { .. }));
 
-    let tx = Transaction::bond(&f.alice, minimum, 0, now, f.fp()).unwrap();
+    let tx = Transaction::bond(&f.alice, minimum, 0, now, f.chain_id()).unwrap();
     let outcome = f.apply(&[tx], now);
     assert_eq!(outcome.applied.len(), 1);
 }
@@ -421,9 +421,9 @@ fn unbonding_waits_out_the_cooldown_then_returns_the_bond() {
     let alice = Fixture::address(&f.alice);
     let now = GENESIS_TIME + 600;
 
-    f.apply(&[Transaction::bond(&f.alice, BOND, 0, now, f.fp()).unwrap()], now);
+    f.apply(&[Transaction::bond(&f.alice, BOND, 0, now, f.chain_id()).unwrap()], now);
     f.apply(
-        &[Transaction::unbond(&f.alice, 1, now + 60, f.fp()).unwrap()],
+        &[Transaction::unbond(&f.alice, 1, now + 60, f.chain_id()).unwrap()],
         now + 60,
     );
 
@@ -456,8 +456,8 @@ fn unbonding_waits_out_the_cooldown_then_returns_the_bond() {
 fn double_unbond_and_bond_while_unbonding_are_rejected() {
     let mut f = Fixture::new();
     let now = GENESIS_TIME + 600;
-    f.apply(&[Transaction::bond(&f.alice, BOND, 0, now, f.fp()).unwrap()], now);
-    f.apply(&[Transaction::unbond(&f.alice, 1, now, f.fp()).unwrap()], now);
+    f.apply(&[Transaction::bond(&f.alice, BOND, 0, now, f.chain_id()).unwrap()], now);
+    f.apply(&[Transaction::unbond(&f.alice, 1, now, f.chain_id()).unwrap()], now);
 
     let context = ExecutionContext::new(3, now, Fixture::address(&f.validator));
     let outcome = f
@@ -466,8 +466,8 @@ fn double_unbond_and_bond_while_unbonding_are_rejected() {
             // Both carry the same nonce: the first is rejected, so the second
             // is still the next one Alice owes.
             &[
-                Transaction::unbond(&f.alice, 2, now, f.fp()).unwrap(),
-                Transaction::bond(&f.alice, BOND, 2, now, f.fp()).unwrap(),
+                Transaction::unbond(&f.alice, 2, now, f.chain_id()).unwrap(),
+                Transaction::bond(&f.alice, BOND, 2, now, f.chain_id()).unwrap(),
             ],
             context,
         )
@@ -507,7 +507,7 @@ fn inflation_is_split_by_bond_share() {
 
     // Alice bonds three times the genesis validator's stake.
     f.apply(
-        &[Transaction::bond(&f.alice, BOND * 3, 0, now, f.fp()).unwrap()],
+        &[Transaction::bond(&f.alice, BOND * 3, 0, now, f.chain_id()).unwrap()],
         now,
     );
 
@@ -541,7 +541,7 @@ fn inflation_pays_every_active_validator_not_just_prior_signers() {
 
     // Both are active from the next height.
     f.apply(
-        &[Transaction::bond(&f.alice, BOND, 0, now, f.fp()).unwrap()],
+        &[Transaction::bond(&f.alice, BOND, 0, now, f.chain_id()).unwrap()],
         now,
     );
     assert_eq!(f.ledger.active_validators_at(f.ledger.height() + 1).unwrap().len(), 2);
@@ -559,7 +559,7 @@ fn inflation_pays_every_active_validator_not_just_prior_signers() {
     let mut checkpoint = Checkpoint::new(header);
     let hash = checkpoint.hash();
     checkpoint.add_signature(
-        Vote::sign(&f.validator, f.fp(), height, 0, VoteKind::Precommit, hash)
+        Vote::sign(&f.validator, f.chain_id(), height, 0, VoteKind::Precommit, hash)
             .unwrap()
             .into_signature(),
     );
@@ -588,7 +588,7 @@ fn slashing_burns_the_bond_and_removes_the_validator() {
     let mut f = Fixture::new();
     let alice = Fixture::address(&f.alice);
     let now = GENESIS_TIME + 600;
-    f.apply(&[Transaction::bond(&f.alice, BOND, 0, now, f.fp()).unwrap()], now);
+    f.apply(&[Transaction::bond(&f.alice, BOND, 0, now, f.chain_id()).unwrap()], now);
 
     let supply_before = f.ledger.total_supply();
     let height = f.ledger.height() + 1;
@@ -623,7 +623,7 @@ fn state_proofs_verify_against_the_committed_root() {
     let bob = Fixture::address(&f.bob);
     let now = GENESIS_TIME + 600;
     f.apply(
-        &[Transaction::transfer(&f.alice, bob, 777, 0, now, f.fp()).unwrap()],
+        &[Transaction::transfer(&f.alice, bob, 777, 0, now, f.chain_id()).unwrap()],
         now,
     );
 
@@ -651,11 +651,11 @@ fn snapshot_restores_an_identical_ledger() {
     let bob = Fixture::address(&f.bob);
     let now = GENESIS_TIME + 600;
     f.apply(
-        &[Transaction::transfer(&f.alice, bob, 1_234, 0, now, f.fp()).unwrap()],
+        &[Transaction::transfer(&f.alice, bob, 1_234, 0, now, f.chain_id()).unwrap()],
         now,
     );
     f.apply(
-        &[Transaction::bond(&f.alice, BOND, 1, now + 60, f.fp()).unwrap()],
+        &[Transaction::bond(&f.alice, BOND, 1, now + 60, f.chain_id()).unwrap()],
         now + 60,
     );
 
@@ -672,7 +672,7 @@ fn snapshot_restores_an_identical_ledger() {
         round: 0,
         total_supply: f.ledger.total_supply(),
         total_bonded: f.ledger.total_bonded(),
-        genesis_fingerprint: f.fp(),
+        chain_id: f.chain_id().into(),
     };
     let snapshot = f.ledger.snapshot(Checkpoint::new(header)).unwrap();
     snapshot.verify().unwrap();
@@ -693,7 +693,7 @@ fn tampered_snapshots_are_rejected() {
     let bob = Fixture::address(&f.bob);
     let now = GENESIS_TIME + 600;
     f.apply(
-        &[Transaction::transfer(&f.alice, bob, 1_000, 0, now, f.fp()).unwrap()],
+        &[Transaction::transfer(&f.alice, bob, 1_000, 0, now, f.chain_id()).unwrap()],
         now,
     );
 
@@ -709,7 +709,7 @@ fn tampered_snapshots_are_rejected() {
         round: 0,
         total_supply: f.ledger.total_supply(),
         total_bonded: f.ledger.total_bonded(),
-        genesis_fingerprint: f.fp(),
+        chain_id: f.chain_id().into(),
     };
     let snapshot: StateSnapshot = f.ledger.snapshot(Checkpoint::new(header)).unwrap();
 
@@ -746,7 +746,7 @@ fn many_accounts_stay_consistent() {
                 let mut raw = [0u8; 32];
                 raw[0] = (round * 20 + i) as u8;
                 raw[1] = 0xaa;
-                let tx = Transaction::transfer(&f.alice, Address(raw), 1_000, nonce, now, f.fp()).unwrap();
+                let tx = Transaction::transfer(&f.alice, Address(raw), 1_000, nonce, now, f.chain_id()).unwrap();
                 nonce += 1;
                 tx
             })

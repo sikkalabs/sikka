@@ -213,8 +213,8 @@ async fn run(cli: Cli) -> Result<()> {
             let wallet = load_wallet(&cli.key)?;
             let client = client(&cli)?;
             let account = client.account(&wallet.address()).await?;
-            let fp = client.chain_info().await?.genesis_fingerprint;
-            let transaction = wallet.transfer(*to, amount, account.next_nonce, now_secs(), fp)?;
+            let chain_id = client.chain_info().await?.chain_id;
+            let transaction = wallet.transfer(*to, amount, account.next_nonce, now_secs(), &chain_id)?;
             let receipt = client.submit(&transaction).await?;
 
             if cli.json {
@@ -242,8 +242,8 @@ async fn run(cli: Cli) -> Result<()> {
             let wallet = load_wallet(&cli.key)?;
             let client = client(&cli)?;
             let account = client.account(&wallet.address()).await?;
-            let fp = client.chain_info().await?.genesis_fingerprint;
-            let transaction = wallet.bond(amount, account.next_nonce, now_secs(), fp)?;
+            let chain_id = client.chain_info().await?.chain_id;
+            let transaction = wallet.bond(amount, account.next_nonce, now_secs(), &chain_id)?;
             let receipt = client.submit(&transaction).await?;
             if cli.json {
                 format::print_json(&receipt)?;
@@ -259,8 +259,8 @@ async fn run(cli: Cli) -> Result<()> {
             let wallet = load_wallet(&cli.key)?;
             let client = client(&cli)?;
             let account = client.account(&wallet.address()).await?;
-            let fp = client.chain_info().await?.genesis_fingerprint;
-            let transaction = wallet.unbond(account.next_nonce, now_secs(), fp)?;
+            let chain_id = client.chain_info().await?.chain_id;
+            let transaction = wallet.unbond(account.next_nonce, now_secs(), &chain_id)?;
             let receipt = client.submit(&transaction).await?;
             if cli.json {
                 format::print_json(&receipt)?;

@@ -50,18 +50,23 @@ Full RPC: [`api.md`](api.md).
 
 ## Sign a transfer
 
-1. `account.get` → use `next_nonce`.
-2. Build signing bytes (little-endian u64s):
+1. `chain.info` → take `chain_id` (exact string; do not invent one).
+2. `account.get` → use `next_nonce`.
+3. Build signing bytes (matches `Transaction::signing_bytes`):
 
 ```text
-SIKKA/tx/v1 ‖ kind ‖ from ‖ to ‖ amount ‖ nonce ‖ timestamp
+SIKKA/tx/v3 ‖ str(chain_id) ‖ kind ‖ from ‖ to ‖ amount ‖ nonce ‖ timestamp ‖ public_key
 ```
 
+`str(s)` is `u32` little-endian UTF-8 length + UTF-8 bytes (same as the Rust
+codec `Writer::str`).  
 `kind`: transfer `0`, bond `1`, unbond `2`.  
 `from` / `to`: 32 raw address bytes.  
-`amount`: CHILLAR. Bond/unbond use the zero address as `to`; unbond amount is `0`.
+`amount` / `nonce` / `timestamp`: little-endian `u64`.  
+`public_key`: raw 2592-byte ML-DSA-87 key (bound into the id and signature).  
+`amount` is CHILLAR. Bond/unbond use the zero address as `to`; unbond amount is `0`.
 
-3. Sign with ML-DSA-87 and context **`SIKKA-v1`**:
+4. Sign with ML-DSA-87 and context **`SIKKA-v1`**:
 
 ```js
 const signature = ml_dsa87.sign(msg, secretKey, {
@@ -69,7 +74,7 @@ const signature = ml_dsa87.sign(msg, secretKey, {
 });
 ```
 
-4. `tx.submit` with:
+5. `tx.submit` with:
 
 ```json
 {
@@ -79,6 +84,7 @@ const signature = ml_dsa87.sign(msg, secretKey, {
   "amount": 1000000000,
   "nonce": 0,
   "timestamp": 1720000000,
+  "chain_id": "sikka",
   "public_key": "<2592-byte hex>",
   "signature": "<4627-byte hex>"
 }

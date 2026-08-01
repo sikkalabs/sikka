@@ -211,8 +211,10 @@
       </div>
       <p class="ok" id="sendOk" hidden></p>
       <p class="warn">
-        Signing uses ML-DSA-87 with context <code>SIKKA-v1</code>. Nothing is
-        sent until you click Send. Prefer <code>sikka new</code> for long-term keys.
+        Signing uses ML-DSA-87 (<code>SIKKA/tx/v3</code>, context
+        <code>SIKKA-v1</code>) bound to the node’s <code>chain_id</code>.
+        Nothing is sent until you click Send. Prefer <code>sikka new</code> for
+        long-term keys.
       </p>
     </div>
   </main>
@@ -228,7 +230,7 @@
     const PK_LEN = 2592;
     const SIG_LEN = 4627;
     const CHILLAR_PER_SIKKA = 1_000_000_000n;
-    const TX_SIGNING_TAG = new TextEncoder().encode("SIKKA/tx/v2");
+    const TX_SIGNING_TAG = new TextEncoder().encode("SIKKA/tx/v3");
     const SIGNING_CONTEXT = new TextEncoder().encode("SIKKA-v1");
     const DEFAULT_NODE = location.protocol.startsWith("http")
       ? location.origin
@@ -239,8 +241,8 @@
     $("node").value = DEFAULT_NODE;
     let wallet = null;
     let rpcId = 1;
-    /** @type {string|null} hex genesis fingerprint from chain.info */
-    let genesisFingerprint = null;
+    /** @type {string|null} chain id from chain.info */
+    let chainId = null;
 
     function hex(bytes) {
       return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
@@ -279,6 +281,20 @@
         x >>= 8n;
       }
       return out;
+    }
+
+    function u32le(n) {
+      const v = Number(n);
+      if (!Number.isInteger(v) || v < 0 || v > 0xffffffff) {
+        throw new Error("u32 out of range");
+      }
+      return Uint8Array.of(v & 0xff, (v >>> 8) & 0xff, (v >>> 16) & 0xff, (v >>> 24) & 0xff);
+    }
+
+    /** Writer::str: u32 little-endian length + utf8 bytes. */
+    function encodeStr(text) {
+      const bytes = new TextEncoder().encode(text);
+      return concat(u32le(bytes.length), bytes);
     }
 
     function asBig(v) {
@@ -363,10 +379,10 @@
     async function refreshNetwork() {
       try {
         const info = await rpc("chain.info");
-        if (!info.genesis_fingerprint) {
-          throw new Error("node did not return genesis_fingerprint");
+        if (typeof info.chain_id !== "string" || !info.chain_id) {
+          throw new Error("node did not return chain_id");
         }
-        genesisFingerprint = String(info.genesis_fingerprint);
+        chainId = info.chain_id;
         $("netStats").hidden = false;
         $("nHeight").textContent = String(info.height);
         $("nSupply").textContent = `${formatSikka(info.total_supply)} SIKKA`;
@@ -376,7 +392,7 @@
         setNet(true, `online · height ${info.height}`);
         fail("");
       } catch (e) {
-        genesisFingerprint = null;
+        chainId = null;
         $("netStats").hidden = true;
         setNet(false, e.message || String(e));
       }
@@ -398,20 +414,30 @@
       }
     }
 
-    async function ensureGenesisFingerprint() {
-      if (genesisFingerprint) return genesisFingerprint;
+    async function ensureChainId() {
+      if (chainId) return chainId;
       const info = await rpc("chain.info");
-      if (!info.genesis_fingerprint) {
-        throw new Error("node did not return genesis_fingerprint");
+      if (typeof info.chain_id !== "string" || !info.chain_id) {
+        throw new Error("node did not return chain_id");
       }
-      genesisFingerprint = String(info.genesis_fingerprint);
-      return genesisFingerprint;
+      chainId = info.chain_id;
+      return chainId;
     }
 
-    // Matches Transaction::signing_bytes (v2):
-    // tag || genesis_fingerprint || kind || from || to || amount || nonce || timestamp || public_key
+    /** Normalize hex address to `0x` + lowercase; must be 32 bytes. */
+    function normalizeAddress(text) {
+      const bytes = unhex(text);
+      if (bytes.length !== 32) {
+        throw new Error("address must be 32 bytes (64 hex chars)");
+      }
+      return "0x" + hex(bytes);
+    }
+
+    // Matches Transaction::signing_bytes (v3):
+    // tag || str(chain_id) || kind || from || to || amount || nonce || timestamp || public_key
+    // where str() is Writer::str = u32le(utf8.len) || utf8
     function signingBytes({
-      genesisFingerprint: fp,
+      chainId: id,
       kind,
       from,
       to,
@@ -420,9 +446,18 @@
       timestamp,
       publicKey,
     }) {
+      if (typeof id !== "string" || !id) {
+        throw new Error("chain_id required for signing");
+      }
+      if (from.length !== 32 || to.length !== 32) {
+        throw new Error("from/to must be 32 raw address bytes");
+      }
+      if (publicKey.length !== PK_LEN) {
+        throw new Error(`public key must be ${PK_LEN} bytes`);
+      }
       return concat(
         TX_SIGNING_TAG,
-        unhex(fp),
+        encodeStr(id),
         Uint8Array.of(kind),
         from,
         to,
@@ -433,14 +468,16 @@
       );
     }
 
-    function signTransfer(toHex, amountChillar, nonce, fp) {
+    function signTransfer(toHex, amountChillar, nonce, id) {
       const from = unhex(wallet.address);
-      const to = unhex(toHex);
-      if (to.length !== 32) throw new Error("recipient must be a 32-byte address");
-      const fingerprint = fp.startsWith("0x") ? fp : `0x${fp}`;
+      if (from.length !== 32) throw new Error("wallet address corrupt");
+      const toAddr = normalizeAddress(toHex);
+      const to = unhex(toAddr);
+      if (hex(from) === hex(to)) throw new Error("cannot send to yourself");
+      if (amountChillar <= 0n) throw new Error("amount must be positive");
       const timestamp = BigInt(Math.floor(Date.now() / 1000));
       const msg = signingBytes({
-        genesisFingerprint: fingerprint,
+        chainId: id,
         kind: 0,
         from,
         to,
@@ -458,11 +495,12 @@
       return {
         kind: "transfer",
         from: wallet.address,
-        to: toHex.startsWith("0x") ? toHex : `0x${toHex}`,
+        to: toAddr,
         amount: amountChillar,
         nonce,
         timestamp,
-        genesis_fingerprint: fingerprint,
+        chain_id: id,
+        // PublicKey / Signature JSON: hex without 0x (matches CLI keystore).
         public_key: hex(wallet.publicKey),
         signature: hex(signature),
       };
@@ -525,10 +563,18 @@
             $("status").textContent = "Restored from keystore seed.";
             return;
           }
-          show({
-            secretKey: unhex(json.private_key),
-            publicKey: unhex(json.public_key),
-          });
+          if (!json.private_key) {
+            throw new Error("keystore missing private_key");
+          }
+          const secretKey = unhex(json.private_key);
+          const publicKey = ml_dsa87.getPublicKey(secretKey);
+          if (json.public_key) {
+            const claimed = unhex(json.public_key);
+            if (hex(claimed) !== hex(publicKey)) {
+              throw new Error("keystore public_key does not match private_key");
+            }
+          }
+          show({ secretKey, publicKey });
           $("status").textContent = "Restored from keystore JSON.";
           return;
         }
@@ -559,7 +605,8 @@
       if (!wallet) return;
       const payload = {
         address: wallet.address,
-        public_key: wallet.public_key,
+        // Match CLI keystore: public_key hex without 0x.
+        public_key: hex(wallet.publicKey),
         private_key: wallet.private_key,
         scheme: wallet.scheme,
       };
@@ -577,7 +624,7 @@
     $("refreshNet").onclick = () => refreshNetwork();
     $("refreshBal").onclick = () => refreshBalance();
     $("node").addEventListener("change", () => {
-      genesisFingerprint = null;
+      chainId = null;
       refreshNetwork();
       if (wallet) refreshBalance();
     });
@@ -594,8 +641,8 @@
 
         const account = await rpc("account.get", { address: wallet.address });
         const nonce = asBig(account.next_nonce);
-        const fp = await ensureGenesisFingerprint();
-        const tx = signTransfer(to, amount, nonce, fp);
+        const id = await ensureChainId();
+        const tx = signTransfer(to, amount, nonce, id);
         const receipt = await rpc("tx.submit", { transaction: tx });
         $("sendOk").hidden = false;
         $("sendOk").textContent =

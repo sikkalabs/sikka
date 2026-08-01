@@ -399,7 +399,7 @@ impl Ledger {
             round: 0,
             total_supply: self.meta.total_supply,
             total_bonded: self.meta.total_bonded,
-            genesis_fingerprint: self.meta.genesis_fingerprint,
+            chain_id: self.meta.chain_id.clone(),
         };
         // Genesis needs no signatures: every node derives it from the same file
         // and refuses to run against a database built from a different one.
@@ -881,7 +881,7 @@ impl Ledger {
             round,
             total_supply: staged.outcome.total_supply,
             total_bonded: staged.outcome.total_bonded,
-            genesis_fingerprint: self.meta.genesis_fingerprint,
+            chain_id: self.meta.chain_id.clone(),
         }
     }
 

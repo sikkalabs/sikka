@@ -260,7 +260,7 @@ mod tests {
             round: 0,
             total_supply: 1_000_000,
             total_bonded: 1_000,
-            genesis_fingerprint: Hash([0x42u8; 32]),
+            chain_id: "sikka-test".into(),
         })
     }
 

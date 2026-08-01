@@ -186,7 +186,7 @@ impl Node {
         // open, and the checkpoint it was cast over is the only one it may help
         // commit there. Both come back, so a restart mid-round can offer that
         // checkpoint again instead of stranding the height.
-        let mut votes = VoteTracker::new(ledger.meta().genesis_fingerprint);
+        let mut votes = VoteTracker::new(ledger.meta().chain_id.clone());
         let mut locked = None;
         let mut known = None;
         for commitment in commitments.load_above(ledger.height())? {
@@ -485,7 +485,7 @@ impl Node {
         run.retain(|t| t.nonce < transaction.nonce);
         run.push(transaction.clone());
         chain.ledger.would_apply(&run, now)?;
-        transaction.check_genesis(&chain.ledger.meta().genesis_fingerprint)?;
+        transaction.check_chain_id(&chain.ledger.meta().chain_id)?;
 
         let admission = mempool.insert(transaction, committed, now)?;
         Ok((id, admission == Admission::Accepted))
@@ -632,7 +632,7 @@ impl Node {
             checkpoint,
             staged,
         } = verified;
-        let genesis_fingerprint = chain.ledger.meta().genesis_fingerprint;
+        let chain_id = chain.ledger.meta().chain_id.clone();
         let guard = sikka_state::StageGuard::arm(&mut chain.ledger, staged);
         proposal.sign(&self.keypair)?;
         if !drop_from_mempool.is_empty() {
@@ -641,7 +641,7 @@ impl Node {
 
         let vote = Vote::sign(
             &self.keypair,
-            genesis_fingerprint,
+            &chain_id,
             height,
             round,
             VoteKind::Prevote,
@@ -729,11 +729,11 @@ impl Node {
             checkpoint,
             staged,
         } = verified;
-        let genesis_fingerprint = chain.ledger.meta().genesis_fingerprint;
+        let chain_id = chain.ledger.meta().chain_id.clone();
         let guard = sikka_state::StageGuard::arm(&mut chain.ledger, staged);
         let vote = Vote::sign(
             &self.keypair,
-            genesis_fingerprint,
+            &chain_id,
             height,
             round,
             VoteKind::Prevote,
@@ -996,7 +996,7 @@ impl Node {
         let verified_ids: HashSet<Hash> = self.mempool.lock().verified_ids();
         let verified = if chain.pending.as_ref().is_some_and(|p| p.hash == hash) {
             // Already staged this body (e.g. we proposed it).
-            let vote = Vote::sign(&self.keypair, chain.ledger.meta().genesis_fingerprint, height, round, VoteKind::Prevote, hash)?;
+            let vote = Vote::sign(&self.keypair, &chain.ledger.meta().chain_id, height, round, VoteKind::Prevote, hash)?;
             self.commitments.put(&Commitment {
                 vote: vote.clone(),
                 proposal: proposal.clone(),
@@ -1017,9 +1017,9 @@ impl Node {
             checkpoint,
             staged,
         } = verified;
-        let genesis_fingerprint = chain.ledger.meta().genesis_fingerprint;
+        let chain_id = chain.ledger.meta().chain_id.clone();
         let guard = sikka_state::StageGuard::arm(&mut chain.ledger, staged);
-        let vote = Vote::sign(&self.keypair, genesis_fingerprint, height, round, VoteKind::Prevote, hash)?;
+        let vote = Vote::sign(&self.keypair, &chain_id, height, round, VoteKind::Prevote, hash)?;
         self.commitments.put(&Commitment {
             vote: vote.clone(),
             proposal: proposal.clone(),
@@ -1069,7 +1069,7 @@ impl Node {
     pub fn handle_vote(&self, vote: Vote) -> Result<(Option<Vote>, Option<Finalized>)> {
         {
             let chain = self.chain();
-            vote.verify(&chain.ledger.meta().genesis_fingerprint)?;
+            vote.verify(&chain.ledger.meta().chain_id)?;
             let height = chain.ledger.height();
             if vote.height <= height {
                 return Ok((None, None));
@@ -1141,12 +1141,12 @@ impl Node {
         ) {
             return Ok(None);
         }
-        let genesis_fingerprint = chain.ledger.meta().genesis_fingerprint;
+        let chain_id = chain.ledger.meta().chain_id.clone();
         drop(chain);
 
         let vote = Vote::sign(
             &self.keypair,
-            genesis_fingerprint,
+            &chain_id,
             height,
             round,
             VoteKind::Precommit,
@@ -1431,8 +1431,8 @@ impl Node {
     // ---- peers -----------------------------------------------------------
 
     pub fn record_announce(&self, announce: &PeerAnnounce) -> Result<bool> {
-        let fp = self.chain().ledger.meta().genesis_fingerprint;
-        self.peers.lock().record(announce, now_secs(), &fp)
+        let chain_id = self.chain().ledger.meta().chain_id.clone();
+        self.peers.lock().record(announce, now_secs(), &chain_id)
     }
 
     pub fn add_peer_endpoint(&self, endpoint: &str) -> bool {
@@ -1448,8 +1448,8 @@ impl Node {
     }
 
     pub fn own_announce(&self) -> Result<PeerAnnounce> {
-        let fp = self.chain().ledger.meta().genesis_fingerprint;
-        PeerAnnounce::sign(&self.keypair, &self.config.advertise, now_secs(), fp)
+        let chain_id = self.chain().ledger.meta().chain_id.clone();
+        PeerAnnounce::sign(&self.keypair, &self.config.advertise, now_secs(), &chain_id)
     }
 
     // ---- maintenance and sync -------------------------------------------
@@ -1694,8 +1694,8 @@ mod tests {
     }
 
     impl Fixture {
-        fn fp(&self) -> Hash {
-            self.node.chain_info().unwrap().genesis_fingerprint
+        fn chain_id(&self) -> String {
+            self.node.chain_info().unwrap().chain_id
         }
     }
 
@@ -1755,8 +1755,8 @@ mod tests {
     }
 
     impl Pair {
-        fn fp(&self) -> Hash {
-            self.nodes[0].chain_info().unwrap().genesis_fingerprint
+        fn chain_id(&self) -> String {
+            self.nodes[0].chain_info().unwrap().chain_id
         }
     }
 
@@ -1832,9 +1832,9 @@ mod tests {
         to: Address,
         amount: u64,
         nonce: u64,
-        genesis_fingerprint: Hash,
+        chain_id: &str,
     ) -> Transaction {
-        Transaction::transfer(from, to, amount, nonce, now_secs(), genesis_fingerprint).unwrap()
+        Transaction::transfer(from, to, amount, nonce, now_secs(), chain_id).unwrap()
     }
 
     /// Drive prevotes → precommits → finalize for a solo validator.
@@ -1929,10 +1929,10 @@ mod tests {
         let config = f.node.config().clone();
         let bob = Address([7u8; 32]);
         f.node
-            .submit_transaction(transfer(&f.alice, bob, 500, 0, f.fp()))
+            .submit_transaction(transfer(&f.alice, bob, 500, 0, &f.chain_id()))
             .unwrap();
         f.node
-            .submit_transaction(transfer(&f.alice, bob, 500, 1, f.fp()))
+            .submit_transaction(transfer(&f.alice, bob, 500, 1, &f.chain_id()))
             .unwrap();
         let (_, vote) = f.node.try_propose().unwrap().unwrap();
         seal_solo(&f.node, vote);
@@ -1949,14 +1949,14 @@ mod tests {
         let f = solo_node();
         let bob = Address([7u8; 32]);
         f.node
-            .submit_transaction(transfer(&f.alice, bob, 700, 0, f.fp()))
+            .submit_transaction(transfer(&f.alice, bob, 700, 0, &f.chain_id()))
             .unwrap();
 
         // One transaction is short of the two-transaction interval.
         assert!(f.node.try_propose().unwrap().is_none());
 
         f.node
-            .submit_transaction(transfer(&f.alice, bob, 300, 1, f.fp()))
+            .submit_transaction(transfer(&f.alice, bob, 300, 1, &f.chain_id()))
             .unwrap();
         let (proposal, vote) = f.node.try_propose().unwrap().unwrap();
         assert_eq!(proposal.transactions.len(), 2);
@@ -1982,7 +1982,7 @@ mod tests {
     #[test]
     fn duplicate_submissions_are_reported_as_known() {
         let f = solo_node();
-        let tx = transfer(&f.alice, Address([7u8; 32]), 1, 0, f.fp());
+        let tx = transfer(&f.alice, Address([7u8; 32]), 1, 0, &f.chain_id());
         assert!(f.node.submit_transaction(tx.clone()).unwrap().1);
         assert!(
             !f.node.submit_transaction(tx).unwrap().1,
@@ -2009,10 +2009,10 @@ mod tests {
         let f = solo_node();
         let bob = Address([7u8; 32]);
         f.node
-            .submit_transaction(transfer(&f.alice, bob, 1, 0, f.fp()))
+            .submit_transaction(transfer(&f.alice, bob, 1, 0, &f.chain_id()))
             .unwrap();
         f.node
-            .submit_transaction(transfer(&f.alice, bob, 1, 1, f.fp()))
+            .submit_transaction(transfer(&f.alice, bob, 1, 1, &f.chain_id()))
             .unwrap();
         let (proposal, _) = f.node.try_propose().unwrap().unwrap();
 
@@ -2040,10 +2040,10 @@ mod tests {
         let f = solo_node();
         let bob = Address([7u8; 32]);
         f.node
-            .submit_transaction(transfer(&f.alice, bob, 1, 0, f.fp()))
+            .submit_transaction(transfer(&f.alice, bob, 1, 0, &f.chain_id()))
             .unwrap();
         f.node
-            .submit_transaction(transfer(&f.alice, bob, 1, 1, f.fp()))
+            .submit_transaction(transfer(&f.alice, bob, 1, 1, &f.chain_id()))
             .unwrap();
         let root_before = f.node.chain_info().unwrap().state_root;
 
@@ -2082,10 +2082,10 @@ mod tests {
         let f = solo_node();
         let bob = Address([7u8; 32]);
         f.node
-            .submit_transaction(transfer(&f.alice, bob, 1, 0, f.fp()))
+            .submit_transaction(transfer(&f.alice, bob, 1, 0, &f.chain_id()))
             .unwrap();
         f.node
-            .submit_transaction(transfer(&f.alice, bob, 1, 1, f.fp()))
+            .submit_transaction(transfer(&f.alice, bob, 1, 1, &f.chain_id()))
             .unwrap();
         let (proposal, _) = f.node.try_propose().unwrap().unwrap();
 
@@ -2110,10 +2110,10 @@ mod tests {
         let f = solo_node();
         let bob = Address([7u8; 32]);
         f.node
-            .submit_transaction(transfer(&f.alice, bob, 1, 0, f.fp()))
+            .submit_transaction(transfer(&f.alice, bob, 1, 0, &f.chain_id()))
             .unwrap();
         f.node
-            .submit_transaction(transfer(&f.alice, bob, 1, 1, f.fp()))
+            .submit_transaction(transfer(&f.alice, bob, 1, 1, &f.chain_id()))
             .unwrap();
         let (proposal, original_vote) = f.node.try_propose().unwrap().unwrap();
         let height = proposal.height();
@@ -2181,7 +2181,7 @@ mod tests {
         let bob = Address([7u8; 32]);
         for node in &pair.nodes {
             for nonce in 0..2 {
-                node.submit_transaction(transfer(&pair.alice, bob, 1, nonce, pair.fp()))
+                node.submit_transaction(transfer(&pair.alice, bob, 1, nonce, &pair.chain_id()))
                     .unwrap();
             }
         }
@@ -2252,7 +2252,7 @@ mod tests {
         let bob = Address([7u8; 32]);
         for node in &pair.nodes {
             for nonce in 0..2 {
-                node.submit_transaction(transfer(&pair.alice, bob, 1, nonce, pair.fp()))
+                node.submit_transaction(transfer(&pair.alice, bob, 1, nonce, &pair.chain_id()))
                     .unwrap();
             }
         }
@@ -2283,7 +2283,7 @@ mod tests {
         let bob = Address([7u8; 32]);
         for node in &pair.nodes {
             for nonce in 0..2 {
-                node.submit_transaction(transfer(&pair.alice, bob, 1, nonce, pair.fp()))
+                node.submit_transaction(transfer(&pair.alice, bob, 1, nonce, &pair.chain_id()))
                     .unwrap();
             }
         }
@@ -2325,10 +2325,10 @@ mod tests {
         let f = solo_node();
         let bob = Address([7u8; 32]);
         f.node
-            .submit_transaction(transfer(&f.alice, bob, 1, 0, f.fp()))
+            .submit_transaction(transfer(&f.alice, bob, 1, 0, &f.chain_id()))
             .unwrap();
         f.node
-            .submit_transaction(transfer(&f.alice, bob, 1, 1, f.fp()))
+            .submit_transaction(transfer(&f.alice, bob, 1, 1, &f.chain_id()))
             .unwrap();
         let (_, vote) = f.node.try_propose().unwrap().unwrap();
         let height = vote.height;
@@ -2355,7 +2355,7 @@ mod tests {
         let pauper = sikka_crypto::Keypair::generate().unwrap();
         let error = f
             .node
-            .submit_transaction(transfer(&pauper, bob, 1, 0, f.fp()))
+            .submit_transaction(transfer(&pauper, bob, 1, 0, &f.chain_id()))
             .unwrap_err();
         assert!(matches!(error, Error::InsufficientBalance { .. }));
         assert_eq!(f.node.mempool_info().pending, 0);
@@ -2368,11 +2368,11 @@ mod tests {
             .unwrap()
             .balance;
         f.node
-            .submit_transaction(transfer(&f.alice, bob, balance - 1, 0, f.fp()))
+            .submit_transaction(transfer(&f.alice, bob, balance - 1, 0, &f.chain_id()))
             .unwrap();
         let error = f
             .node
-            .submit_transaction(transfer(&f.alice, bob, balance - 1, 1, f.fp()))
+            .submit_transaction(transfer(&f.alice, bob, balance - 1, 1, &f.chain_id()))
             .unwrap_err();
         assert!(matches!(error, Error::InsufficientBalance { .. }));
         assert_eq!(f.node.mempool_info().pending, 1);
@@ -2380,7 +2380,7 @@ mod tests {
         // Replacing that queued transaction with an affordable one is fine: it
         // takes the nonce's place instead of queueing behind it.
         f.node
-            .submit_transaction(transfer(&f.alice, bob, 1, 0, f.fp()))
+            .submit_transaction(transfer(&f.alice, bob, 1, 0, &f.chain_id()))
             .unwrap();
         assert_eq!(f.node.mempool_info().pending, 1);
     }
@@ -2389,7 +2389,7 @@ mod tests {
     fn votes_from_strangers_are_rejected() {
         let f = solo_node();
         let stranger = sikka_crypto::Keypair::generate().unwrap();
-        let vote = Vote::sign(&stranger, f.fp(), 1, 0, VoteKind::Precommit, Hash([1u8; 32])).unwrap();
+        let vote = Vote::sign(&stranger, &f.chain_id(), 1, 0, VoteKind::Precommit, Hash([1u8; 32])).unwrap();
         assert!(matches!(
             f.node.handle_vote(vote),
             Err(Error::UnknownVoter(_))
@@ -2399,7 +2399,7 @@ mod tests {
     #[test]
     fn stale_votes_are_ignored_rather_than_erroring() {
         let f = solo_node();
-        let vote = Vote::sign(f.node.keypair(), f.fp(), 0, 0, VoteKind::Precommit, Hash([1u8; 32])).unwrap();
+        let vote = Vote::sign(f.node.keypair(), &f.chain_id(), 0, 0, VoteKind::Precommit, Hash([1u8; 32])).unwrap();
         assert!(f.node.handle_vote(vote).unwrap().1.is_none());
     }
 
@@ -2408,10 +2408,10 @@ mod tests {
         let f = solo_node();
         let bob = Address([7u8; 32]);
         f.node
-            .submit_transaction(transfer(&f.alice, bob, 1_000, 0, f.fp()))
+            .submit_transaction(transfer(&f.alice, bob, 1_000, 0, &f.chain_id()))
             .unwrap();
         f.node
-            .submit_transaction(transfer(&f.alice, bob, 1_000, 1, f.fp()))
+            .submit_transaction(transfer(&f.alice, bob, 1_000, 1, &f.chain_id()))
             .unwrap();
         let (_, vote) = f.node.try_propose().unwrap().unwrap();
         seal_solo(&f.node, vote);
@@ -2430,7 +2430,7 @@ mod tests {
         // Nonce 5 with nothing pending leaves a gap.
         let error = f
             .node
-            .submit_transaction(transfer(&f.alice, bob, 1, 5, f.fp()))
+            .submit_transaction(transfer(&f.alice, bob, 1, 5, &f.chain_id()))
             .unwrap_err();
         assert!(matches!(error, Error::BadNonce { .. }));
     }

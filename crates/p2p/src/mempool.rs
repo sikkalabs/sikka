@@ -369,14 +369,14 @@ mod tests {
     use super::*;
     use sikka_crypto::Keypair;
 
-    fn fp() -> Hash {
-        Hash([0x42u8; 32])
+    fn chain_id() -> &'static str {
+        "sikka-test"
     }
 
     const NOW: u64 = 1_700_000_000;
 
     fn transfer(kp: &Keypair, nonce: u64, amount: u64) -> Transaction {
-        Transaction::transfer(kp, Address([9u8; 32]), amount, nonce, NOW, fp()).unwrap()
+        Transaction::transfer(kp, Address([9u8; 32]), amount, nonce, NOW, chain_id()).unwrap()
     }
 
     #[test]
