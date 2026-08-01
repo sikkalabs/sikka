@@ -262,10 +262,11 @@ verification. Serving nodes cache the two newest requested snapshots under
 The old monolithic `GET /api/state/snapshot` JSON response no longer exists.
 
 Snapshot chunks prove their contents against the checkpoint roots, but they do
-not prove an arbitrary history of validator-set changes. A node accepts an
-unpinned multi-height snapshot only when its validator root is unchanged.
-Validator-changing gaps require an independently verified
-`SIKKA_TRUSTED_CHECKPOINT=<height>:<checkpoint-hash>` trust anchor.
+not prove an arbitrary history against a long-range fork. A node accepts an
+unpinned snapshot only across a single-height gap. Any larger gap requires an
+independently verified
+`SIKKA_TRUSTED_CHECKPOINT=<height>:<checkpoint-hash>` trust anchor — even when
+the validator root is unchanged.
 
 ---
 

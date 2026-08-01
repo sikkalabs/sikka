@@ -11,7 +11,7 @@ use sikka_common::constants::quorum_threshold;
 use sikka_common::error::Error;
 use sikka_common::genesis::{GenesisAllocation, GenesisConfig, GenesisValidator};
 use sikka_common::transaction::Transaction;
-use sikka_common::vote::Vote;
+use sikka_common::vote::{Vote, VoteKind};
 use sikka_consensus::proposal::{build_proposal, verify_proposal, CheckpointProposal};
 use sikka_consensus::{proposer_for, Equivocation, VoteOutcome, VoteTracker};
 use sikka_crypto::Keypair;
@@ -162,7 +162,7 @@ impl Testnet {
         let mut tracker = VoteTracker::new();
         for node in &self.nodes {
             tracker
-                .record(Vote::sign(&node.key, height, hash).unwrap())
+                .record(Vote::sign(&node.key, height, 0, VoteKind::Precommit, hash).unwrap())
                 .unwrap();
         }
         let authorized: Vec<(Address, u64)> = self.nodes[0]
@@ -172,10 +172,10 @@ impl Testnet {
             .iter()
             .map(|v| (v.address, v.bond))
             .collect();
-        assert!(tracker.has_quorum(height, &hash, &authorized));
+        assert!(tracker.has_quorum(height, 0, VoteKind::Precommit, &hash, &authorized));
 
         let addresses: Vec<Address> = authorized.iter().map(|(a, _)| *a).collect();
-        let signatures = tracker.signatures(height, &hash, &addresses);
+        let signatures = tracker.signatures(height, 0, &hash, &addresses);
         for (i, node) in self.nodes.iter_mut().enumerate() {
             let mut v = verified[i]
                 .take()
@@ -587,20 +587,20 @@ fn quorum_is_two_thirds_and_a_stalled_vote_finalizes_nothing() {
 
     let mut tracker = VoteTracker::new();
     tracker
-        .record(Vote::sign(&net.nodes[0].key, height, hash).unwrap())
+        .record(Vote::sign(&net.nodes[0].key, height, 0, VoteKind::Precommit, hash).unwrap())
         .unwrap();
     tracker
-        .record(Vote::sign(&net.nodes[1].key, height, hash).unwrap())
+        .record(Vote::sign(&net.nodes[1].key, height, 0, VoteKind::Precommit, hash).unwrap())
         .unwrap();
     assert!(
-        !tracker.has_quorum(height, &hash, &authorized),
+        !tracker.has_quorum(height, 0, VoteKind::Precommit, &hash, &authorized),
         "two of four must not finalize"
     );
 
     tracker
-        .record(Vote::sign(&net.nodes[2].key, height, hash).unwrap())
+        .record(Vote::sign(&net.nodes[2].key, height, 0, VoteKind::Precommit, hash).unwrap())
         .unwrap();
-    assert!(tracker.has_quorum(height, &hash, &authorized));
+    assert!(tracker.has_quorum(height, 0, VoteKind::Precommit, &hash, &authorized));
 
     // Nothing was committed while quorum was short: rolling back leaves the
     // proposer exactly where it started.
@@ -619,8 +619,8 @@ fn equivocation_is_detected_and_slashed_in_the_next_checkpoint() {
     // The cheat signs two different checkpoints at height 1.
     let cheat_index = 0;
     let cheat = net.nodes[cheat_index].address;
-    let vote_a = Vote::sign(&net.nodes[cheat_index].key, 1, Hash([1u8; 32])).unwrap();
-    let vote_b = Vote::sign(&net.nodes[cheat_index].key, 1, Hash([2u8; 32])).unwrap();
+    let vote_a = Vote::sign(&net.nodes[cheat_index].key, 1, 0, VoteKind::Precommit, Hash([1u8; 32])).unwrap();
+    let vote_b = Vote::sign(&net.nodes[cheat_index].key, 1, 0, VoteKind::Precommit, Hash([2u8; 32])).unwrap();
 
     let mut tracker = VoteTracker::new();
     tracker.record(vote_a).unwrap();

@@ -132,25 +132,29 @@ impl Transaction {
         Self::sign(keypair, TxKind::Unbond, Address::ZERO, 0, nonce, timestamp)
     }
 
-    /// The bytes covered by the signature. Excludes the signature itself and
-    /// the public key, which is bound through `from`.
+    /// The bytes covered by the signature.
+    ///
+    /// Includes the public key so a proposer cannot take a cached mempool id,
+    /// swap in a different key, and skip verification: the id and the signature
+    /// both bind the key that must hash to `from`.
     pub fn signing_bytes(&self) -> Vec<u8> {
-        let mut w = Writer::with_capacity(96);
+        let mut w = Writer::with_capacity(96 + self.public_key.as_slice().len());
         w.raw(TX_SIGNING_TAG)
             .u8(self.kind.tag())
             .raw(self.from.as_bytes())
             .raw(self.to.as_bytes())
             .u64(self.amount)
             .u64(self.nonce)
-            .u64(self.timestamp);
+            .u64(self.timestamp)
+            .raw(self.public_key.as_slice());
         w.finish()
     }
 
-    /// Transaction id: hash of the signed payload.
+    /// Transaction id: hash of the signed payload (which includes the public key).
     ///
-    /// The signature is excluded so that re-signing the same payload — ML-DSA
-    /// signatures are randomised by default — yields the same id and cannot
-    /// enter the mempool twice.
+    /// The signature itself is excluded so that re-signing the same payload —
+    /// ML-DSA signatures are randomised by default — yields the same id and
+    /// cannot enter the mempool twice.
     pub fn id(&self) -> Hash {
         Hash::digest(&[TX_ID_TAG, &self.signing_bytes()])
     }
@@ -366,6 +370,24 @@ mod tests {
 
         let c = Transaction::transfer(&kp, Address([9u8; 32]), 101, 0, 1_000).unwrap();
         assert_ne!(a.id(), c.id());
+    }
+
+    #[test]
+    fn swapping_the_public_key_changes_the_id() {
+        let kp = keypair();
+        let other = keypair();
+        let mut tx = Transaction::transfer(&kp, Address([9u8; 32]), 100, 0, 1_000).unwrap();
+        let original_id = tx.id();
+        tx.public_key = PublicKey::new(*other.public_bytes());
+        assert_ne!(
+            tx.id(),
+            original_id,
+            "a pubkey swap must not keep the mempool cache id"
+        );
+        assert_eq!(
+            tx.verify_signature().unwrap_err(),
+            Error::AddressKeyMismatch
+        );
     }
 
     #[test]

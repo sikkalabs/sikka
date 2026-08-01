@@ -134,7 +134,7 @@ impl Testnet {
         // TIME_WAIT from a previous test's aborted listener.
         let mut nodes = Vec::new();
         for key in keys.iter().take(running) {
-            nodes.push(spawn_node(&genesis_path, Some(key), Vec::new(), true).await);
+            nodes.push(spawn_node(&genesis_path, Some(key), Vec::new(), true, None).await);
         }
         for i in 0..nodes.len() {
             for j in 0..nodes.len() {
@@ -164,9 +164,12 @@ impl Testnet {
     }
 
     /// Add a node that is not a validator and has no state at all.
-    async fn join_observer(&self) -> TestNode {
+    ///
+    /// `trusted` is required when the network tip is more than one height ahead
+    /// of genesis (weak-subjectivity window).
+    async fn join_observer(&self, trusted: Option<TrustedCheckpoint>) -> TestNode {
         let bootstrap: Vec<String> = self.nodes.iter().map(|n| n.endpoint.clone()).collect();
-        spawn_node(&self.genesis_path, None, bootstrap, false).await
+        spawn_node(&self.genesis_path, None, bootstrap, false, trusted).await
     }
 
     fn rpc(&self, index: usize) -> &RpcClient {
@@ -258,6 +261,7 @@ async fn spawn_node(
     key: Option<&Keypair>,
     bootstrap: Vec<String>,
     validator: bool,
+    trusted_checkpoint: Option<TrustedCheckpoint>,
 ) -> TestNode {
     let dir = tempfile::tempdir().unwrap();
     let key_path = dir.path().join("node_key.json");
@@ -273,6 +277,7 @@ async fn spawn_node(
         advertise: "http://127.0.0.1:0".into(),
         bootstrap,
         validator,
+        trusted_checkpoint,
         mempool_capacity: 10_000,
         // Brisk timers: the test should finish in seconds, not minutes.
         propose_interval: Duration::from_millis(100),
@@ -420,9 +425,16 @@ async fn a_new_node_joins_and_fast_syncs_to_the_current_state() {
     }
     let target = net.nodes[0].node.height();
     assert!(target >= 3);
+    let tip = net.nodes[0].node.checkpoint(target).unwrap();
 
-    // A node with an empty database, no key and no stake joins the network.
-    let joiner = net.join_observer().await;
+    // A node with an empty database joins with an independently pinned tip —
+    // multi-height snapshot sync always needs a weak-subjectivity checkpoint.
+    let joiner = net
+        .join_observer(Some(TrustedCheckpoint {
+            height: tip.header.height,
+            hash: tip.hash(),
+        }))
+        .await;
     assert_eq!(joiner.node.height(), 0, "a joiner starts from genesis");
 
     let deadline = Instant::now() + Duration::from_secs(30);

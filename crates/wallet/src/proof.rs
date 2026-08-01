@@ -91,7 +91,7 @@ pub fn verify_account_proof(
 mod tests {
     use super::*;
     use sikka_common::checkpoint::CheckpointHeader;
-    use sikka_common::vote::Vote;
+    use sikka_common::vote::{Vote, VoteKind};
     use sikka_crypto::Keypair;
     use sikka_state::smt::Smt;
 
@@ -150,7 +150,7 @@ mod tests {
         let mut checkpoint = Checkpoint::new(header);
         let hash = checkpoint.hash();
         for key in keys.iter().take(3) {
-            checkpoint.add_signature(Vote::sign(key, 42, hash).unwrap().into_signature());
+            checkpoint.add_signature(Vote::sign(key, 42, 0, VoteKind::Precommit, hash).unwrap().into_signature());
         }
         checkpoint.canonicalize();
 

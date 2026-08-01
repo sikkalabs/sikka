@@ -38,4 +38,4 @@ pub use inflation::{checkpoint_inflation, distribute_rewards};
 pub use time::now_secs;
 pub use transaction::{Transaction, TxKind};
 pub use validator::Validator;
-pub use vote::Vote;
+pub use vote::{Vote, VoteKind};

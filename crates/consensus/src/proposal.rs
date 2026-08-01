@@ -386,6 +386,12 @@ pub fn verify_proposal_with(
     }
 
     for (tx, id) in proposal.transactions.iter().zip(&ids) {
+        // Always bind address↔key, even when the id is already cached: a
+        // proposer must not swap a different public key onto a mempool
+        // transaction and skip verification.
+        if tx.public_key.address() != tx.from {
+            return Err(Error::AddressKeyMismatch);
+        }
         if !verified_signatures.contains(id) {
             tx.verify_signature()?;
         }
@@ -442,7 +448,7 @@ pub fn verify_proposal_with(
 mod tests {
     use super::*;
     use sikka_common::transaction::Transaction;
-    use sikka_common::vote::Vote;
+    use sikka_common::vote::{Vote, VoteKind};
     use sikka_crypto::Keypair;
 
     #[test]
@@ -467,8 +473,8 @@ mod tests {
                 Transaction::transfer(&kp, Address([7u8; 32]), 2, 1, 1_700_000_000).unwrap(),
             ],
             evidence: vec![Equivocation::new(
-                Vote::sign(&kp, 9, Hash([8u8; 32])).unwrap(),
-                Vote::sign(&kp, 9, Hash([9u8; 32])).unwrap(),
+                Vote::sign(&kp, 9, 0, VoteKind::Precommit, Hash([8u8; 32])).unwrap(),
+                Vote::sign(&kp, 9, 0, VoteKind::Precommit, Hash([9u8; 32])).unwrap(),
             )
             .unwrap()],
             proposer_signature: Signature::default(),

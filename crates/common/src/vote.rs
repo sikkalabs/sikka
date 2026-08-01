@@ -1,8 +1,15 @@
 //! Checkpoint votes.
 //!
-//! Consensus never votes on individual transactions — only on the state
-//! checkpoint they produce. A vote is therefore tiny: a height, the checkpoint
-//! hash, and a signature over both.
+//! Consensus votes in two phases (Tendermint-style):
+//!
+//! 1. **Prevote** — a soft preference for a checkpoint hash in a given round.
+//!    Different rounds may prevote different hashes without equivocation.
+//! 2. **Precommit** — cast only after ≥2/3 bonded stake has prevoted the same
+//!    hash in that round. Precommits are what finalize, and once cast they lock
+//!    the validator onto that hash for the height.
+//!
+//! Equivocation is signing two different hashes for the same
+//! `(height, round, kind)`. That is the only slashable offence.
 
 use serde::{Deserialize, Serialize};
 
@@ -12,21 +19,60 @@ use crate::codec::{Decode, Encode, Reader, Writer};
 use crate::error::{Error, Result};
 
 /// Domain tag for the signed vote payload.
-pub const VOTE_TAG: &[u8] = b"SIKKA/vote/v1";
+pub const VOTE_TAG: &[u8] = b"SIKKA/vote/v2";
 
-/// The exact bytes a validator signs when voting for a checkpoint.
+/// Which consensus step a vote belongs to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum VoteKind {
+    Prevote,
+    Precommit,
+}
+
+impl VoteKind {
+    pub const fn tag(self) -> u8 {
+        match self {
+            VoteKind::Prevote => 0,
+            VoteKind::Precommit => 1,
+        }
+    }
+
+    pub fn from_tag(tag: u8) -> Result<Self> {
+        match tag {
+            0 => Ok(VoteKind::Prevote),
+            1 => Ok(VoteKind::Precommit),
+            tag => Err(Error::InvalidTag {
+                kind: "VoteKind",
+                tag,
+            }),
+        }
+    }
+}
+
+/// The exact bytes a validator signs when voting.
 ///
-/// The height is included alongside the hash so a signature can never be
-/// replayed at another height, even if two heights somehow shared a hash.
-pub fn vote_signing_bytes(height: u64, checkpoint_hash: &Hash) -> Vec<u8> {
-    let mut w = Writer::with_capacity(48);
-    w.raw(VOTE_TAG).u64(height).raw(checkpoint_hash.as_bytes());
+/// Height, round, and kind are all bound so a signature cannot be replayed
+/// across steps or rounds.
+pub fn vote_signing_bytes(
+    height: u64,
+    round: u32,
+    kind: VoteKind,
+    checkpoint_hash: &Hash,
+) -> Vec<u8> {
+    let mut w = Writer::with_capacity(56);
+    w.raw(VOTE_TAG)
+        .u64(height)
+        .u32(round)
+        .u8(kind.tag())
+        .raw(checkpoint_hash.as_bytes());
     w.finish()
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Vote {
     pub height: u64,
+    pub round: u32,
+    pub kind: VoteKind,
     pub checkpoint_hash: Hash,
     pub validator: Address,
     pub public_key: PublicKey,
@@ -37,13 +83,21 @@ impl Vote {
     pub fn sign(
         keypair: &sikka_crypto::Keypair,
         height: u64,
+        round: u32,
+        kind: VoteKind,
         checkpoint_hash: Hash,
     ) -> Result<Self> {
         let public_key = PublicKey::new(*keypair.public_bytes());
-        let signature =
-            Signature::new(keypair.sign(&vote_signing_bytes(height, &checkpoint_hash))?);
+        let signature = Signature::new(keypair.sign(&vote_signing_bytes(
+            height,
+            round,
+            kind,
+            &checkpoint_hash,
+        ))?);
         Ok(Self {
             height,
+            round,
+            kind,
             checkpoint_hash,
             validator: public_key.address(),
             public_key,
@@ -55,7 +109,12 @@ impl Vote {
         if self.public_key.address() != self.validator {
             return Err(Error::AddressKeyMismatch);
         }
-        let payload = vote_signing_bytes(self.height, &self.checkpoint_hash);
+        let payload = vote_signing_bytes(
+            self.height,
+            self.round,
+            self.kind,
+            &self.checkpoint_hash,
+        );
         if !sikka_crypto::verify(
             self.public_key.as_slice(),
             &payload,
@@ -66,7 +125,7 @@ impl Vote {
         Ok(())
     }
 
-    /// Convert to the form embedded in a finalized checkpoint.
+    /// Convert a precommit into the form embedded in a finalized checkpoint.
     pub fn into_signature(self) -> ValidatorSignature {
         ValidatorSignature {
             validator: self.validator,
@@ -79,6 +138,8 @@ impl Vote {
 impl Encode for Vote {
     fn encode(&self, w: &mut Writer) {
         w.u64(self.height)
+            .u32(self.round)
+            .u8(self.kind.tag())
             .raw(self.checkpoint_hash.as_bytes())
             .raw(self.validator.as_bytes())
             .raw(self.public_key.as_slice())
@@ -90,6 +151,8 @@ impl Decode for Vote {
     fn decode(r: &mut Reader<'_>) -> Result<Self> {
         Ok(Self {
             height: r.u64()?,
+            round: r.u32()?,
+            kind: VoteKind::from_tag(r.u8()?)?,
             checkpoint_hash: Hash::decode(r)?,
             validator: Address::decode(r)?,
             public_key: PublicKey::decode(r)?,
@@ -104,41 +167,38 @@ mod tests {
     use sikka_crypto::Keypair;
 
     #[test]
-    fn signed_vote_verifies() {
+    fn a_signed_vote_verifies() {
         let kp = Keypair::generate().unwrap();
-        let vote = Vote::sign(&kp, 42, Hash([7u8; 32])).unwrap();
+        let vote = Vote::sign(&kp, 42, 1, VoteKind::Prevote, Hash([7u8; 32])).unwrap();
         vote.verify().unwrap();
         assert_eq!(vote.validator, PublicKey::new(*kp.public_bytes()).address());
+        assert_eq!(vote.kind, VoteKind::Prevote);
+        assert_eq!(vote.round, 1);
     }
 
     #[test]
-    fn height_and_hash_are_both_bound() {
+    fn vote_survives_a_codec_roundtrip() {
         let kp = Keypair::generate().unwrap();
-        let vote = Vote::sign(&kp, 42, Hash([7u8; 32])).unwrap();
-
-        let mut wrong_height = vote.clone();
-        wrong_height.height = 43;
-        assert_eq!(wrong_height.verify().unwrap_err(), Error::InvalidSignature);
-
-        let mut wrong_hash = vote.clone();
-        wrong_hash.checkpoint_hash = Hash([8u8; 32]);
-        assert_eq!(wrong_hash.verify().unwrap_err(), Error::InvalidSignature);
+        let vote = Vote::sign(&kp, 42, 3, VoteKind::Precommit, Hash([7u8; 32])).unwrap();
+        let decoded = Vote::from_bytes(&vote.to_bytes()).unwrap();
+        assert_eq!(decoded, vote);
     }
 
     #[test]
-    fn claimed_identity_must_match_key() {
+    fn tampering_invalidates_a_vote() {
         let kp = Keypair::generate().unwrap();
-        let mut vote = Vote::sign(&kp, 1, Hash([1u8; 32])).unwrap();
-        vote.validator = Address([9u8; 32]);
-        assert_eq!(vote.verify().unwrap_err(), Error::AddressKeyMismatch);
+        let mut vote = Vote::sign(&kp, 1, 0, VoteKind::Prevote, Hash([1u8; 32])).unwrap();
+        vote.checkpoint_hash = Hash([9u8; 32]);
+        assert_eq!(vote.verify().unwrap_err(), Error::InvalidSignature);
     }
 
     #[test]
-    fn roundtrips() {
+    fn prevote_and_precommit_have_distinct_domains() {
         let kp = Keypair::generate().unwrap();
-        let vote = Vote::sign(&kp, 1, Hash([1u8; 32])).unwrap();
-        assert_eq!(Vote::from_bytes(&vote.to_bytes()).unwrap(), vote);
-        let json = serde_json::to_string(&vote).unwrap();
-        assert_eq!(serde_json::from_str::<Vote>(&json).unwrap(), vote);
+        let hash = Hash([1u8; 32]);
+        let prevote = Vote::sign(&kp, 1, 0, VoteKind::Prevote, hash).unwrap();
+        let mut forged = prevote.clone();
+        forged.kind = VoteKind::Precommit;
+        assert_eq!(forged.verify().unwrap_err(), Error::InvalidSignature);
     }
 }

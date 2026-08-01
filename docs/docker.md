@@ -108,7 +108,7 @@ docker exec sikka sikka help
 | `SIKKA_PRIVATE_KEY` | unset | 32-byte seed or full secret (hex); else a key is created under `/data` |
 | `SIKKA_BOOTSTRAP` | two Tor onions (see `BOOTSTRAP_NODES`) | first peers |
 | `SIKKA_GENESIS` | baked-in if missing | optional custom genesis path |
-| `SIKKA_TRUSTED_CHECKPOINT` | unset | `<height>:<hash>` trust anchor required when fast-sync crosses multiple heights and the validator set changed |
+| `SIKKA_TRUSTED_CHECKPOINT` | unset | `<height>:<hash>` trust anchor required when fast-sync crosses more than one height |
 | `SIKKA_LOG` | `info` | tracing filter |
 | `SIKKA_TOR_READY_TIMEOUT_SECS` | `300` | how long to wait for Tor `Bootstrapped 100%` before starting the node |
 
@@ -117,7 +117,8 @@ derived onion and local Tor SOCKS — do not set them.
 
 Do not copy `SIKKA_TRUSTED_CHECKPOINT` from an untrusted peer. Verify the
 checkpoint hash independently through multiple operators or a release
-announcement first. Gaps with an unchanged validator root need no pin.
+announcement first. Any gap beyond one height needs a pin, even when the
+validator root is unchanged.
 
 Tor writes notices to `/data/tor/notice.log` (not container stdout). Inspect with:
 

@@ -190,7 +190,7 @@ mod tests {
         };
         let mut proposal = proposal;
         proposal.sign(kp).unwrap();
-        let vote = Vote::sign(kp, height, proposal.hash()).unwrap();
+        let vote = Vote::sign(kp, height, 0, sikka_common::vote::VoteKind::Prevote, proposal.hash()).unwrap();
         Commitment { vote, proposal }
     }
 

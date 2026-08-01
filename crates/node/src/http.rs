@@ -204,7 +204,10 @@ async fn submit_vote(
     State(state): State<AppState>,
     Json(body): Json<SubmitVote>,
 ) -> HttpResult<Json<Value>> {
-    let finalized = state.node.handle_vote(body.vote)?;
+    let (follow_up, finalized) = state.node.handle_vote(body.vote)?;
+    if let Some(vote) = follow_up {
+        state.gossip.vote(vote);
+    }
     let height = finalized.as_ref().map(|f| f.checkpoint.header.height);
     if let Some(finalized) = finalized {
         state.gossip.finalized(finalized);
@@ -218,10 +221,16 @@ async fn submit_proposal(
 ) -> HttpResult<Json<sikka_p2p::wire::ProposalResponse>> {
     let response = state.node.handle_proposal(&body.proposal)?;
     if let Some(vote) = &response.vote {
-        // Fan the vote out ourselves rather than relying on the proposer to
+        // Fan the prevote out ourselves rather than relying on the proposer to
         // relay it: that is what lets a checkpoint finalize even if the proposer
         // dies mid-round.
         state.gossip.vote(vote.clone());
+    }
+    if let Ok(Some(precommit)) = state.node.maybe_precommit() {
+        state.gossip.vote(precommit);
+    }
+    if let Ok(Some(finalized)) = state.node.finalize_if_quorum() {
+        state.gossip.finalized(finalized);
     }
     Ok(Json(response))
 }

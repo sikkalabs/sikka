@@ -24,7 +24,7 @@ use sikka_common::genesis::GenesisConfig;
 use sikka_common::time::now_secs;
 use sikka_common::transaction::Transaction;
 use sikka_common::validator::Validator;
-use sikka_common::vote::Vote;
+use sikka_common::vote::{Vote, VoteKind};
 use sikka_consensus::equivocation::Equivocation;
 use sikka_consensus::proposal::{
     build_proposal, verify_proposal, verify_proposal_with, Authority, CheckpointProposal,
@@ -192,10 +192,15 @@ impl Node {
         for commitment in commitments.load_above(ledger.height())? {
             if commitment.height() == ledger.height() + 1 {
                 known = Some(commitment.proposal.clone());
-                locked = Some(Locked {
-                    proposal: commitment.proposal,
-                    offered_at: None,
-                });
+                // Only a precommit permanently locks the height. A restored
+                // prevote is remembered as `known` so we can reoffer that round,
+                // but a later round may still adopt a different proposal.
+                if commitment.vote.kind == VoteKind::Precommit {
+                    locked = Some(Locked {
+                        proposal: commitment.proposal,
+                        offered_at: None,
+                    });
+                }
             }
             votes.record(commitment.vote)?;
         }
@@ -539,42 +544,50 @@ impl Node {
         let timestamp = now.max(last_time + 1);
         let round = round_at(timestamp, last_time);
 
-        // A vote already cast binds us until this height closes: proposing a
-        // rival would be equivocation against ourselves, so the checkpoint we
-        // voted for is the only one left to push. Offering it again is what
-        // rescues a round whose quorum never arrived.
-        let own_vote = self.votes.lock().vote_by(height, &self.address).cloned();
-        if let Some(vote) = own_vote {
-            return Ok(self.reoffer_locked(chain, vote, now));
+        // A precommit locks us for the height: only that checkpoint may be
+        // offered again. A lone prevote does not lock — later rounds may adopt
+        // a different proposal (Tendermint-style), which is what heals partitions.
+        if let Some(lock) = self.votes.lock().precommit_lock(height, &self.address).cloned() {
+            return Ok(self.reoffer_locked(chain, lock, now));
+        }
+
+        // Already prevoted this clock-round: restage that body (never invent a
+        // rival at the same step). A later clock-round falls through and may
+        // adopt a different known proposal.
+        if let Some(prevote) = self
+            .votes
+            .lock()
+            .vote_by(height, round, VoteKind::Prevote, &self.address)
+            .cloned()
+        {
+            let body = chain
+                .locked
+                .as_ref()
+                .map(|l| &l.proposal)
+                .or(chain.known.as_ref())
+                .filter(|p| p.hash() == prevote.checkpoint_hash)
+                .cloned();
+            if let Some(proposal) = body {
+                if chain.locked.is_none() {
+                    chain.locked = Some(Locked {
+                        proposal: proposal.clone(),
+                        offered_at: None,
+                    });
+                }
+                return Ok(self.reoffer_locked(chain, prevote, now));
+            }
+            // Voted for a hash we no longer hold — wait for a peer reoffer.
+            return Ok(None);
         }
 
         // Prefer an earlier proposal we already hold over inventing a new one —
-        // but only if the network has not already committed votes to a different
-        // hash. Adopting against an existing vote is how committees split.
+        // but only if we are not precommit-locked elsewhere (checked above).
         if let Some(proposal) = chain.known.clone() {
             if proposal.height() == height {
-                let agrees_with_votes = {
-                    let votes = self.votes.lock();
-                    let candidates = votes.candidates(height);
-                    candidates.is_empty()
-                        || candidates
-                            .iter()
-                            .any(|(hash, _)| *hash == proposal.hash())
-                };
-                if agrees_with_votes {
-                    return self.adopt_proposal(chain, proposal, now);
-                }
-                chain.known = None;
-            } else {
-                chain.known = None;
+                return self.adopt_proposal(chain, proposal, now);
             }
+            chain.known = None;
         }
-
-        // Do not invent while orphan votes exist without a body: peers are
-        // fetched first in the consensus loop. Blindly refusing to invent on
-        // *any* vote would let a byzantine orphan freeze the height forever.
-        // Honest nodes only vote after verifying a proposal body, so once peer
-        // fetch has run, inventing is safe.
 
         let active = chain.ledger.active_validators_at(height)?;
         let Some(proposer) = proposer_for_round(height, round, &active) else {
@@ -619,7 +632,13 @@ impl Node {
         }
 
         let hash = verified.hash();
-        let vote = Vote::sign(&self.keypair, height, hash)?;
+        let vote = Vote::sign(
+            &self.keypair,
+            height,
+            round,
+            VoteKind::Prevote,
+            hash,
+        )?;
         // Disk before broadcast: a crash after signing must not let us sign again,
         // and must not lose the checkpoint the signature commits us to.
         self.commitments.put(&Commitment {
@@ -656,14 +675,32 @@ impl Node {
         now: u64,
     ) -> Result<Option<(CheckpointProposal, Vote)>> {
         let height = proposal.height();
+        let round = proposal.header.round;
         if height != chain.ledger.height() + 1 {
             return Ok(None);
         }
-        if chain.pending.is_some() {
+        if let Some(lock) = self.votes.lock().precommit_lock(height, &self.address) {
+            if lock.checkpoint_hash != proposal.hash() {
+                return Ok(None);
+            }
+        }
+        if self
+            .votes
+            .lock()
+            .vote_by(height, round, VoteKind::Prevote, &self.address)
+            .is_some()
+        {
             return Ok(None);
         }
-        if self.votes.lock().vote_by(height, &self.address).is_some() {
-            return Ok(None);
+        // A prior round's pending prevote may be abandoned for a later-round
+        // proposal — that is the partition heal. A precommit lock above already
+        // refused rivals.
+        if let Some(stale) = chain.pending.take() {
+            if stale.proposal.header.round >= round {
+                chain.pending = Some(stale);
+                return Ok(None);
+            }
+            chain.ledger.rollback(stale.verified.staged);
         }
 
         let verified_ids: HashSet<Hash> = self.mempool.lock().verified_ids();
@@ -671,8 +708,6 @@ impl Node {
             Ok(verified) => verified,
             Err(error) => {
                 debug!(%error, height, "could not adopt the known open proposal");
-                // Drop a proposal we cannot verify so a later round can invent
-                // once peers agree there is nothing better.
                 if chain.known.as_ref().is_some_and(|known| known.hash() == proposal.hash()) {
                     chain.known = None;
                 }
@@ -681,7 +716,13 @@ impl Node {
         };
 
         let hash = verified.hash();
-        let vote = Vote::sign(&self.keypair, height, hash)?;
+        let vote = Vote::sign(
+            &self.keypair,
+            height,
+            round,
+            VoteKind::Prevote,
+            hash,
+        )?;
         self.commitments.put(&Commitment {
             vote: vote.clone(),
             proposal: proposal.clone(),
@@ -699,7 +740,7 @@ impl Node {
         self.votes.lock().record(vote.clone())?;
         info!(
             height,
-            round = proposal.header.round,
+            round,
             hash = %hash.short(),
             "adopting an open proposal instead of inventing a rival"
         );
@@ -733,10 +774,13 @@ impl Node {
         }
     }
 
-    /// Whether this node has already cast a vote for the height still open.
+    /// Whether this node has already precommit-locked the height still open.
     pub fn has_voted_for_open_height(&self) -> bool {
         let height = self.height() + 1;
-        self.votes.lock().vote_by(height, &self.address).is_some()
+        self.votes
+            .lock()
+            .precommit_lock(height, &self.address)
+            .is_some()
     }
 
     /// Offer the checkpoint an abandoned round left us committed to.
@@ -822,13 +866,14 @@ impl Node {
             .collect()
     }
 
-    /// Replay a peer's proposal and vote for it if we agree.
+    /// Replay a peer's proposal and prevote for it if we agree.
     pub fn handle_proposal(&self, proposal: &CheckpointProposal) -> Result<ProposalResponse> {
         if !self.config.validator {
             return Ok(refused("this node does not vote"));
         }
         let now = now_secs();
         let height = proposal.height();
+        let round = proposal.header.round;
         let mut chain = self.chain();
 
         if height <= chain.ledger.height() {
@@ -838,36 +883,82 @@ impl Node {
             )));
         }
 
-        // Never sign twice at the same height: that is equivocation, and it would
-        // slash our own bond. The record that matters is the vote itself, not the
-        // staged state — a round we gave up on still binds us.
         let hash = proposal.hash();
-        if let Some(previous) = self.votes.lock().vote_by(height, &self.address) {
-            if previous.checkpoint_hash == hash {
-                // Idempotent: re-send the vote so a retrying proposer makes
-                // progress. This is what lets an abandoned round be completed
-                // when it is offered again.
+        // A precommit locks the height to one hash.
+        if let Some(lock) = self.votes.lock().precommit_lock(height, &self.address) {
+            if lock.checkpoint_hash == hash {
                 remember_proposal(&mut chain.known, proposal);
                 return Ok(ProposalResponse {
                     accepted: true,
-                    vote: Some(previous.clone()),
+                    vote: Some(lock.clone()),
                     reason: None,
                 });
             }
             return Ok(refused(format!(
-                "already voted for {} at height {height}",
+                "precommit-locked to {} at height {height}",
+                lock.checkpoint_hash.short()
+            )));
+        }
+        // Idempotent prevote for this round.
+        if let Some(previous) = self
+            .votes
+            .lock()
+            .vote_by(height, round, VoteKind::Prevote, &self.address)
+            .cloned()
+        {
+            if previous.checkpoint_hash == hash {
+                remember_proposal(&mut chain.known, proposal);
+                // After a restart (or an expired round) we may still hold the
+                // prevote without a staged body. Restage so we can precommit
+                // once prevote quorum is visible again.
+                if chain.pending.as_ref().is_none_or(|p| p.hash != hash) {
+                    if let Some(stale) = chain.pending.take() {
+                        chain.ledger.rollback(stale.verified.staged);
+                    }
+                    let verified_ids: HashSet<Hash> = self.mempool.lock().verified_ids();
+                    match verify_proposal(&mut chain.ledger, proposal, now, &verified_ids) {
+                        Ok(verified) => {
+                            chain.pending = Some(Pending {
+                                verified,
+                                proposal: proposal.clone(),
+                                hash,
+                                height,
+                                created_at: now,
+                            });
+                        }
+                        Err(error) => {
+                            debug!(%error, height, "could not restage a previously prevoted checkpoint");
+                        }
+                    }
+                }
+                return Ok(ProposalResponse {
+                    accepted: true,
+                    vote: Some(previous),
+                    reason: None,
+                });
+            }
+            return Ok(refused(format!(
+                "already prevoted for {} at height {height} round {round}",
                 previous.checkpoint_hash.short()
             )));
         }
-        if chain.pending.is_some() {
-            return Ok(refused("a checkpoint is already staged at this height"));
+
+        // Abandon an earlier-round pending prevote for a later-round proposal.
+        if let Some(stale) = chain.pending.take() {
+            if stale.hash == hash {
+                chain.pending = Some(stale);
+            } else if stale.proposal.header.round < round {
+                chain.ledger.rollback(stale.verified.staged);
+            } else {
+                chain.pending = Some(stale);
+                return Ok(refused("a checkpoint is already staged at this height"));
+            }
         }
 
         // Proposer signature before any per-tx ML-DSA work, then admit at most
         // one expensive verify per proposer per timeout window.
         let active = chain.ledger.active_validators_at(height)?;
-        let expected = proposer_for_round(height, proposal.header.round, &active)
-            .ok_or(Error::NoActiveValidators)?;
+        let expected = proposer_for_round(height, round, &active).ok_or(Error::NoActiveValidators)?;
         if proposal.header.proposer != expected {
             return Err(Error::WrongProposer {
                 expected,
@@ -885,8 +976,26 @@ impl Node {
         }
 
         let verified_ids: HashSet<Hash> = self.mempool.lock().verified_ids();
-        let verified = verify_proposal(&mut chain.ledger, proposal, now, &verified_ids)?;
-        let vote = Vote::sign(&self.keypair, height, hash)?;
+        let verified = if chain.pending.as_ref().is_some_and(|p| p.hash == hash) {
+            // Already staged this body (e.g. we proposed it).
+            let vote = Vote::sign(&self.keypair, height, round, VoteKind::Prevote, hash)?;
+            self.commitments.put(&Commitment {
+                vote: vote.clone(),
+                proposal: proposal.clone(),
+            })?;
+            remember_proposal(&mut chain.known, proposal);
+            drop(chain);
+            self.votes.lock().record(vote.clone())?;
+            debug!(height, hash = %hash.short(), "prevoted for our own staged checkpoint");
+            return Ok(ProposalResponse {
+                accepted: true,
+                vote: Some(vote),
+                reason: None,
+            });
+        } else {
+            verify_proposal(&mut chain.ledger, proposal, now, &verified_ids)?
+        };
+        let vote = Vote::sign(&self.keypair, height, round, VoteKind::Prevote, hash)?;
         self.commitments.put(&Commitment {
             vote: vote.clone(),
             proposal: proposal.clone(),
@@ -903,7 +1012,7 @@ impl Node {
         drop(chain);
 
         self.votes.lock().record(vote.clone())?;
-        debug!(height, hash = %hash.short(), "voted for a peer's checkpoint");
+        debug!(height, round, hash = %hash.short(), "prevoted for a peer's checkpoint");
         Ok(ProposalResponse {
             accepted: true,
             vote: Some(vote),
@@ -927,14 +1036,18 @@ impl Node {
         }
     }
 
-    /// Record a vote, and finalize if it completes a super-majority.
-    pub fn handle_vote(&self, vote: Vote) -> Result<Option<Finalized>> {
+    /// Record a vote. When prevotes reach quorum for our pending checkpoint we
+    /// cast a precommit; when precommits reach quorum we finalize.
+    ///
+    /// Returns `(follow_up_vote, finalized)` so callers can gossip a precommit
+    /// we just produced in reaction to inbound prevotes.
+    pub fn handle_vote(&self, vote: Vote) -> Result<(Option<Vote>, Option<Finalized>)> {
         vote.verify()?;
         {
             let chain = self.chain();
             let height = chain.ledger.height();
             if vote.height <= height {
-                return Ok(None);
+                return Ok((None, None));
             }
             let active = chain.ledger.active_validators_at(vote.height)?;
             if !active.iter().any(|v| v.address == vote.validator) {
@@ -956,11 +1069,72 @@ impl Node {
                 "equivocation detected; will be slashed in the next checkpoint we propose"
             );
         }
-        self.finalize_if_quorum()
+        let follow_up = self.maybe_precommit()?;
+        let finalized = self.finalize_if_quorum()?;
+        Ok((follow_up, finalized))
+    }
+
+    /// If our pending checkpoint has a prevote quorum and we have not
+    /// precommitted yet, cast the precommit (the height lock).
+    pub fn maybe_precommit(&self) -> Result<Option<Vote>> {
+        if !self.config.validator {
+            return Ok(None);
+        }
+        let chain = self.chain();
+        let Some(pending) = &chain.pending else {
+            return Ok(None);
+        };
+        let height = pending.height;
+        let round = pending.proposal.header.round;
+        let hash = pending.hash;
+        let proposal = pending.proposal.clone();
+        if self
+            .votes
+            .lock()
+            .vote_by(height, round, VoteKind::Precommit, &self.address)
+            .is_some()
+        {
+            return Ok(None);
+        }
+        let active = chain.ledger.active_validators_at(height)?;
+        let authorized: Vec<(Address, u64)> =
+            active.iter().map(|v| (v.address, v.bond)).collect();
+        if !self.votes.lock().has_quorum(
+            height,
+            round,
+            VoteKind::Prevote,
+            &hash,
+            &authorized,
+        ) {
+            return Ok(None);
+        }
+        drop(chain);
+
+        let vote = Vote::sign(
+            &self.keypair,
+            height,
+            round,
+            VoteKind::Precommit,
+            hash,
+        )?;
+        self.commitments.put(&Commitment {
+            vote: vote.clone(),
+            proposal: proposal.clone(),
+        })?;
+        {
+            let mut chain = self.chain();
+            chain.locked = Some(Locked {
+                proposal,
+                offered_at: None,
+            });
+        }
+        self.votes.lock().record(vote.clone())?;
+        info!(height, round, hash = %hash.short(), "precommitting checkpoint");
+        Ok(Some(vote))
     }
 
     /// Commit the pending checkpoint once ≥2/3 of the active bonded stake has
-    /// signed it.
+    /// precommitted it.
     ///
     /// Only the proposal's proposer assembles and commits the finalized
     /// artifact immediately. Everyone else applies that artifact via
@@ -979,6 +1153,7 @@ impl Node {
             return Ok(None);
         };
         let (height, hash) = (pending.height, pending.hash);
+        let round = pending.proposal.header.round;
         let proposer = pending.proposal.header.proposer;
         let created_at = pending.created_at;
         let is_proposer = proposer == self.address;
@@ -992,13 +1167,14 @@ impl Node {
         let addresses: Vec<Address> = active.iter().map(|v| v.address).collect();
         let total_bond: u64 = active.iter().map(|v| v.bond).sum();
         let needed = quorum_bond(total_bond);
-        let mut signatures = self.votes.lock().signatures(height, &hash, &addresses);
+        let mut signatures = self
+            .votes
+            .lock()
+            .signatures(height, round, &hash, &addresses);
         let Some(take) = VoteTracker::quorum_prefix(&signatures, &bonds, needed) else {
             return Ok(None);
         };
         // Always seal with the lexicographically first quorum of bonded stake.
-        // That way a late fallback finalizer embeds the same last_signers the
-        // proposer would have, as long as both have seen those voters.
         signatures.truncate(take);
 
         let pending = chain.pending.take().expect("checked above");
@@ -1190,12 +1366,26 @@ impl Node {
         }
         let pending = chain.pending.take().expect("checked above");
         let height = pending.height;
+        let round = pending.proposal.header.round;
+        let hash = pending.hash;
         chain.ledger.rollback(pending.verified.staged);
         remember_proposal(&mut chain.known, &pending.proposal);
-        chain.locked = Some(Locked {
-            proposal: pending.proposal,
-            offered_at: None,
-        });
+        // Precommits lock the height; prevotes do not. Keeping a prevote-only
+        // body as `locked` would force reoffering it forever and recreate the
+        // one-phase deadlock after a partition heals.
+        let precommit_locked = self
+            .votes
+            .lock()
+            .vote_by(height, round, VoteKind::Precommit, &self.address)
+            .is_some_and(|v| v.checkpoint_hash == hash);
+        if precommit_locked {
+            chain.locked = Some(Locked {
+                proposal: pending.proposal,
+                offered_at: None,
+            });
+        } else {
+            chain.locked = None;
+        }
         warn!(
             height,
             "pending checkpoint timed out without quorum; will offer it again"
@@ -1270,11 +1460,18 @@ impl Node {
             _ => false,
         };
         let validators_changed = checkpoint.header.validator_root != chain.ledger.validator_root();
-        if height > local_height.saturating_add(1) && validators_changed && !pinned {
+        let gap = height.saturating_sub(local_height);
+        if gap > sikka_common::constants::WEAK_SUBJECTIVITY_GAP && !pinned {
             return Err(Error::Other(format!(
-                "snapshot changes validators across a gap from {local_height} to {height}; \
-                 set SIKKA_TRUSTED_CHECKPOINT={height}:{checkpoint_hash} after independently \
-                 verifying that checkpoint"
+                "snapshot gap from {local_height} to {height} exceeds weak-subjectivity \
+                 limit {}; set SIKKA_TRUSTED_CHECKPOINT={height}:{checkpoint_hash} after \
+                 independently verifying that checkpoint{}",
+                sikka_common::constants::WEAK_SUBJECTIVITY_GAP,
+                if validators_changed {
+                    " (validator set also changed)"
+                } else {
+                    ""
+                }
             )));
         }
         Ok(pinned)
@@ -1326,8 +1523,8 @@ impl Node {
         )?;
 
         // A one-height transition is authorized by the locally known active
-        // set. Across a larger unchanged-validator gap the same set remains the
-        // trust anchor. A pinned checkpoint may use its committed validator set.
+        // set. Larger gaps always need an operator-pinned trust anchor (see
+        // WEAK_SUBJECTIVITY_GAP), even when validator_root is unchanged.
         let validators: Vec<Validator> = if pinned {
             snapshot.validators.clone()
         } else {
@@ -1585,6 +1782,72 @@ mod tests {
         Transaction::transfer(from, to, amount, nonce, now_secs()).unwrap()
     }
 
+    /// Drive prevotes → precommits → finalize for a solo validator.
+    fn seal_solo(node: &Node, prevote: Vote) -> Finalized {
+        let (follow_up, finalized) = node.handle_vote(prevote).unwrap();
+        if let Some(done) = finalized {
+            return done;
+        }
+        if let Some(precommit) = follow_up.or_else(|| node.maybe_precommit().unwrap()) {
+            let (_, finalized) = node.handle_vote(precommit).unwrap();
+            if let Some(done) = finalized {
+                return done;
+            }
+        }
+        node.finalize_if_quorum()
+            .unwrap()
+            .expect("solo precommit is a quorum of one")
+    }
+
+    /// Exchange votes between a proposer and one other validator until the height seals.
+    fn seal_pair(
+        proposer: &Node,
+        voter: &Node,
+        proposal: &CheckpointProposal,
+        proposer_prevote: Vote,
+    ) -> Finalized {
+        let voter_prevote = voter
+            .handle_proposal(proposal)
+            .unwrap()
+            .vote
+            .expect("voter prevotes for a valid proposal");
+
+        let (mut proposer_pre, finalized) = proposer.handle_vote(voter_prevote.clone()).unwrap();
+        if let Some(done) = finalized {
+            return done;
+        }
+        let (mut voter_pre, finalized) = voter.handle_vote(proposer_prevote).unwrap();
+        if let Some(done) = finalized {
+            return done;
+        }
+
+        if proposer_pre.is_none() {
+            proposer_pre = proposer.maybe_precommit().unwrap();
+        }
+        if voter_pre.is_none() {
+            voter_pre = voter.maybe_precommit().unwrap();
+        }
+
+        if let Some(pre) = voter_pre {
+            let (_, finalized) = proposer.handle_vote(pre).unwrap();
+            if let Some(done) = finalized {
+                return done;
+            }
+        }
+        if let Some(pre) = proposer_pre {
+            let (_, finalized) = voter.handle_vote(pre).unwrap();
+            if let Some(done) = finalized {
+                return done;
+            }
+        }
+
+        proposer
+            .finalize_if_quorum()
+            .unwrap()
+            .or_else(|| voter.finalize_if_quorum().unwrap())
+            .expect("two precommits are a quorum")
+    }
+
     #[test]
     fn opens_a_chain_from_genesis_and_serves_it() {
         let f = solo_node();
@@ -1617,7 +1880,7 @@ mod tests {
             .submit_transaction(transfer(&f.alice, bob, 500, 1))
             .unwrap();
         let (_, vote) = f.node.try_propose().unwrap().unwrap();
-        f.node.handle_vote(vote).unwrap().unwrap();
+        seal_solo(&f.node, vote);
         assert_eq!(f.node.height(), 1);
         drop(f.node);
 
@@ -1643,11 +1906,7 @@ mod tests {
         let (proposal, vote) = f.node.try_propose().unwrap().unwrap();
         assert_eq!(proposal.transactions.len(), 2);
 
-        let finalized = f
-            .node
-            .handle_vote(vote)
-            .unwrap()
-            .expect("our own vote is a quorum of one");
+        let finalized = seal_solo(&f.node, vote);
         assert_eq!(finalized.checkpoint.header.height, 1);
         assert_eq!(finalized.checkpoint.validator_signatures.len(), 1);
 
@@ -1712,7 +1971,10 @@ mod tests {
         conflicting.header.timestamp += 1;
         let response = f.node.handle_proposal(&conflicting).unwrap();
         assert!(!response.accepted);
-        assert!(response.reason.unwrap().contains("already voted"));
+        assert!(
+            response.reason.unwrap().contains("prevoted"),
+            "same-round rival must be refused"
+        );
 
         // Proposing again while a round is open does nothing.
         assert!(f.node.try_propose().unwrap().is_none());
@@ -1753,8 +2015,9 @@ mod tests {
         assert_eq!(again.hash(), first.hash());
         assert_eq!(again_vote, first_vote);
 
-        // A vote that turns up once the staging is back still closes the height.
-        let finalized = f.node.finalize_if_quorum().unwrap().unwrap();
+        // A vote that turns up once the staging is back still closes the height
+        // after prevotes reach quorum and we precommit.
+        let finalized = seal_solo(&f.node, again_vote);
         assert_eq!(finalized.checkpoint.header.height, 1);
         assert_eq!(f.node.height(), 1);
     }
@@ -1778,7 +2041,13 @@ mod tests {
         rival.header.timestamp += 1;
         let response = f.node.handle_proposal(&rival).unwrap();
         assert!(!response.accepted);
-        assert!(response.reason.unwrap().contains("already voted"));
+        let reason = response.reason.unwrap();
+        assert!(
+            reason.contains("prevoted")
+                || reason.contains("precommit")
+                || reason.contains("voted"),
+            "unexpected reason: {reason}"
+        );
     }
 
     #[test]
@@ -1817,7 +2086,10 @@ mod tests {
         rival.header.timestamp += 1;
         let refused = reopened.handle_proposal(&rival).unwrap();
         assert!(!refused.accepted);
-        assert!(refused.reason.unwrap().contains("already voted"));
+        assert!(
+            refused.reason.unwrap().contains("prevoted"),
+            "restored prevote must block a same-round rival"
+        );
 
         // The checkpoint came back with the vote, so this node can offer it again
         // unaided. Were it restoring the vote alone it would be bound to a
@@ -1837,10 +2109,8 @@ mod tests {
         assert_eq!(vote, original_vote);
         assert_eq!(vote.height, height);
 
-        assert_eq!(
-            reopened.finalize_if_quorum().unwrap().unwrap().checkpoint,
-            reopened.checkpoint(height).unwrap()
-        );
+        let finalized = seal_solo(&reopened, vote);
+        assert_eq!(finalized.checkpoint, reopened.checkpoint(height).unwrap());
         assert_eq!(reopened.height(), height);
     }
 
@@ -1873,7 +2143,7 @@ mod tests {
             }
         };
         let voter = 1 - proposer;
-        let voter_vote = pair.nodes[voter]
+        let _ = pair.nodes[voter]
             .handle_proposal(&proposal)
             .unwrap()
             .vote
@@ -1896,15 +2166,12 @@ mod tests {
         assert_eq!(again, proposal);
         assert_eq!(again_vote, proposer_vote);
 
-        // The other validator recognises it and answers with the vote it restored.
-        let answer = restarted[voter].handle_proposal(&again).unwrap();
-        assert!(answer.accepted);
-        assert_eq!(answer.vote, Some(voter_vote.clone()));
-
-        let finalized = restarted[proposer]
-            .handle_vote(voter_vote)
-            .unwrap()
-            .expect("both signatures are a quorum");
+        let finalized = seal_pair(
+            &restarted[proposer],
+            &restarted[voter],
+            &again,
+            again_vote,
+        );
         assert_eq!(finalized.checkpoint.header.height, 1);
         assert_eq!(finalized.checkpoint.hash(), proposal.hash());
 
@@ -1951,12 +2218,7 @@ mod tests {
         // Still the proposer's round: the other node is not due to invent yet.
         assert!(pair.nodes[other].try_propose().unwrap().is_none());
 
-        let accepted = pair.nodes[other].handle_proposal(&proposal).unwrap();
-        assert!(accepted.accepted);
-        let finalized = pair.nodes[proposer]
-            .handle_vote(accepted.vote.unwrap())
-            .unwrap()
-            .expect("both signatures are a quorum");
+        let finalized = seal_pair(&pair.nodes[proposer], &pair.nodes[other], &proposal, vote);
         assert_eq!(finalized.checkpoint.hash(), proposal.hash());
     }
 
@@ -1992,11 +2254,14 @@ mod tests {
             .expect("the known proposal is adopted");
         assert_eq!(adopted.hash(), proposal.hash());
         assert_ne!(adopted_vote.validator, proposer_vote.validator);
+        let _ = adopted_vote;
 
-        let finalized = pair.nodes[proposer]
-            .handle_vote(adopted_vote)
-            .unwrap()
-            .expect("both signatures are a quorum");
+        let finalized = seal_pair(
+            &pair.nodes[proposer],
+            &pair.nodes[other],
+            &proposal,
+            proposer_vote,
+        );
         assert_eq!(finalized.checkpoint.hash(), proposal.hash());
     }
 
@@ -2013,7 +2278,7 @@ mod tests {
         let (_, vote) = f.node.try_propose().unwrap().unwrap();
         let height = vote.height;
         let commitments_path = f.node.config().commitments_path();
-        f.node.handle_vote(vote).unwrap().unwrap();
+        seal_solo(&f.node, vote);
         assert_eq!(f.node.height(), height);
         drop(f.node);
 
@@ -2069,7 +2334,7 @@ mod tests {
     fn votes_from_strangers_are_rejected() {
         let f = solo_node();
         let stranger = sikka_crypto::Keypair::generate().unwrap();
-        let vote = Vote::sign(&stranger, 1, Hash([1u8; 32])).unwrap();
+        let vote = Vote::sign(&stranger, 1, 0, VoteKind::Precommit, Hash([1u8; 32])).unwrap();
         assert!(matches!(
             f.node.handle_vote(vote),
             Err(Error::UnknownVoter(_))
@@ -2079,8 +2344,8 @@ mod tests {
     #[test]
     fn stale_votes_are_ignored_rather_than_erroring() {
         let f = solo_node();
-        let vote = Vote::sign(f.node.keypair(), 0, Hash([1u8; 32])).unwrap();
-        assert!(f.node.handle_vote(vote).unwrap().is_none());
+        let vote = Vote::sign(f.node.keypair(), 0, 0, VoteKind::Precommit, Hash([1u8; 32])).unwrap();
+        assert!(f.node.handle_vote(vote).unwrap().1.is_none());
     }
 
     #[test]
@@ -2094,7 +2359,7 @@ mod tests {
             .submit_transaction(transfer(&f.alice, bob, 1_000, 1))
             .unwrap();
         let (_, vote) = f.node.try_propose().unwrap().unwrap();
-        f.node.handle_vote(vote).unwrap().unwrap();
+        seal_solo(&f.node, vote);
 
         let snapshot = f.node.snapshot().unwrap();
         snapshot.verify().unwrap();

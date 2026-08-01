@@ -43,6 +43,15 @@ pub const UNBONDING_SECS: u64 = 7 * 24 * 60 * 60;
 /// Number of recent checkpoints retained; older ones are pruned.
 pub const CHECKPOINT_HISTORY: u64 = 100;
 
+/// Maximum height gap a node may fast-sync across without an independently
+/// pinned trusted checkpoint.
+///
+/// A gap of one height can still be closed by replaying a finalized checkpoint.
+/// Anything larger requires `SIKKA_TRUSTED_CHECKPOINT`, even when
+/// `validator_root` is unchanged — otherwise a former ≥2/3 set can forge a
+/// long-range fork that keeps the same root and trick a stale node.
+pub const WEAK_SUBJECTIVITY_GAP: u64 = 1;
+
 /// Seconds in a protocol year (365 days) used by the inflation schedule.
 pub const SECONDS_PER_YEAR: u64 = 31_536_000;
 

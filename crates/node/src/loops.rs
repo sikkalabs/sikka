@@ -67,6 +67,18 @@ async fn consensus_loop(node: Arc<Node>, gossip: Arc<Gossip>, client: PeerClient
             Err(e) => warn!(error = %e, "finalizing a staged checkpoint failed"),
         }
 
+        if let Ok(Some(precommit)) = node.maybe_precommit() {
+            gossip.vote(precommit);
+            match node.finalize_if_quorum() {
+                Ok(Some(finalized)) => {
+                    gossip.finalized(finalized);
+                    continue;
+                }
+                Ok(None) => {}
+                Err(e) => warn!(error = %e, "finalizing after precommit failed"),
+            }
+        }
+
         if node.expire_pending(ROUND_TIMEOUT_SECS) {
             continue;
         }
@@ -79,17 +91,22 @@ async fn consensus_loop(node: Arc<Node>, gossip: Arc<Gossip>, client: PeerClient
         match node.try_propose() {
             Ok(Some((proposal, vote))) => {
                 gossip.proposal(proposal);
-                // A single-validator chain reaches quorum on its own vote, and
-                // there is no peer to send it to; check locally either way.
+                gossip.vote(vote);
+                // Prevote may already be a quorum (single-validator or small
+                // committee); advance to precommit/finalize locally either way.
+                if let Ok(Some(precommit)) = node.maybe_precommit() {
+                    gossip.vote(precommit);
+                }
                 match node.finalize_if_quorum() {
                     Ok(Some(finalized)) => gossip.finalized(finalized),
-                    Ok(None) => gossip.vote(vote),
+                    Ok(None) => {}
                     Err(e) => warn!(error = %e, "finalizing our own proposal failed"),
                 }
             }
             Ok(None) => {
-                // An adopt/reoffer may have restaged while votes already sat in
-                // the tracker; check again before the next tick.
+                if let Ok(Some(precommit)) = node.maybe_precommit() {
+                    gossip.vote(precommit);
+                }
                 match node.finalize_if_quorum() {
                     Ok(Some(finalized)) => gossip.finalized(finalized),
                     Ok(None) => {}
@@ -120,9 +137,13 @@ async fn adopt_peer_proposals(node: &Node, gossip: &Gossip, client: &PeerClient)
                         if let Some(vote) = response.vote {
                             node.record_peer_success(&endpoint);
                             gossip.proposal(proposal);
+                            gossip.vote(vote);
+                            if let Ok(Some(precommit)) = node.maybe_precommit() {
+                                gossip.vote(precommit);
+                            }
                             match node.finalize_if_quorum() {
                                 Ok(Some(finalized)) => gossip.finalized(finalized),
-                                Ok(None) => gossip.vote(vote),
+                                Ok(None) => {}
                                 Err(e) => {
                                     warn!(error = %e, "finalizing an adopted proposal failed")
                                 }

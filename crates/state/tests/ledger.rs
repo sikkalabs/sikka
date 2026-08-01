@@ -528,7 +528,7 @@ fn inflation_is_split_by_bond_share() {
 
 #[test]
 fn inflation_pays_every_active_validator_not_just_prior_signers() {
-    use sikka_common::vote::Vote;
+    use sikka_common::vote::{Vote, VoteKind};
 
     let mut f = Fixture::new();
     let alice = Fixture::address(&f.alice);
@@ -555,7 +555,7 @@ fn inflation_pays_every_active_validator_not_just_prior_signers() {
     let mut checkpoint = Checkpoint::new(header);
     let hash = checkpoint.hash();
     checkpoint.add_signature(
-        Vote::sign(&f.validator, height, hash)
+        Vote::sign(&f.validator, height, 0, VoteKind::Precommit, hash)
             .unwrap()
             .into_signature(),
     );

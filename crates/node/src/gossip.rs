@@ -208,8 +208,14 @@ async fn worker(
 /// Feed a vote we received in a proposal response back into consensus.
 fn collect_vote(node: &Arc<Node>, gossip: &Arc<Gossip>, vote: Vote) {
     match node.handle_vote(vote) {
-        Ok(Some(finalized)) => gossip.finalized(finalized),
-        Ok(None) => {}
+        Ok((follow_up, finalized)) => {
+            if let Some(vote) = follow_up {
+                gossip.vote(vote);
+            }
+            if let Some(finalized) = finalized {
+                gossip.finalized(finalized);
+            }
+        }
         Err(e) => debug!(error = %e, "a peer's vote was not usable"),
     }
 }
