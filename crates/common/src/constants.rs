@@ -59,6 +59,7 @@ pub const DEFAULT_CHAIN_ID: &str = "sikka";
 pub const BOOTSTRAP_NODES: &[&str] = &[
     "http://kkd45odg66a5nwubewg4fw5v5wsr6rzbwiclcp6xe3hgtw7q7rdwxuid.onion",
     "http://myqf24ywedvegns2ubwkrmo45zxlbhoo6ss3dbaz4x2flzghlmtq5byd.onion",
+    "http://pmz6d5pq6haxc4nmuohhtr2jvvvl6j2lfiowszkxdpn52gokkq4yg5id.onion",
 ];
 
 /// Signatures required to finalize a checkpoint: `ceil(2/3 * validators)`.
