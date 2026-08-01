@@ -57,8 +57,8 @@ pub const DEFAULT_CHAIN_ID: &str = "sikka";
 
 /// Hardcoded bootstrap peers used when no override is supplied.
 pub const BOOTSTRAP_NODES: &[&str] = &[
-    "http://fpnqdzfixlyx5nuxuyy7nvyxiwxatyzs6hy34vjy27osvhk7vu364gad.onion",
-    "http://xn4knq6t6sgbi6eihkkhandjimic3eu3vhsazcaj5y7ergl224ptrkyd.onion",
+    "http://kkd45odg66a5nwubewg4fw5v5wsr6rzbwiclcp6xe3hgtw7q7rdwxuid.onion",
+    "http://myqf24ywedvegns2ubwkrmo45zxlbhoo6ss3dbaz4x2flzghlmtq5byd.onion",
 ];
 
 /// Signatures required to finalize a checkpoint: `ceil(2/3 * validators)`.
