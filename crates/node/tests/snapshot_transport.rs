@@ -81,7 +81,6 @@ async fn snapshot_download_uses_manifest_and_chunks() {
     let client = PeerClient::new(&ClientConfig {
         timeout: Duration::from_secs(5),
         bulk_timeout: Duration::from_secs(30),
-        socks_proxy: None,
     })
     .unwrap();
 

@@ -2,8 +2,8 @@
 //!
 //! Everything is JSON over plain HTTP. There is no custom framing, no persistent
 //! connection state and no handshake: a node is just an HTTP server, which is
-//! what makes it deployable behind anything — a reverse proxy, a Tor onion
-//! service, a home router.
+//! what makes it deployable behind anything — a reverse proxy, load balancer, or
+//! home router.
 
 use serde::{Deserialize, Serialize};
 

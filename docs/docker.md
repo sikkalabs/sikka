@@ -2,16 +2,17 @@
 
 Image: [`ghcr.io/sikkalabs/sikka:latest`](https://github.com/orgs/sikkalabs/packages) (amd64 + arm64).
 
-**Peer mesh is Tor.** The image runs `tor` + `sikka-node`: a v3 onion is
-derived from the node key and published automatically. Users still use plain
-HTTP on port **64552** (wallet / RPC / landing page) on any node they can reach
-— localhost or LAN HTTP on that node.
+**Peer mesh is clearnet HTTP(S).** The image runs `sikka-node` only. Bootstrap
+defaults to `https://1.sikkalabs.com`, `https://2.sikkalabs.com`, and
+`https://3.sikkalabs.com`. Set `SIKKA_NODE_URL` to the public URL other nodes
+should dial for this instance. Users hit plain HTTP on port **64552** (wallet /
+RPC / landing page) locally, or your reverse-proxied HTTPS hostname.
 
-Data in `/data`, key at `/data/node_key.json`, onion keys under `/data/tor/`,
-and resumable state snapshot chunks under `/data/snapshots/`. Snapshot sync is
-chunked and zstd-compressed so interrupted Tor downloads continue from the last
-verified chunk. Genesis is baked in (supply **19,960,907 SIKKA**: cold admin mint at
-`0x9949…447`, three validators each with **20,000 bonded** + **20,000 liquid**).
+Data in `/data`, key at `/data/node_key.json`, and resumable state snapshot
+chunks under `/data/snapshots/`. Snapshot sync is chunked and zstd-compressed so
+interrupted downloads continue from the last verified chunk. Genesis is baked in
+(supply **19,960,907 SIKKA**: cold admin mint at `0x9949…447`, three validators
+each with **20,000 bonded** + **20,000 liquid**).
 
 ---
 
@@ -31,27 +32,25 @@ docker build -t ghcr.io/sikkalabs/sikka:latest .
 
 ## Run a node (Pi / validator)
 
-Same command for everyone. The container derives `http://….onion` from the key
-and dials peers over Tor SOCKS. Map `64552` only if you want a local wallet UI.
+Map `64552` and advertise the clearnet URL peers should use:
 
 ```bash
 docker run -d --name sikka \
   -p 64552:64552 \
   -v sikka-data:/data \
   -e SIKKA_PRIVATE_KEY=<seed> \
+  -e SIKKA_NODE_URL=https://1.sikkalabs.com \
   ghcr.io/sikkalabs/sikka:latest
 ```
 
 ```bash
-docker logs -f sikka          # shows onion + advertise
-docker exec sikka sikka tor-id
+docker logs -f sikka
 curl -s http://127.0.0.1:64552/api/health
 curl -s http://127.0.0.1:64552/          # landing page
 open http://127.0.0.1:64552/wallet.html  # browser wallet on this node
 ```
 
-Joiners: different `--name`, volume, and seed. The entrypoint always advertises
-the onion derived from that key; peers find each other over Tor.
+Joiners: different `--name`, volume, seed, and `SIKKA_NODE_URL`.
 
 ### Fund and bond (joiners)
 
@@ -75,7 +74,6 @@ the container and signs with `/data/node_key.json`.
 ```bash
 # Identity
 docker exec sikka sikka address
-docker exec sikka sikka tor-id
 docker exec sikka sikka balance
 docker exec sikka sikka balance --verify
 
@@ -106,25 +104,16 @@ docker exec sikka sikka help
 | Variable | Default in image | Meaning |
 | --- | --- | --- |
 | `SIKKA_PRIVATE_KEY` | unset | 32-byte seed or full secret (hex); else a key is created under `/data` |
-| `SIKKA_BOOTSTRAP` | two Tor onions (see `BOOTSTRAP_NODES`) | first peers |
+| `SIKKA_NODE_URL` | `http://$HOSTNAME:64552` | public URL peers should dial for this node (`SIKKA_ADVERTISE` still works as an alias) |
+| `SIKKA_BOOTSTRAP` | `https://1.sikkalabs.com,https://2.sikkalabs.com,https://3.sikkalabs.com` | first peers |
 | `SIKKA_GENESIS` | baked-in if missing | optional custom genesis path |
 | `SIKKA_TRUSTED_CHECKPOINT` | unset | `<height>:<hash>` trust anchor required when fast-sync crosses more than one height |
 | `SIKKA_LOG` | `info` | tracing filter |
-| `SIKKA_TOR_READY_TIMEOUT_SECS` | `300` | how long to wait for Tor `Bootstrapped 100%` before starting the node |
-
-`SIKKA_ADVERTISE` and `SIKKA_TOR_PROXY` are set by the entrypoint from the
-derived onion and local Tor SOCKS — do not set them.
 
 Do not copy `SIKKA_TRUSTED_CHECKPOINT` from an untrusted peer. Verify the
 checkpoint hash independently through multiple operators or a release
 announcement first. Any gap beyond one height needs a pin, even when the
 validator root is unchanged.
-
-Tor writes notices to `/data/tor/notice.log` (not container stdout). Inspect with:
-
-```bash
-docker exec sikka tail -n 50 /data/tor/notice.log
-```
 
 ---
 
@@ -133,5 +122,5 @@ docker exec sikka tail -n 50 /data/tor/notice.log
 ```bash
 docker stop sikka sikka-2
 docker rm sikka sikka-2
-docker volume rm sikka-data sikka-2-data   # deletes chain state + keys + onion
+docker volume rm sikka-data sikka-2-data   # deletes chain state + keys
 ```

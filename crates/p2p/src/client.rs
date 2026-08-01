@@ -1,9 +1,8 @@
 //! Outbound HTTP client.
 //!
-//! One `reqwest` client, reused for every peer. If a SOCKS5 proxy is configured
-//! all traffic goes through it, which is how a node reaches `.onion` peers — the
-//! protocol itself needs no changes, because every message is already signed and
-//! there is nothing to protect in transit beyond metadata.
+//! One `reqwest` client, reused for every peer. Messages are already signed at
+//! the application layer, so plain HTTP(S) is enough — reverse proxies and TLS
+//! terminators are fine.
 
 use std::path::Path;
 use std::time::Duration;
@@ -36,9 +35,6 @@ pub struct ClientConfig {
     /// Timeout for large transfers (proposals, finalized checkpoints, sync,
     /// and each independently resumable snapshot chunk).
     pub bulk_timeout: Duration,
-    /// `socks5h://host:port`, typically a local Tor daemon. `socks5h` resolves
-    /// names through the proxy, which is required for `.onion`.
-    pub socks_proxy: Option<String>,
 }
 
 impl Default for ClientConfig {
@@ -46,7 +42,6 @@ impl Default for ClientConfig {
         Self {
             timeout: Duration::from_secs(10),
             bulk_timeout: Duration::from_secs(BULK_REQUEST_TIMEOUT_SECS),
-            socks_proxy: None,
         }
     }
 }
@@ -61,21 +56,15 @@ pub struct PeerClient {
 
 impl PeerClient {
     pub fn new(config: &ClientConfig) -> Result<Self> {
-        let mut builder = reqwest::Client::builder()
+        let http = reqwest::Client::builder()
             .timeout(config.timeout)
             .connect_timeout(config.timeout)
             // Federation is request/response with many peers; pooling idle
             // sockets to all of them buys nothing.
             .pool_max_idle_per_host(2)
-            .user_agent(concat!("sikka/", env!("CARGO_PKG_VERSION")));
-
-        if let Some(proxy) = &config.socks_proxy {
-            let proxy = reqwest::Proxy::all(proxy)
-                .map_err(|e| Error::Network(format!("invalid SOCKS proxy: {e}")))?;
-            builder = builder.proxy(proxy);
-        }
-
-        let http = builder.build().map_err(|e| Error::Network(e.to_string()))?;
+            .user_agent(concat!("sikka/", env!("CARGO_PKG_VERSION")))
+            .build()
+            .map_err(|e| Error::Network(e.to_string()))?;
         Ok(Self {
             http,
             timeout: config.timeout,
@@ -508,23 +497,12 @@ mod tests {
     }
 
     #[test]
-    fn client_builds_with_and_without_a_proxy() {
+    fn client_builds_with_defaults() {
         PeerClient::new(&ClientConfig::default()).unwrap();
         PeerClient::new(&ClientConfig {
             timeout: Duration::from_secs(5),
             bulk_timeout: Duration::from_secs(60),
-            socks_proxy: Some("socks5h://127.0.0.1:9050".into()),
         })
         .unwrap();
-    }
-
-    #[test]
-    fn an_invalid_proxy_is_reported() {
-        let result = PeerClient::new(&ClientConfig {
-            timeout: Duration::from_secs(5),
-            bulk_timeout: Duration::from_secs(60),
-            socks_proxy: Some("not a url".into()),
-        });
-        assert!(result.is_err());
     }
 }

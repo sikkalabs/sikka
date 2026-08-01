@@ -2,8 +2,7 @@
 //!
 //! Handlers and loops hand work to [`Gossip`] and return immediately; a worker
 //! task does the fanning out. Nothing here blocks a request on a peer being
-//! reachable, which matters when peers are onion services with second-scale
-//! latency and a habit of disappearing.
+//! reachable, so a slow or briefly unreachable peer cannot stall HTTP handlers.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -44,7 +43,6 @@ impl Gossip {
         let client = PeerClient::new(&ClientConfig {
             timeout: node.config().request_timeout,
             bulk_timeout: node.config().bulk_request_timeout,
-            socks_proxy: node.config().socks5_proxy.clone(),
         })?;
         let (jobs, receiver) = mpsc::unbounded_channel();
         let syncing = Arc::new(AtomicBool::new(false));

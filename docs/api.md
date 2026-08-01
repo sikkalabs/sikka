@@ -22,9 +22,9 @@ Request bodies on ordinary endpoints are capped at Axum's default **2 MiB**.
 Bulk federation POSTs (`/api/checkpoint/proposal`, `/api/checkpoint/finalized`,
 `/api/tx/sync`) accept up to **256 MiB** so a full 10,000-transaction checkpoint
 (hex-encoded ML-DSA-87 material) can be gossiped. Clients should allow several
-minutes for those transfers, especially over Tor. State snapshots use a
+minutes for those transfers on slow links. State snapshots use a
 manifest plus independently zstd-compressed 4 MiB chunks. Chunks are hashed,
-bounded, retried, and persisted so an interrupted Tor transfer resumes instead
+bounded, retried, and persisted so an interrupted transfer resumes instead
 of restarting. Reverse proxies in front of a node still need a matching
 `client_max_body_size` (or equivalent) for the bulk POSTs.
 

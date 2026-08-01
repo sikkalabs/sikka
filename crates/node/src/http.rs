@@ -1,7 +1,7 @@
 //! The HTTP surface: federation for peers, JSON-RPC for wallets.
 //!
 //! Both live on one port because a node is meant to be trivially deployable —
-//! one container, one port, optionally one onion address. Peer messages are
+//! one container, one port, one clearnet URL. Peer messages are
 //! authenticated by the signatures inside them, never by who sent the request,
 //! so there is nothing here that needs TLS to be safe.
 

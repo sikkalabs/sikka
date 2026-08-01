@@ -1,7 +1,7 @@
 //! Node configuration.
 //!
 //! A few knobs stay as environment variables (`SIKKA_PRIVATE_KEY`,
-//! `SIKKA_ADVERTISE`, …). Paths, listen port, and “act as a validator” are
+//! `SIKKA_NODE_URL`, …). Paths, listen port, and “act as a validator” are
 //! fixed so a normal `docker run` does not ask the operator to invent
 //! filesystem layout.
 
@@ -39,8 +39,6 @@ pub struct NodeConfig {
     pub advertise: String,
     /// Peers to try when the peer book is empty.
     pub bootstrap: Vec<String>,
-    /// SOCKS5 proxy for outbound requests, e.g. Tor at `127.0.0.1:9050`.
-    pub socks5_proxy: Option<String>,
     /// Take part in consensus when bonded. Always `true` in production.
     pub validator: bool,
     /// Upper bound on transactions held in memory.
@@ -74,7 +72,6 @@ impl Default for NodeConfig {
             listen: SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), DEFAULT_PORT),
             advertise: format!("http://localhost:{DEFAULT_PORT}"),
             bootstrap: BOOTSTRAP_NODES.iter().map(|s| s.to_string()).collect(),
-            socks5_proxy: None,
             validator: true,
             mempool_capacity: 50_000,
             propose_interval: Duration::from_millis(500),
@@ -106,7 +103,8 @@ impl NodeConfig {
 
         config.listen = SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), DEFAULT_PORT);
 
-        config.advertise = match env("SIKKA_ADVERTISE") {
+        // Prefer SIKKA_NODE_URL; SIKKA_ADVERTISE remains as a compatibility alias.
+        config.advertise = match env("SIKKA_NODE_URL").or_else(|| env("SIKKA_ADVERTISE")) {
             Some(url) => normalize_endpoint(&url),
             None => {
                 let host = env("HOSTNAME").unwrap_or_else(|| "localhost".to_string());
@@ -121,9 +119,6 @@ impl NodeConfig {
                 .filter(|s| !s.is_empty())
                 .map(normalize_endpoint)
                 .collect();
-        }
-        if let Some(proxy) = env("SIKKA_TOR_PROXY").or_else(|| env("SIKKA_SOCKS5_PROXY")) {
-            config.socks5_proxy = Some(proxy);
         }
         if let Some(value) = env("SIKKA_TRUSTED_CHECKPOINT") {
             config.trusted_checkpoint = Some(parse_trusted_checkpoint(&value)?);
@@ -243,6 +238,14 @@ mod tests {
         assert!(config.validator);
         assert!(config.private_key.is_none());
         assert!(config.trusted_checkpoint.is_none());
+        assert_eq!(
+            config.bootstrap,
+            vec![
+                "https://1.sikkalabs.com".to_string(),
+                "https://2.sikkalabs.com".to_string(),
+                "https://3.sikkalabs.com".to_string(),
+            ]
+        );
     }
 
     #[test]

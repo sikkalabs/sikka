@@ -4,7 +4,7 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
-description = "SIKKA HTTP federation: mempool, peer discovery, transaction sync, Tor support"
+description = "SIKKA HTTP federation: mempool, peer discovery, transaction sync"
 
 [dependencies]
 sikka-common.workspace = true

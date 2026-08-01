@@ -3,7 +3,7 @@
 //! A node with no `SIKKA_GENESIS` file starts from this document: the admin
 //! address holds the liquid mint (cold treasury — not a validator), and three
 //! operators are funded and bonded at height 0. Peers find each other via the
-//! hardcoded Tor bootstrap list, so genesis validators carry no endpoints.
+//! hardcoded clearnet bootstrap list, so genesis validators carry no endpoints.
 //! Tests and second networks still override it by mounting a different genesis
 //! file.
 

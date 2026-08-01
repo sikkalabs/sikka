@@ -4,7 +4,7 @@
 //! There is no bespoke networking here on purpose. Nodes talk to each other with
 //! `POST`s and `GET`s of signed JSON, so:
 //!
-//! * a node can sit behind any reverse proxy, load balancer or Tor onion service;
+//! * a node can sit behind any reverse proxy or load balancer;
 //! * there are no long-lived connections to manage or reconnect;
 //! * transport encryption is unnecessary, because every message carries an
 //!   ML-DSA-87 signature over its own contents.

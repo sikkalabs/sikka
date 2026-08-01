@@ -4,8 +4,7 @@
 //! are the same 32-byte address. Announcements are signed, so a node can never
 //! be told that some other node lives at an attacker's endpoint, and there is
 //! nothing to encrypt in transit — every message is authenticated at the
-//! application layer, which is why plain HTTP is enough (and why Tor can be
-//! layered underneath without changing anything).
+//! application layer, which is why plain HTTP(S) is enough.
 
 use std::collections::HashMap;
 
@@ -29,7 +28,7 @@ pub const MAX_FAILURES: u32 = 10;
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PeerAnnounce {
     pub public_key: PublicKey,
-    /// Base URL, e.g. `http://sikka-1.example.com:8080` or an `.onion` address.
+    /// Base URL, e.g. `https://1.sikkalabs.com` or `http://node:64552`.
     pub endpoint: String,
     pub timestamp: u64,
     pub signature: Signature,
@@ -104,12 +103,6 @@ pub struct Peer {
     pub last_seen: u64,
     #[serde(default)]
     pub failures: u32,
-}
-
-impl Peer {
-    pub fn is_onion(&self) -> bool {
-        self.endpoint.contains(".onion")
-    }
 }
 
 /// The set of peers a node talks to.
@@ -402,14 +395,4 @@ mod tests {
         assert_eq!(book.len(), 3);
     }
 
-    #[test]
-    fn onion_endpoints_are_recognised() {
-        let peer = Peer {
-            address: Address([1u8; 32]),
-            endpoint: "http://abcdef.onion:8080".into(),
-            last_seen: NOW,
-            failures: 0,
-        };
-        assert!(peer.is_onion());
-    }
 }

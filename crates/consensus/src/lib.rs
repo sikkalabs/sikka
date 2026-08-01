@@ -35,7 +35,7 @@ use sikka_common::validator::Validator;
 /// the turn passes to the next one.
 ///
 /// Short enough that a dead validator costs seconds rather than minutes; long
-/// enough that a slow node (an onion service, a Raspberry Pi) is not skipped
+/// enough that a slow node (a Raspberry Pi, a busy VPS) is not skipped
 /// merely for being slow.
 pub const PROPOSER_TIMEOUT_SECS: u64 = 10;
 

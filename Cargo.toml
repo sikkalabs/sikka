@@ -36,7 +36,7 @@ sha3 = "0.10"
 redb = "2"
 axum = { version = "0.8", default-features = false, features = ["http1", "json", "tokio", "query"] }
 tokio = { version = "1", default-features = false, features = ["rt-multi-thread", "macros", "net", "time", "signal", "sync", "fs"] }
-reqwest = { version = "0.12", default-features = false, features = ["json", "socks", "rustls-tls"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 hex = "0.4"
@@ -47,9 +47,6 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 parking_lot = "0.12"
 tempfile = "3"
-ed25519-dalek = { version = "2.1", default-features = false, features = ["std", "zeroize"] }
-sha2 = "0.10"
-data-encoding = "2"
 zstd = "0.13.3"
 
 

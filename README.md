@@ -22,8 +22,8 @@ every transfer ever made.
 - **No history** — finalized payments are thrown away. Only balances and the
   latest checkpoint remain on-chain.
 - **Private by default** — without a permanent tx log, past payments are not
-  publicly reconstructable. **Tor is the peer mesh**: every node image publishes
-  a v3 onion derived from its key; users still open any node over plain HTTP.
+  publicly reconstructable. Peer mesh is plain HTTP(S) between nodes; wallets
+  talk to any reachable node the same way.
 - **Built for micropayments** — feeless transfers and regenerating spam credits (+1/min, cap 100) make high-frequency, low-value payments practical. Fresh accounts start at 0 credits to prevent funding-sybil attacks.
 - **Agent-ready** — plain HTTP + JSON-RPC. One endpoint to check balances,
   send, and bond — no heavy SDKs required.
@@ -35,8 +35,8 @@ every transfer ever made.
 - **Non-punitive consensus** — round-robin proposer rotation with automatic 10-second timeout fallbacks. Downtime never burns stake; only double-signing (equivocation) is slashed. Inflation each round is shared across the active bonded set (bond-weighted), independent of which exact quorum certificate sealed the prior checkpoint.
 - **Efficient mempool sync** — nodes exchange compact Bloom filters during peer reconciliation to request only missing transactions, minimizing network bandwidth.
 - **Pure-Rust storage** — built on `redb` (ACID key-value store) with 3 fixed tables (`accounts`, `validators`, `meta`), requiring zero C/C++ database dependencies.
-- **Simple ops** — one container (Tor + node), one optional published port for
-  wallets. Docker is the production path.
+- **Simple ops** — one container, one published port, set `SIKKA_NODE_URL` to
+  your public clearnet URL. Docker is the production path.
 
 ---
 
@@ -47,7 +47,7 @@ every transfer ever made.
 | Genesis supply | **19,960,907** SIKKA (1 SIKKA = 10⁹ CHILLAR) |
 | Consensus | Checkpoint voting · ≥2/3 bonded stake · round-robin proposer |
 | Spam control | Credits (+1/min, cap 100, 1 per tx) |
-| Transport | Signed JSON over HTTP · Tor onion mesh between nodes |
+| Transport | Signed JSON over HTTP(S) · clearnet peer mesh |
 | Repo | [github.com/sikkalabs/sikka](https://github.com/sikkalabs/sikka) |
 
 ---

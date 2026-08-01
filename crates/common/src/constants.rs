@@ -27,7 +27,7 @@ pub const MAX_HTTP_BODY_BYTES: usize = 256 * 1024 * 1024;
 
 /// Outbound timeout for large peer transfers (proposals, finalized
 /// checkpoints, mempool sync, snapshots). Short timeouts are fine for votes
-/// and single transactions; bulk payloads over Tor need minutes.
+/// and single transactions; bulk payloads can take minutes on slow links.
 pub const BULK_REQUEST_TIMEOUT_SECS: u64 = 300;
 
 /// Transactions whose signed timestamp differs from a validator's wall clock by
@@ -79,9 +79,9 @@ pub const DEFAULT_CHAIN_ID: &str = "sikka";
 
 /// Hardcoded bootstrap peers used when no override is supplied.
 pub const BOOTSTRAP_NODES: &[&str] = &[
-    "http://kkd45odg66a5nwubewg4fw5v5wsr6rzbwiclcp6xe3hgtw7q7rdwxuid.onion",
-    "http://myqf24ywedvegns2ubwkrmo45zxlbhoo6ss3dbaz4x2flzghlmtq5byd.onion",
-    "http://pmz6d5pq6haxc4nmuohhtr2jvvvl6j2lfiowszkxdpn52gokkq4yg5id.onion",
+    "https://1.sikkalabs.com",
+    "https://2.sikkalabs.com",
+    "https://3.sikkalabs.com",
 ];
 
 /// Bonded stake required to finalize a checkpoint: `ceil(2/3 * total_active_bond)`.
