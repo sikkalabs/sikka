@@ -52,6 +52,19 @@ pub const CHECKPOINT_HISTORY: u64 = 100;
 /// long-range fork that keeps the same root and trick a stale node.
 pub const WEAK_SUBJECTIVITY_GAP: u64 = 1;
 
+/// Votes more than this many heights ahead of the local tip are ignored.
+///
+/// Stops a bonded key from filling the vote tracker with arbitrary future
+/// heights (memory + ML-DSA verification spam).
+pub const MAX_VOTE_HEIGHT_AHEAD: u64 = 1;
+
+/// Maximum equivocation proofs accepted in one checkpoint proposal.
+pub const MAX_EVIDENCE_PER_CHECKPOINT: usize = 64;
+
+/// Soft cap on JSON/text bodies for non-bulk peer responses (votes, health,
+/// single-tx receipts). Bulk routes still use [`MAX_HTTP_BODY_BYTES`].
+pub const MAX_RPC_BODY_BYTES: usize = 2 * 1024 * 1024;
+
 /// Seconds in a protocol year (365 days) used by the inflation schedule.
 pub const SECONDS_PER_YEAR: u64 = 31_536_000;
 

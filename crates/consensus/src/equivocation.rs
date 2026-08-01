@@ -7,7 +7,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use sikka_common::bytes::Address;
+use sikka_common::bytes::{Address, Hash};
 use sikka_common::codec::{Decode, Encode, Reader, Writer};
 use sikka_common::error::{Error, Result};
 use sikka_common::vote::Vote;
@@ -24,7 +24,7 @@ pub struct Equivocation {
 impl Equivocation {
     /// Build evidence from two votes, normalising their order so the same pair
     /// always produces identical evidence.
-    pub fn new(a: Vote, b: Vote) -> Result<Self> {
+    pub fn new(a: Vote, b: Vote, genesis_fingerprint: &Hash) -> Result<Self> {
         let (first, second) = if a.checkpoint_hash <= b.checkpoint_hash {
             (a, b)
         } else {
@@ -36,12 +36,12 @@ impl Equivocation {
             first,
             second,
         };
-        evidence.verify()?;
+        evidence.verify(genesis_fingerprint)?;
         Ok(evidence)
     }
 
     /// Check that this really is proof of equivocation.
-    pub fn verify(&self) -> Result<()> {
+    pub fn verify(&self, genesis_fingerprint: &Hash) -> Result<()> {
         if self.first.validator != self.validator || self.second.validator != self.validator {
             return Err(Error::Other(
                 "evidence votes are from different validators".into(),
@@ -67,8 +67,8 @@ impl Equivocation {
                 "evidence votes agree; that is not equivocation".into(),
             ));
         }
-        self.first.verify()?;
-        self.second.verify()?;
+        self.first.verify(genesis_fingerprint)?;
+        self.second.verify(genesis_fingerprint)?;
         Ok(())
     }
 }
@@ -99,64 +99,68 @@ mod tests {
     use sikka_common::vote::VoteKind;
     use sikka_crypto::Keypair;
 
+    fn fp() -> Hash {
+        Hash([0x42u8; 32])
+    }
+
     #[test]
     fn conflicting_same_step_votes_are_evidence() {
         let kp = Keypair::generate().unwrap();
-        let a = Vote::sign(&kp, 5, 0, VoteKind::Prevote, Hash([1u8; 32])).unwrap();
-        let b = Vote::sign(&kp, 5, 0, VoteKind::Prevote, Hash([2u8; 32])).unwrap();
-        let evidence = Equivocation::new(a.clone(), b.clone()).unwrap();
-        evidence.verify().unwrap();
+        let a = Vote::sign(&kp, fp(), 5, 0, VoteKind::Prevote, Hash([1u8; 32])).unwrap();
+        let b = Vote::sign(&kp, fp(), 5, 0, VoteKind::Prevote, Hash([2u8; 32])).unwrap();
+        let evidence = Equivocation::new(a.clone(), b.clone(), &fp()).unwrap();
+        evidence.verify(&fp()).unwrap();
         assert_eq!(evidence.validator, a.validator);
         assert_eq!(evidence.height, 5);
-        assert_eq!(Equivocation::new(b, a).unwrap(), evidence);
+        assert_eq!(Equivocation::new(b, a, &fp()).unwrap(), evidence);
     }
 
     #[test]
     fn agreeing_votes_are_not_evidence() {
         let kp = Keypair::generate().unwrap();
         let hash = Hash([1u8; 32]);
-        let a = Vote::sign(&kp, 5, 0, VoteKind::Prevote, hash).unwrap();
-        let b = Vote::sign(&kp, 5, 0, VoteKind::Prevote, hash).unwrap();
-        assert!(Equivocation::new(a, b).is_err());
+        let a = Vote::sign(&kp, fp(), 5, 0, VoteKind::Prevote, hash).unwrap();
+        let b = Vote::sign(&kp, fp(), 5, 0, VoteKind::Prevote, hash).unwrap();
+        assert!(Equivocation::new(a, b, &fp()).is_err());
     }
 
     #[test]
     fn different_rounds_are_not_equivocation() {
         let kp = Keypair::generate().unwrap();
-        let a = Vote::sign(&kp, 5, 0, VoteKind::Prevote, Hash([1u8; 32])).unwrap();
-        let b = Vote::sign(&kp, 5, 1, VoteKind::Prevote, Hash([2u8; 32])).unwrap();
-        assert!(Equivocation::new(a, b).is_err());
+        let a = Vote::sign(&kp, fp(), 5, 0, VoteKind::Prevote, Hash([1u8; 32])).unwrap();
+        let b = Vote::sign(&kp, fp(), 5, 1, VoteKind::Prevote, Hash([2u8; 32])).unwrap();
+        assert!(Equivocation::new(a, b, &fp()).is_err());
     }
 
     #[test]
     fn prevote_and_precommit_are_not_equivocation() {
         let kp = Keypair::generate().unwrap();
-        let a = Vote::sign(&kp, 5, 0, VoteKind::Prevote, Hash([1u8; 32])).unwrap();
-        let b = Vote::sign(&kp, 5, 0, VoteKind::Precommit, Hash([2u8; 32])).unwrap();
-        assert!(Equivocation::new(a, b).is_err());
+        let a = Vote::sign(&kp, fp(), 5, 0, VoteKind::Prevote, Hash([1u8; 32])).unwrap();
+        let b = Vote::sign(&kp, fp(), 5, 0, VoteKind::Precommit, Hash([2u8; 32])).unwrap();
+        assert!(Equivocation::new(a, b, &fp()).is_err());
     }
 
     #[test]
     fn votes_at_different_heights_are_not_evidence() {
         let kp = Keypair::generate().unwrap();
-        let a = Vote::sign(&kp, 5, 0, VoteKind::Prevote, Hash([1u8; 32])).unwrap();
-        let b = Vote::sign(&kp, 6, 0, VoteKind::Prevote, Hash([2u8; 32])).unwrap();
-        assert!(Equivocation::new(a, b).is_err());
+        let a = Vote::sign(&kp, fp(), 5, 0, VoteKind::Prevote, Hash([1u8; 32])).unwrap();
+        let b = Vote::sign(&kp, fp(), 6, 0, VoteKind::Prevote, Hash([2u8; 32])).unwrap();
+        assert!(Equivocation::new(a, b, &fp()).is_err());
     }
 
     #[test]
     fn votes_from_different_validators_are_not_evidence() {
         let a_kp = Keypair::generate().unwrap();
         let b_kp = Keypair::generate().unwrap();
-        let a = Vote::sign(&a_kp, 5, 0, VoteKind::Prevote, Hash([1u8; 32])).unwrap();
-        let b = Vote::sign(&b_kp, 5, 0, VoteKind::Prevote, Hash([2u8; 32])).unwrap();
-        assert!(Equivocation::new(a, b).is_err());
+        let a = Vote::sign(&a_kp, fp(), 5, 0, VoteKind::Prevote, Hash([1u8; 32])).unwrap();
+        let b = Vote::sign(&b_kp, fp(), 5, 0, VoteKind::Prevote, Hash([2u8; 32])).unwrap();
+        assert!(Equivocation::new(a, b, &fp()).is_err());
     }
 
     #[test]
     fn forged_evidence_is_rejected() {
         let victim = Keypair::generate().unwrap();
-        let real = Vote::sign(&victim, 5, 0, VoteKind::Prevote, Hash([1u8; 32])).unwrap();
+        let real = Vote::sign(&victim, fp(), 5, 0, VoteKind::Prevote, Hash([1u8; 32])).unwrap();
         let mut fake = real.clone();
         fake.checkpoint_hash = Hash([2u8; 32]);
         let evidence = Equivocation {
@@ -165,15 +169,15 @@ mod tests {
             first: real,
             second: fake,
         };
-        assert_eq!(evidence.verify().unwrap_err(), Error::InvalidSignature);
+        assert_eq!(evidence.verify(&fp()).unwrap_err(), Error::InvalidSignature);
     }
 
     #[test]
     fn evidence_serialises() {
         let kp = Keypair::generate().unwrap();
-        let a = Vote::sign(&kp, 1, 0, VoteKind::Precommit, Hash([1u8; 32])).unwrap();
-        let b = Vote::sign(&kp, 1, 0, VoteKind::Precommit, Hash([2u8; 32])).unwrap();
-        let evidence = Equivocation::new(a, b).unwrap();
+        let a = Vote::sign(&kp, fp(), 1, 0, VoteKind::Precommit, Hash([1u8; 32])).unwrap();
+        let b = Vote::sign(&kp, fp(), 1, 0, VoteKind::Precommit, Hash([2u8; 32])).unwrap();
+        let evidence = Equivocation::new(a, b, &fp()).unwrap();
         let json = serde_json::to_string(&evidence).unwrap();
         let parsed: Equivocation = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed, evidence);

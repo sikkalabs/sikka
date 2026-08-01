@@ -12,7 +12,7 @@ pub mod proof;
 pub use keystore::Keystore;
 pub use proof::{verify_account_proof, VerifiedBalance};
 
-use sikka_common::bytes::Address;
+use sikka_common::bytes::{Address, Hash};
 use sikka_common::error::Result;
 use sikka_common::transaction::{Transaction, TxKind};
 
@@ -54,12 +54,16 @@ impl Wallet {
     /// `timestamp` is signed and becomes the credit-regeneration clock for the
     /// sending account, so it must be the wallet's honest view of now: a node
     /// rejects anything more than five minutes from its own clock.
+    ///
+    /// `genesis_fingerprint` binds the signature to one chain so the same key
+    /// cannot reuse a payment across forks.
     pub fn transfer(
         &self,
         to: Address,
         amount: u64,
         nonce: u64,
         timestamp: u64,
+        genesis_fingerprint: Hash,
     ) -> Result<Transaction> {
         Transaction::sign(
             &self.keypair,
@@ -68,15 +72,27 @@ impl Wallet {
             amount,
             nonce,
             timestamp,
+            genesis_fingerprint,
         )
     }
 
-    pub fn bond(&self, amount: u64, nonce: u64, timestamp: u64) -> Result<Transaction> {
-        Transaction::bond(&self.keypair, amount, nonce, timestamp)
+    pub fn bond(
+        &self,
+        amount: u64,
+        nonce: u64,
+        timestamp: u64,
+        genesis_fingerprint: Hash,
+    ) -> Result<Transaction> {
+        Transaction::bond(&self.keypair, amount, nonce, timestamp, genesis_fingerprint)
     }
 
-    pub fn unbond(&self, nonce: u64, timestamp: u64) -> Result<Transaction> {
-        Transaction::unbond(&self.keypair, nonce, timestamp)
+    pub fn unbond(
+        &self,
+        nonce: u64,
+        timestamp: u64,
+        genesis_fingerprint: Hash,
+    ) -> Result<Transaction> {
+        Transaction::unbond(&self.keypair, nonce, timestamp, genesis_fingerprint)
     }
 }
 
@@ -96,16 +112,17 @@ mod tests {
     fn signs_transactions_it_can_verify() {
         let wallet = Wallet::generate().unwrap();
         let to = Address([9u8; 32]);
+        let fp = Hash([0x42u8; 32]);
 
-        let transfer = wallet.transfer(to, 100, 0, 1_700_000_000).unwrap();
+        let transfer = wallet.transfer(to, 100, 0, 1_700_000_000, fp).unwrap();
         assert_eq!(transfer.from, wallet.address());
         transfer.verify_signature().unwrap();
 
-        let bond = wallet.bond(1_000, 1, 1_700_000_000).unwrap();
+        let bond = wallet.bond(1_000, 1, 1_700_000_000, fp).unwrap();
         assert_eq!(bond.kind, TxKind::Bond);
         bond.verify_signature().unwrap();
 
-        let unbond = wallet.unbond(2, 1_700_000_000).unwrap();
+        let unbond = wallet.unbond(2, 1_700_000_000, fp).unwrap();
         assert_eq!(unbond.kind, TxKind::Unbond);
         assert_eq!(unbond.amount, 0);
         unbond.verify_signature().unwrap();

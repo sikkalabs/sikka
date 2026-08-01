@@ -107,6 +107,42 @@ pub struct Staged {
     validators_undo: UndoLog,
 }
 
+/// Rolls staged Merkle changes back on drop unless [`Self::disarm`]ed.
+///
+/// Use this around any fallible work that happens after [`Ledger::stage`] and
+/// before the staged value is installed into `Pending` or committed. A sign or
+/// disk failure then cannot leave the in-memory trees ahead of committed meta.
+pub struct StageGuard<'a> {
+    ledger: &'a mut Ledger,
+    staged: Option<Staged>,
+}
+
+impl<'a> StageGuard<'a> {
+    pub fn arm(ledger: &'a mut Ledger, staged: Staged) -> Self {
+        Self {
+            ledger,
+            staged: Some(staged),
+        }
+    }
+
+    pub fn staged(&self) -> &Staged {
+        self.staged.as_ref().expect("stage guard is armed")
+    }
+
+    /// Transfer ownership to the caller; drop will no longer roll back.
+    pub fn disarm(mut self) -> Staged {
+        self.staged.take().expect("stage guard is armed")
+    }
+}
+
+impl Drop for StageGuard<'_> {
+    fn drop(&mut self) {
+        if let Some(staged) = self.staged.take() {
+            self.ledger.rollback(staged);
+        }
+    }
+}
+
 /// Outcome of opening a database against a genesis file.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum GenesisOutcome {
@@ -363,6 +399,7 @@ impl Ledger {
             round: 0,
             total_supply: self.meta.total_supply,
             total_bonded: self.meta.total_bonded,
+            genesis_fingerprint: self.meta.genesis_fingerprint,
         };
         // Genesis needs no signatures: every node derives it from the same file
         // and refuses to run against a database built from a different one.
@@ -844,6 +881,7 @@ impl Ledger {
             round,
             total_supply: staged.outcome.total_supply,
             total_bonded: staged.outcome.total_bonded,
+            genesis_fingerprint: self.meta.genesis_fingerprint,
         }
     }
 

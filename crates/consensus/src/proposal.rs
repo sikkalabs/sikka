@@ -26,16 +26,19 @@ use crate::equivocation::Equivocation;
 use crate::{proposer_for_round, PROPOSER_TIMEOUT_SECS};
 
 /// Domain tag for the proposer's signature over a proposal.
-pub const PROPOSAL_TAG: &[u8] = b"SIKKA/proposal/v1";
+pub const PROPOSAL_TAG: &[u8] = b"SIKKA/proposal/v2";
 
-/// Bytes the proposer signs: domain tag + checkpoint header hash.
+/// Bytes the proposer signs: domain tag + genesis fingerprint + header hash.
 ///
 /// The header already commits to `tx_root`, evidence-affecting state roots, and
 /// round/proposer, so one signature authenticates the whole body without hashing
-/// every transaction again up front.
-pub fn proposal_signing_bytes(header_hash: &Hash) -> Vec<u8> {
-    let mut w = Writer::with_capacity(40);
-    w.raw(PROPOSAL_TAG).raw(header_hash.as_bytes());
+/// every transaction again up front. The genesis fingerprint binds the proposal
+/// to a single chain.
+pub fn proposal_signing_bytes(genesis_fingerprint: &Hash, header_hash: &Hash) -> Vec<u8> {
+    let mut w = Writer::with_capacity(72);
+    w.raw(PROPOSAL_TAG)
+        .raw(genesis_fingerprint.as_bytes())
+        .raw(header_hash.as_bytes());
     w.finish()
 }
 
@@ -74,7 +77,10 @@ impl CheckpointProposal {
                 actual: public_key.address(),
             });
         }
-        self.proposer_signature = Signature::new(keypair.sign(&proposal_signing_bytes(&self.hash()))?);
+        self.proposer_signature = Signature::new(keypair.sign(&proposal_signing_bytes(
+            &self.header.genesis_fingerprint,
+            &self.hash(),
+        ))?);
         Ok(())
     }
 
@@ -83,7 +89,8 @@ impl CheckpointProposal {
         if public_key.address() != self.header.proposer {
             return Err(Error::AddressKeyMismatch);
         }
-        let payload = proposal_signing_bytes(&self.hash());
+        let payload =
+            proposal_signing_bytes(&self.header.genesis_fingerprint, &self.hash());
         if !sikka_crypto::verify(
             public_key.as_slice(),
             &payload,
@@ -158,9 +165,17 @@ pub fn canonical_order(mut transactions: Vec<Transaction>) -> Vec<Transaction> {
 
 /// Validate evidence and reduce it to the set of validators to slash.
 fn slashings(ledger: &Ledger, evidence: &[Equivocation]) -> Result<Vec<Address>> {
+    if evidence.len() > sikka_common::constants::MAX_EVIDENCE_PER_CHECKPOINT {
+        return Err(Error::Other(format!(
+            "proposal carries {} evidence items; max is {}",
+            evidence.len(),
+            sikka_common::constants::MAX_EVIDENCE_PER_CHECKPOINT
+        )));
+    }
     let mut out: Vec<Address> = Vec::new();
+    let genesis_fingerprint = &ledger.meta().genesis_fingerprint;
     for item in evidence {
-        item.verify()?;
+        item.verify(genesis_fingerprint)?;
         // Only bonded validators can be slashed; evidence against anyone else is
         // noise, not an offence.
         match ledger.validator(&item.validator)? {
@@ -361,6 +376,13 @@ pub fn verify_proposal_with(
             "checkpoint carries neither transactions nor evidence".into(),
         ));
     }
+    let max_txs = ledger.checkpoint_tx_interval() as usize;
+    if proposal.transactions.len() > max_txs {
+        return Err(Error::Other(format!(
+            "proposal carries {} transactions; checkpoint interval allows at most {max_txs}",
+            proposal.transactions.len()
+        )));
+    }
     if header.tx_count as usize != proposal.transactions.len() {
         return Err(Error::Other(format!(
             "header claims {} transactions but carries {}",
@@ -385,6 +407,10 @@ pub fn verify_proposal_with(
         ));
     }
 
+    if header.genesis_fingerprint != ledger.meta().genesis_fingerprint {
+        return Err(Error::GenesisMismatch);
+    }
+
     for (tx, id) in proposal.transactions.iter().zip(&ids) {
         // Always bind address↔key, even when the id is already cached: a
         // proposer must not swap a different public key onto a mempool
@@ -392,6 +418,7 @@ pub fn verify_proposal_with(
         if tx.public_key.address() != tx.from {
             return Err(Error::AddressKeyMismatch);
         }
+        tx.check_genesis(&ledger.meta().genesis_fingerprint)?;
         if !verified_signatures.contains(id) {
             tx.verify_signature()?;
         }
@@ -451,6 +478,10 @@ mod tests {
     use sikka_common::vote::{Vote, VoteKind};
     use sikka_crypto::Keypair;
 
+    fn fp() -> Hash {
+        Hash([0x42u8; 32])
+    }
+
     #[test]
     fn a_proposal_survives_a_codec_roundtrip() {
         let kp = Keypair::generate().unwrap();
@@ -467,14 +498,16 @@ mod tests {
                 round: 3,
                 total_supply: 1_000_000,
                 total_bonded: 1_000,
+                genesis_fingerprint: Hash([0x42u8; 32]),
             },
             transactions: vec![
-                Transaction::transfer(&kp, Address([6u8; 32]), 1, 0, 1_700_000_000).unwrap(),
-                Transaction::transfer(&kp, Address([7u8; 32]), 2, 1, 1_700_000_000).unwrap(),
+                Transaction::transfer(&kp, Address([6u8; 32]), 1, 0, 1_700_000_000, fp()).unwrap(),
+                Transaction::transfer(&kp, Address([7u8; 32]), 2, 1, 1_700_000_000, fp()).unwrap(),
             ],
             evidence: vec![Equivocation::new(
-                Vote::sign(&kp, 9, 0, VoteKind::Precommit, Hash([8u8; 32])).unwrap(),
-                Vote::sign(&kp, 9, 0, VoteKind::Precommit, Hash([9u8; 32])).unwrap(),
+                Vote::sign(&kp, fp(), 9, 0, VoteKind::Precommit, Hash([8u8; 32])).unwrap(),
+                Vote::sign(&kp, fp(), 9, 0, VoteKind::Precommit, Hash([9u8; 32])).unwrap(),
+                &fp(),
             )
             .unwrap()],
             proposer_signature: Signature::default(),
@@ -509,6 +542,7 @@ mod tests {
                 round: 0,
                 total_supply: 1,
                 total_bonded: 1,
+                genesis_fingerprint: Hash([0x42u8; 32]),
             },
             transactions: Vec::new(),
             evidence: Vec::new(),
@@ -523,9 +557,9 @@ mod tests {
     #[test]
     fn canonical_order_sorts_and_deduplicates() {
         let kp = Keypair::generate().unwrap();
-        let a = Transaction::transfer(&kp, Address([1u8; 32]), 1, 0, 1_000).unwrap();
-        let b = Transaction::transfer(&kp, Address([2u8; 32]), 2, 1, 1_000).unwrap();
-        let c = Transaction::transfer(&kp, Address([3u8; 32]), 3, 2, 1_000).unwrap();
+        let a = Transaction::transfer(&kp, Address([1u8; 32]), 1, 0, 1_000, fp()).unwrap();
+        let b = Transaction::transfer(&kp, Address([2u8; 32]), 2, 1, 1_000, fp()).unwrap();
+        let c = Transaction::transfer(&kp, Address([3u8; 32]), 3, 2, 1_000, fp()).unwrap();
 
         let ordered = canonical_order(vec![c.clone(), a.clone(), b.clone(), a.clone()]);
         assert_eq!(ordered.len(), 3, "the duplicate was dropped");
@@ -550,7 +584,7 @@ mod tests {
         let mut transactions = Vec::new();
         for kp in [&first, &second] {
             for nonce in 0..3 {
-                transactions.push(Transaction::transfer(kp, target, 1, nonce, 1_000).unwrap());
+                transactions.push(Transaction::transfer(kp, target, 1, nonce, 1_000, fp()).unwrap());
             }
         }
         transactions.reverse();

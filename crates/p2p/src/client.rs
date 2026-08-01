@@ -10,7 +10,7 @@ use std::time::Duration;
 
 use sikka_common::bytes::Hash;
 use sikka_common::checkpoint::Checkpoint;
-use sikka_common::constants::BULK_REQUEST_TIMEOUT_SECS;
+use sikka_common::constants::{BULK_REQUEST_TIMEOUT_SECS, MAX_HTTP_BODY_BYTES, MAX_RPC_BODY_BYTES};
 use sikka_common::error::{Error, Result};
 use sikka_common::transaction::Transaction;
 use sikka_common::vote::Vote;
@@ -117,6 +117,11 @@ impl PeerClient {
         body: &B,
         timeout: Duration,
     ) -> Result<R> {
+        let maximum = if timeout >= self.bulk_timeout {
+            MAX_HTTP_BODY_BYTES
+        } else {
+            MAX_RPC_BODY_BYTES
+        };
         let response = self
             .http
             .post(Self::url(endpoint, path))
@@ -125,7 +130,7 @@ impl PeerClient {
             .send()
             .await
             .map_err(|e| Error::Network(format!("{path} to {endpoint}: {e}")))?;
-        Self::decode(response, endpoint, path).await
+        Self::decode(response, endpoint, path, maximum).await
     }
 
     async fn get<R: serde::de::DeserializeOwned>(&self, endpoint: &str, path: &str) -> Result<R> {
@@ -138,6 +143,11 @@ impl PeerClient {
         path: &str,
         timeout: Duration,
     ) -> Result<R> {
+        let maximum = if timeout >= self.bulk_timeout {
+            MAX_HTTP_BODY_BYTES
+        } else {
+            MAX_RPC_BODY_BYTES
+        };
         let response = self
             .http
             .get(Self::url(endpoint, path))
@@ -145,7 +155,7 @@ impl PeerClient {
             .send()
             .await
             .map_err(|e| Error::Network(format!("{path} from {endpoint}: {e}")))?;
-        Self::decode(response, endpoint, path).await
+        Self::decode(response, endpoint, path, maximum).await
     }
 
     async fn get_bytes_timed(
@@ -212,12 +222,34 @@ impl PeerClient {
         response: reqwest::Response,
         endpoint: &str,
         path: &str,
+        maximum: usize,
     ) -> Result<R> {
         let status = response.status();
-        let body = response
-            .text()
+        if response
+            .content_length()
+            .is_some_and(|length| length > maximum as u64)
+        {
+            return Err(Error::Network(format!(
+                "{endpoint}{path} exceeds the {maximum}-byte response limit"
+            )));
+        }
+        let mut body = Vec::new();
+        let mut response = response;
+        while let Some(chunk) = response
+            .chunk()
             .await
-            .map_err(|e| Error::Network(e.to_string()))?;
+            .map_err(|e| Error::Network(e.to_string()))?
+        {
+            if body.len().saturating_add(chunk.len()) > maximum {
+                return Err(Error::Network(format!(
+                    "{endpoint}{path} exceeds the {maximum}-byte response limit"
+                )));
+            }
+            body.extend_from_slice(&chunk);
+        }
+        let body = String::from_utf8(body).map_err(|e| {
+            Error::Network(format!("{endpoint}{path} sent non-UTF8 body: {e}"))
+        })?;
         if !status.is_success() {
             // Surface the peer's own reason when it sent one.
             let reason = serde_json::from_str::<crate::wire::ErrorBody>(&body)

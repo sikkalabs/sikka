@@ -675,6 +675,7 @@ mod tests {
             round: 0,
             total_supply: 100,
             total_bonded: 10,
+            genesis_fingerprint: Hash([0x42u8; 32]),
         })
     }
 

@@ -181,16 +181,17 @@ mod tests {
                 round: 0,
                 total_supply: 1_000_000,
                 total_bonded: 1_000,
+                genesis_fingerprint: Hash([0x42u8; 32]),
             },
             transactions: vec![
-                Transaction::transfer(kp, Address([fill; 32]), 1, 0, 1_700_000_000).unwrap(),
+                Transaction::transfer(kp, Address([fill; 32]), 1, 0, 1_700_000_000, Hash([0x42u8; 32])).unwrap(),
             ],
             evidence: Vec::new(),
             proposer_signature: sikka_common::bytes::Signature::default(),
         };
         let mut proposal = proposal;
         proposal.sign(kp).unwrap();
-        let vote = Vote::sign(kp, height, 0, sikka_common::vote::VoteKind::Prevote, proposal.hash()).unwrap();
+        let vote = Vote::sign(kp, Hash([0x42u8; 32]), height, 0, sikka_common::vote::VoteKind::Prevote, proposal.hash()).unwrap();
         Commitment { vote, proposal }
     }
 

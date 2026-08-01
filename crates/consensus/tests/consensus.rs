@@ -13,7 +13,7 @@ use sikka_common::genesis::{GenesisAllocation, GenesisConfig, GenesisValidator};
 use sikka_common::transaction::Transaction;
 use sikka_common::vote::{Vote, VoteKind};
 use sikka_consensus::proposal::{build_proposal, verify_proposal, CheckpointProposal};
-use sikka_consensus::{proposer_for, Equivocation, VoteOutcome, VoteTracker};
+use sikka_consensus::{proposer_for, VoteOutcome, VoteTracker};
 use sikka_crypto::Keypair;
 use sikka_state::Ledger;
 
@@ -45,6 +45,10 @@ struct Testnet {
 }
 
 impl Testnet {
+    fn fp(&self) -> Hash {
+        self.nodes[0].ledger.meta().genesis_fingerprint
+    }
+
     fn new() -> Self {
         let now = sikka_common::now_secs();
         let genesis_time = now - 3_600;
@@ -159,10 +163,10 @@ impl Testnet {
 
         // Votes are collected by everyone; each node finalizes on its own.
         let hash = proposal.hash();
-        let mut tracker = VoteTracker::new();
+        let mut tracker = VoteTracker::new(self.fp());
         for node in &self.nodes {
             tracker
-                .record(Vote::sign(&node.key, height, 0, VoteKind::Precommit, hash).unwrap())
+                .record(Vote::sign(&node.key, self.fp(), height, 0, VoteKind::Precommit, hash).unwrap())
                 .unwrap();
         }
         let authorized: Vec<(Address, u64)> = self.nodes[0]
@@ -222,7 +226,7 @@ fn a_checkpoint_round_finalizes_identical_state_everywhere() {
     let now = net.now;
 
     let txs: Vec<Transaction> = (0..4)
-        .map(|nonce| Transaction::transfer(net.alice(), bob, 1_000 + nonce, nonce, now).unwrap())
+        .map(|nonce| Transaction::transfer(net.alice(), bob, 1_000 + nonce, nonce, now, net.fp()).unwrap())
         .collect();
 
     net.round(txs, now);
@@ -254,7 +258,7 @@ fn several_rounds_keep_the_committee_in_step() {
         let timestamp = net.now + round * 30;
         let txs: Vec<Transaction> = (0..3)
             .map(|_| {
-                let tx = Transaction::transfer(net.alice(), bob, 500, nonce, timestamp).unwrap();
+                let tx = Transaction::transfer(net.alice(), bob, 500, nonce, timestamp, net.fp()).unwrap();
                 nonce += 1;
                 tx
             })
@@ -284,7 +288,7 @@ fn tampered_proposals_are_refused() {
     let proposer = net.nodes[index].address;
 
     let txs: Vec<Transaction> = (0..3)
-        .map(|nonce| Transaction::transfer(net.alice(), bob, 1_000, nonce, now).unwrap())
+        .map(|nonce| Transaction::transfer(net.alice(), bob, 1_000, nonce, now, net.fp()).unwrap())
         .collect();
 
     let (proposal, verified) = {
@@ -379,7 +383,7 @@ fn an_absent_proposer_loses_its_turn_to_the_next_validator() {
 
     let last_time = net.nodes[0].ledger.meta().last_checkpoint_time;
     let timestamp = last_time + sikka_consensus::PROPOSER_TIMEOUT_SECS;
-    let txs = vec![Transaction::transfer(net.alice(), bob, 1_000, 0, timestamp).unwrap()];
+    let txs = vec![Transaction::transfer(net.alice(), bob, 1_000, 0, timestamp, net.fp()).unwrap()];
 
     let (proposal, verified) = {
         let node = &mut net.nodes[taker];
@@ -426,7 +430,7 @@ fn a_validator_cannot_jump_the_queue_by_claiming_a_later_round() {
         .unwrap();
 
     // Round 1's proposer builds immediately, without waiting out round 0.
-    let txs = vec![Transaction::transfer(net.alice(), bob, 1_000, 0, now).unwrap()];
+    let txs = vec![Transaction::transfer(net.alice(), bob, 1_000, 0, now, net.fp()).unwrap()];
     let (proposal, verified) = {
         let node = &mut net.nodes[impatient];
         let (proposal, verified, _) =
@@ -473,7 +477,7 @@ fn a_finalized_checkpoint_is_applied_without_re_arguing_whose_turn_it_was() {
     let index = net.proposer_index(height);
     let proposer = net.nodes[index].address;
 
-    let txs = vec![Transaction::transfer(net.alice(), bob, 2_000, 0, now).unwrap()];
+    let txs = vec![Transaction::transfer(net.alice(), bob, 2_000, 0, now, net.fp()).unwrap()];
     let (proposal, verified) = {
         let node = &mut net.nodes[index];
         let (proposal, verified, _) =
@@ -512,8 +516,8 @@ fn a_proposal_that_double_spends_is_refused() {
     let now = net.now;
 
     // Two transactions with the same nonce: only one can apply.
-    let a = Transaction::transfer(net.alice(), bob, 1_000, 0, now).unwrap();
-    let b = Transaction::transfer(net.alice(), bob, 2_000, 0, now).unwrap();
+    let a = Transaction::transfer(net.alice(), bob, 1_000, 0, now, net.fp()).unwrap();
+    let b = Transaction::transfer(net.alice(), bob, 2_000, 0, now, net.fp()).unwrap();
     let mut transactions = vec![a, b];
     transactions.sort_by_key(|tx| tx.id());
 
@@ -534,6 +538,7 @@ fn a_proposal_that_double_spends_is_refused() {
         round: 0,
         total_supply: net.nodes[index].ledger.total_supply(),
         total_bonded: net.nodes[index].ledger.total_bonded(),
+        genesis_fingerprint: net.fp(),
     };
     let mut proposal = CheckpointProposal {
         header,
@@ -566,7 +571,7 @@ fn quorum_is_two_thirds_and_a_stalled_vote_finalizes_nothing() {
     let index = net.proposer_index(height);
     let proposer = net.nodes[index].address;
 
-    let txs = vec![Transaction::transfer(net.alice(), bob, 1_000, 0, now).unwrap()];
+    let txs = vec![Transaction::transfer(net.alice(), bob, 1_000, 0, now, net.fp()).unwrap()];
     let (proposal, verified) = {
         let node = &mut net.nodes[index];
         let (proposal, verified, _) =
@@ -585,12 +590,12 @@ fn quorum_is_two_thirds_and_a_stalled_vote_finalizes_nothing() {
     assert_eq!(authorized.len(), VALIDATORS);
     assert_eq!(quorum_threshold(authorized.len()), 3);
 
-    let mut tracker = VoteTracker::new();
+    let mut tracker = VoteTracker::new(net.fp());
     tracker
-        .record(Vote::sign(&net.nodes[0].key, height, 0, VoteKind::Precommit, hash).unwrap())
+        .record(Vote::sign(&net.nodes[0].key, net.fp(), height, 0, VoteKind::Precommit, hash).unwrap())
         .unwrap();
     tracker
-        .record(Vote::sign(&net.nodes[1].key, height, 0, VoteKind::Precommit, hash).unwrap())
+        .record(Vote::sign(&net.nodes[1].key, net.fp(), height, 0, VoteKind::Precommit, hash).unwrap())
         .unwrap();
     assert!(
         !tracker.has_quorum(height, 0, VoteKind::Precommit, &hash, &authorized),
@@ -598,7 +603,7 @@ fn quorum_is_two_thirds_and_a_stalled_vote_finalizes_nothing() {
     );
 
     tracker
-        .record(Vote::sign(&net.nodes[2].key, height, 0, VoteKind::Precommit, hash).unwrap())
+        .record(Vote::sign(&net.nodes[2].key, net.fp(), height, 0, VoteKind::Precommit, hash).unwrap())
         .unwrap();
     assert!(tracker.has_quorum(height, 0, VoteKind::Precommit, &hash, &authorized));
 
@@ -619,23 +624,23 @@ fn equivocation_is_detected_and_slashed_in_the_next_checkpoint() {
     // The cheat signs two different checkpoints at height 1.
     let cheat_index = 0;
     let cheat = net.nodes[cheat_index].address;
-    let vote_a = Vote::sign(&net.nodes[cheat_index].key, 1, 0, VoteKind::Precommit, Hash([1u8; 32])).unwrap();
-    let vote_b = Vote::sign(&net.nodes[cheat_index].key, 1, 0, VoteKind::Precommit, Hash([2u8; 32])).unwrap();
+    let vote_a = Vote::sign(&net.nodes[cheat_index].key, net.fp(), 1, 0, VoteKind::Precommit, Hash([1u8; 32])).unwrap();
+    let vote_b = Vote::sign(&net.nodes[cheat_index].key, net.fp(), 1, 0, VoteKind::Precommit, Hash([2u8; 32])).unwrap();
 
-    let mut tracker = VoteTracker::new();
+    let mut tracker = VoteTracker::new(net.fp());
     tracker.record(vote_a).unwrap();
     let outcome = tracker.record(vote_b).unwrap();
     let VoteOutcome::Equivocated(evidence) = outcome else {
         panic!("expected equivocation");
     };
     let evidence = *evidence;
-    Equivocation::verify(&evidence).unwrap();
+    evidence.verify(&net.fp()).unwrap();
 
     // An honest proposer includes the evidence in its checkpoint.
     let height = 1;
     let index = net.proposer_index(height);
     let proposer = net.nodes[index].address;
-    let txs = vec![Transaction::transfer(net.alice(), bob, 1_000, 0, now).unwrap()];
+    let txs = vec![Transaction::transfer(net.alice(), bob, 1_000, 0, now, net.fp()).unwrap()];
 
     let (proposal, verified) = {
         let node = &mut net.nodes[index];
@@ -705,7 +710,7 @@ fn bonding_a_new_validator_changes_the_committee() {
     let alice = net.alice_address();
 
     net.round(
-        vec![Transaction::bond(net.alice(), BOND, 0, now).unwrap()],
+        vec![Transaction::bond(net.alice(), BOND, 0, now, net.fp()).unwrap()],
         now,
     );
 
@@ -726,7 +731,7 @@ fn bonding_a_new_validator_changes_the_committee() {
     // And the next round still finalizes with the larger committee.
     let bob = Address([0xbbu8; 32]);
     net.round(
-        vec![Transaction::transfer(net.alice(), bob, 1_000, 1, now + 10).unwrap()],
+        vec![Transaction::transfer(net.alice(), bob, 1_000, 1, now + 10, net.fp()).unwrap()],
         now + 10,
     );
     let reference = &net.nodes[0].ledger;

@@ -12,7 +12,7 @@ pub mod snapshot;
 pub mod store;
 
 pub use ledger::{
-    ExecutionContext, ExecutionOutcome, GenesisOutcome, Ledger, Staged, StateSnapshot,
+    ExecutionContext, ExecutionOutcome, GenesisOutcome, Ledger, StageGuard, Staged, StateSnapshot,
 };
 pub use smt::{Proof, ProofLeaf, Smt, EMPTY_HASH};
 pub use snapshot::{

@@ -4,6 +4,7 @@ use std::time::Duration;
 
 use sikka_common::bytes::{Address, Hash};
 use sikka_common::checkpoint::Checkpoint;
+use sikka_common::constants::MAX_RPC_BODY_BYTES;
 use sikka_common::error::{Error, Result};
 use sikka_common::transaction::Transaction;
 
@@ -55,10 +56,33 @@ impl RpcClient {
             .map_err(|e| Error::Network(format!("{method}: {e}")))?;
 
         let status = response.status();
-        let body = response
-            .text()
+        if response
+            .content_length()
+            .is_some_and(|length| length > MAX_RPC_BODY_BYTES as u64)
+        {
+            return Err(Error::Network(format!(
+                "{} exceeded the {MAX_RPC_BODY_BYTES}-byte response limit",
+                self.endpoint
+            )));
+        }
+        let mut raw = Vec::new();
+        let mut response = response;
+        while let Some(chunk) = response
+            .chunk()
             .await
-            .map_err(|e| Error::Network(e.to_string()))?;
+            .map_err(|e| Error::Network(e.to_string()))?
+        {
+            if raw.len().saturating_add(chunk.len()) > MAX_RPC_BODY_BYTES {
+                return Err(Error::Network(format!(
+                    "{} exceeded the {MAX_RPC_BODY_BYTES}-byte response limit",
+                    self.endpoint
+                )));
+            }
+            raw.extend_from_slice(&chunk);
+        }
+        let body = String::from_utf8(raw).map_err(|e| {
+            Error::Network(format!("{} sent non-UTF8 body: {e}", self.endpoint))
+        })?;
         if !status.is_success() {
             return Err(Error::Network(format!(
                 "{} returned {status}: {}",

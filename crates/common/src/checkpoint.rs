@@ -11,7 +11,7 @@ use crate::codec::{Decode, Encode, Reader, Writer};
 use crate::error::{Error, Result};
 
 /// Domain tag for the checkpoint hash preimage.
-pub const CHECKPOINT_TAG: &[u8] = b"SIKKA/checkpoint/v1";
+pub const CHECKPOINT_TAG: &[u8] = b"SIKKA/checkpoint/v2";
 /// Domain tag for the transaction-set commitment.
 pub const TX_ROOT_TAG: &[u8] = b"SIKKA/tx-root/v1";
 
@@ -42,6 +42,11 @@ pub struct CheckpointHeader {
     pub total_supply: u64,
     /// Sum of every validator bond after this checkpoint, unbonding included.
     pub total_bonded: u64,
+    /// Genesis fingerprint of the chain this checkpoint belongs to.
+    ///
+    /// Bound into the header hash so votes and proposals cannot be replayed
+    /// across chains that share validator keys.
+    pub genesis_fingerprint: Hash,
 }
 
 impl CheckpointHeader {
@@ -77,7 +82,8 @@ impl Encode for CheckpointHeader {
             .raw(self.proposer.as_bytes())
             .u32(self.round)
             .u64(self.total_supply)
-            .u64(self.total_bonded);
+            .u64(self.total_bonded)
+            .raw(self.genesis_fingerprint.as_bytes());
     }
 }
 
@@ -95,6 +101,7 @@ impl Decode for CheckpointHeader {
             round: r.u32()?,
             total_supply: r.u64()?,
             total_bonded: r.u64()?,
+            genesis_fingerprint: Hash::decode(r)?,
         })
     }
 }
@@ -200,6 +207,7 @@ impl Checkpoint {
                 return Err(Error::AddressKeyMismatch);
             }
             let payload = crate::vote::vote_signing_bytes(
+                &self.header.genesis_fingerprint,
                 self.header.height,
                 self.header.round,
                 crate::vote::VoteKind::Precommit,
@@ -262,9 +270,9 @@ mod tests {
             round: 0,
             total_supply: 21_000_000,
             total_bonded: 1_000,
+            genesis_fingerprint: Hash([0x42u8; 32]),
         }
     }
-
     #[test]
     fn header_roundtrips_and_hash_covers_fields() {
         let h = header(7);
@@ -325,7 +333,7 @@ mod tests {
 
         // Two of four signatures is short of the three required.
         for kp in keys.iter().take(2) {
-            cp.add_signature(Vote::sign(kp, 1, 0, VoteKind::Precommit, hash).unwrap().into_signature());
+            cp.add_signature(Vote::sign(kp, cp.header.genesis_fingerprint, 1, 0, VoteKind::Precommit, hash).unwrap().into_signature());
         }
         let refs: Vec<(&Address, &PublicKey, u64)> = authorized
             .iter()
@@ -336,7 +344,7 @@ mod tests {
             Err(Error::QuorumNotReached { got: 2, needed: 3 })
         ));
 
-        cp.add_signature(Vote::sign(&keys[2], 1, 0, VoteKind::Precommit, hash).unwrap().into_signature());
+        cp.add_signature(Vote::sign(&keys[2], cp.header.genesis_fingerprint, 1, 0, VoteKind::Precommit, hash).unwrap().into_signature());
         assert_eq!(cp.verify_signatures(refs).unwrap(), 3);
     }
 
@@ -356,7 +364,7 @@ mod tests {
 
         let mut cp = Checkpoint::new(header(1));
         let hash = cp.hash();
-        cp.add_signature(Vote::sign(&keys[0], 1, 0, VoteKind::Precommit, hash).unwrap().into_signature());
+        cp.add_signature(Vote::sign(&keys[0], cp.header.genesis_fingerprint, 1, 0, VoteKind::Precommit, hash).unwrap().into_signature());
         let refs: Vec<(&Address, &PublicKey, u64)> = authorized
             .iter()
             .map(|(a, k, b)| (a, k, *b))
@@ -375,18 +383,18 @@ mod tests {
 
         let mut cp = Checkpoint::new(header(1));
         let hash = cp.hash();
-        cp.add_signature(Vote::sign(&insider, 1, 0, VoteKind::Precommit, hash).unwrap().into_signature());
+        cp.add_signature(Vote::sign(&insider, cp.header.genesis_fingerprint, 1, 0, VoteKind::Precommit, hash).unwrap().into_signature());
         cp.verify_signatures(refs.clone()).unwrap();
 
         cp.validator_signatures
-            .push(Vote::sign(&outsider, 1, 0, VoteKind::Precommit, hash).unwrap().into_signature());
+            .push(Vote::sign(&outsider, cp.header.genesis_fingerprint, 1, 0, VoteKind::Precommit, hash).unwrap().into_signature());
         assert!(matches!(
             cp.verify_signatures(refs.clone()),
             Err(Error::UnknownVoter(_))
         ));
 
         let mut cp = Checkpoint::new(header(1));
-        let sig = Vote::sign(&insider, 1, 0, VoteKind::Precommit, hash).unwrap().into_signature();
+        let sig = Vote::sign(&insider, cp.header.genesis_fingerprint, 1, 0, VoteKind::Precommit, hash).unwrap().into_signature();
         cp.validator_signatures.push(sig.clone());
         cp.validator_signatures.push(sig);
         assert!(matches!(
@@ -405,7 +413,7 @@ mod tests {
 
         let mut cp = Checkpoint::new(header(1));
         let hash = cp.hash();
-        cp.add_signature(Vote::sign(&kp, 2, 0, VoteKind::Precommit, hash).unwrap().into_signature());
+        cp.add_signature(Vote::sign(&kp, cp.header.genesis_fingerprint, 2, 0, VoteKind::Precommit, hash).unwrap().into_signature());
         assert_eq!(
             cp.verify_signatures(refs).unwrap_err(),
             Error::InvalidSignature
@@ -418,7 +426,7 @@ mod tests {
         let mut cp = Checkpoint::new(header(1));
         let hash = cp.hash();
         for kp in &keys {
-            cp.add_signature(Vote::sign(kp, 1, 0, VoteKind::Precommit, hash).unwrap().into_signature());
+            cp.add_signature(Vote::sign(kp, cp.header.genesis_fingerprint, 1, 0, VoteKind::Precommit, hash).unwrap().into_signature());
         }
         cp.canonicalize();
         let addrs: Vec<Address> = cp
@@ -437,8 +445,8 @@ mod tests {
         let kp = Keypair::generate().unwrap();
         let mut cp = Checkpoint::new(header(1));
         let hash = cp.hash();
-        cp.add_signature(Vote::sign(&kp, 1, 0, VoteKind::Precommit, hash).unwrap().into_signature());
-        cp.add_signature(Vote::sign(&kp, 1, 0, VoteKind::Precommit, hash).unwrap().into_signature());
+        cp.add_signature(Vote::sign(&kp, cp.header.genesis_fingerprint, 1, 0, VoteKind::Precommit, hash).unwrap().into_signature());
+        cp.add_signature(Vote::sign(&kp, cp.header.genesis_fingerprint, 1, 0, VoteKind::Precommit, hash).unwrap().into_signature());
         assert_eq!(cp.validator_signatures.len(), 1);
     }
 }

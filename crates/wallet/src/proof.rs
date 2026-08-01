@@ -146,11 +146,12 @@ mod tests {
             round: 0,
             total_supply: 5_001,
             total_bonded: 0,
+            genesis_fingerprint: Hash([0x42u8; 32]),
         };
         let mut checkpoint = Checkpoint::new(header);
         let hash = checkpoint.hash();
         for key in keys.iter().take(3) {
-            checkpoint.add_signature(Vote::sign(key, 42, 0, VoteKind::Precommit, hash).unwrap().into_signature());
+            checkpoint.add_signature(Vote::sign(key, checkpoint.header.genesis_fingerprint, 42, 0, VoteKind::Precommit, hash).unwrap().into_signature());
         }
         checkpoint.canonicalize();
 

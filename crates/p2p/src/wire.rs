@@ -149,10 +149,14 @@ mod tests {
     use sikka_common::bytes::Address;
     use sikka_crypto::Keypair;
 
+    fn fp() -> Hash {
+        Hash([0x42u8; 32])
+    }
+
     #[test]
     fn transaction_submission_roundtrips() {
         let kp = Keypair::generate().unwrap();
-        let tx = Transaction::transfer(&kp, Address([1u8; 32]), 10, 0, 1_700_000_000).unwrap();
+        let tx = Transaction::transfer(&kp, Address([1u8; 32]), 10, 0, 1_700_000_000, fp()).unwrap();
         let message = SubmitTransaction {
             transaction: tx.clone(),
         };
