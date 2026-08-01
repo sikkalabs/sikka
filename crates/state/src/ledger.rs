@@ -28,6 +28,15 @@ use crate::smt::{Proof, Smt, UndoLog};
 use crate::snapshot::{SnapshotArchive, SnapshotArchiveWriter, SnapshotHeader, SnapshotManifest};
 use crate::store::{LedgerMeta, StateStore, WriteBatch};
 
+/// Addresses that signed `checkpoint`, in the order stored on it.
+fn signers_of(checkpoint: &Checkpoint) -> Vec<Address> {
+    checkpoint
+        .validator_signatures
+        .iter()
+        .map(|signature| signature.validator)
+        .collect()
+}
+
 /// Where a checkpoint is being built, and when.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExecutionContext {
@@ -281,6 +290,7 @@ impl Ledger {
                 validator_root: Hash::ZERO,
                 total_supply: 0,
                 total_bonded: 0,
+                last_signers: Vec::new(),
             },
         };
         let checkpoint = ledger.init_genesis(genesis)?;
@@ -547,17 +557,37 @@ impl Ledger {
             }
         }
 
-        // 4. Mint inflation for the elapsed period and pay the active set.
+        // 4. Mint inflation for the elapsed period and pay validators that
+        // signed the previous checkpoint (still active). Offline bonded stake
+        // is not burned — it simply earns nothing this round. An empty signer
+        // list (genesis) pays the whole active set; if every prior signer has
+        // since left, fall back to the active set so inflation still lands.
         let elapsed = context
             .timestamp
             .saturating_sub(self.meta.last_checkpoint_time);
         let minted = checkpoint_inflation(outcome.total_supply, elapsed);
-        let eligible: Vec<(Address, u64)> = overlay
+        let active: Vec<(Address, u64)> = overlay
             .all_validators()?
             .into_iter()
             .filter(|v| v.is_active_at(context.height))
             .map(|v| (v.address, v.bond))
             .collect();
+        let eligible: Vec<(Address, u64)> = if self.meta.last_signers.is_empty() {
+            active
+        } else {
+            let paid: std::collections::HashSet<Address> =
+                self.meta.last_signers.iter().copied().collect();
+            let filtered: Vec<(Address, u64)> = active
+                .iter()
+                .copied()
+                .filter(|(address, _)| paid.contains(address))
+                .collect();
+            if filtered.is_empty() {
+                active
+            } else {
+                filtered
+            }
+        };
         let rewards = distribute_rewards(minted, &eligible, &context.proposer);
         for (address, amount) in &rewards {
             overlay.credit(*address, *amount, context.timestamp)?;
@@ -787,6 +817,7 @@ impl Ledger {
             validator_root: staged.validator_root,
             total_supply: staged.outcome.total_supply,
             total_bonded: staged.outcome.total_bonded,
+            last_signers: signers_of(checkpoint),
         };
         batch.meta = Some(meta.clone());
 
@@ -916,6 +947,7 @@ impl Ledger {
             validator_root: snapshot.checkpoint.header.validator_root,
             total_supply: snapshot.checkpoint.header.total_supply,
             total_bonded: snapshot.checkpoint.header.total_bonded,
+            last_signers: signers_of(&snapshot.checkpoint),
         };
         batch.meta = Some(meta.clone());
         store.write(&batch)?;
@@ -963,6 +995,7 @@ impl Ledger {
             validator_root: snapshot.checkpoint.header.validator_root,
             total_supply: snapshot.checkpoint.header.total_supply,
             total_bonded: snapshot.checkpoint.header.total_bonded,
+            last_signers: signers_of(&snapshot.checkpoint),
         };
         self.store
             .replace_all(&snapshot.accounts, &snapshot.validators, &meta)?;

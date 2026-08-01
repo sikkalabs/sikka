@@ -527,6 +527,60 @@ fn inflation_is_split_by_bond_share() {
 }
 
 #[test]
+fn inflation_skips_validators_who_missed_the_previous_checkpoint() {
+    use sikka_common::vote::Vote;
+
+    let mut f = Fixture::new();
+    let alice = Fixture::address(&f.alice);
+    let validator = Fixture::address(&f.validator);
+    let now = GENESIS_TIME + 600;
+
+    // Both are active from the next height.
+    f.apply(
+        &[Transaction::bond(&f.alice, BOND, 0, now).unwrap()],
+        now,
+    );
+    assert_eq!(f.ledger.active_validators_at(f.ledger.height() + 1).unwrap().len(), 2);
+
+    // Finalize a checkpoint signed only by the genesis validator — Alice was
+    // "offline" for that round.
+    let height = f.ledger.height() + 1;
+    let context = ExecutionContext::new(height, now + 10, validator);
+    let outcome = f.ledger.execute(&[], context).unwrap();
+    let prev = f.ledger.meta().last_checkpoint_hash;
+    let staged = f.ledger.stage(outcome);
+    let header = f.ledger.build_header(&staged, prev, validator, 0);
+    let mut checkpoint = Checkpoint::new(header);
+    let hash = checkpoint.hash();
+    checkpoint.add_signature(
+        Vote::sign(&f.validator, height, hash)
+            .unwrap()
+            .into_signature(),
+    );
+    f.ledger.commit(staged, &checkpoint).unwrap();
+    assert_eq!(f.ledger.meta().last_signers, vec![validator]);
+
+    let alice_before = f.ledger.account(&alice).unwrap().balance;
+    let validator_before = f.ledger.account(&validator).unwrap().balance;
+
+    let later = now + 86_400;
+    let paid = f.apply(&[], later);
+
+    let alice_after = f.ledger.account(&alice).unwrap().balance;
+    let validator_after = f.ledger.account(&validator).unwrap().balance;
+    assert_eq!(
+        alice_after, alice_before,
+        "offline alice must not receive inflation"
+    );
+    assert_eq!(
+        validator_after,
+        validator_before + paid.minted,
+        "the sole prior signer receives the whole reward"
+    );
+    assert!(paid.minted > 0);
+}
+
+#[test]
 fn slashing_burns_the_bond_and_removes_the_validator() {
     let mut f = Fixture::new();
     let alice = Fixture::address(&f.alice);

@@ -59,9 +59,11 @@ pub fn checkpoint_inflation(total_supply: u64, elapsed_secs: u64) -> u64 {
 /// Split `amount` across validators in proportion to their bonds.
 ///
 /// `validators` must be in a deterministic order (the ledger sorts by address).
-/// Integer division leaves a remainder of at most `validators.len() - 1`
-/// CHILLAR, which goes to the proposer — the node that did the work of building
-/// the checkpoint — so no CHILLAR is ever created or lost by rounding.
+/// Callers pass only the validators that earned a share this round — typically
+/// those that signed the previous checkpoint and are still active. Integer
+/// division leaves a remainder of at most `validators.len() - 1` CHILLAR, which
+/// goes to the proposer — the node that did the work of building the checkpoint
+/// — so no CHILLAR is ever created or lost by rounding.
 pub fn distribute_rewards(
     amount: u64,
     validators: &[(Address, u64)],

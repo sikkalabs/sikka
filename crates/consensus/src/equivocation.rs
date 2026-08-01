@@ -3,8 +3,10 @@
 //! A validator that signs two different checkpoints at the same height is trying
 //! to split the network, and that is provable with nothing more than the two
 //! signatures. Everything else — being offline, being slow, missing a
-//! checkpoint — costs only the forgone reward. Liveness failures are not
-//! punished, so validators can come and go freely.
+//! checkpoint — never burns stake. Missed participation simply forfeits the next
+//! round's inflation share (paid only to signers of the previous checkpoint).
+//! Liveness failures are not capital-punished, so validators can come and go
+//! freely.
 
 use serde::{Deserialize, Serialize};
 

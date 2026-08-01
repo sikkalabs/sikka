@@ -42,6 +42,12 @@ pub struct LedgerMeta {
     pub validator_root: Hash,
     pub total_supply: u64,
     pub total_bonded: u64,
+    /// Validators that signed the last finalized checkpoint.
+    ///
+    /// The next height's inflation is shared only among these addresses (∩ still
+    /// active). Empty means "pay every active validator" — used right after
+    /// genesis, which carries no signatures.
+    pub last_signers: Vec<Address>,
 }
 
 impl Encode for LedgerMeta {
@@ -56,6 +62,7 @@ impl Encode for LedgerMeta {
             .raw(self.validator_root.as_bytes())
             .u64(self.total_supply)
             .u64(self.total_bonded);
+        self.last_signers.encode(w);
     }
 }
 
@@ -72,6 +79,7 @@ impl Decode for LedgerMeta {
             validator_root: Hash::decode(r)?,
             total_supply: r.u64()?,
             total_bonded: r.u64()?,
+            last_signers: Vec::<Address>::decode(r)?,
         })
     }
 }
@@ -372,6 +380,7 @@ mod tests {
             validator_root: Hash([4u8; 32]),
             total_supply: 21_000_000,
             total_bonded: 1_000,
+            last_signers: Vec::new(),
         }
     }
 
