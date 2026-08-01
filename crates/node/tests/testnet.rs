@@ -66,7 +66,7 @@ struct Testnet {
     nodes: Vec<TestNode>,
     alice: Wallet,
     genesis_path: PathBuf,
-    validator_keys: Vec<(Address, PublicKey)>,
+    validator_keys: Vec<(Address, PublicKey, u64)>,
 }
 
 impl Testnet {
@@ -150,6 +150,7 @@ impl Testnet {
                 (
                     Address(k.address_bytes()),
                     PublicKey::new(*k.public_bytes()),
+                    bond,
                 )
             })
             .collect();
@@ -356,7 +357,7 @@ async fn a_payment_submitted_to_one_node_is_finalized_by_all_of_them() {
     // Signatures verify against the genesis validator set, which is the anchor a
     // wallet actually trusts.
     let signers = checkpoint
-        .verify_signatures(net.validator_keys.iter().map(|(a, k)| (a, k)))
+        .verify_signatures(net.validator_keys.iter().map(|(a, k, b)| (a, k, *b)))
         .unwrap();
     assert_eq!(signers, checkpoint.validator_signatures.len());
 

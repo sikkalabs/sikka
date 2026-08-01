@@ -62,19 +62,28 @@ pub const BOOTSTRAP_NODES: &[&str] = &[
     "http://pmz6d5pq6haxc4nmuohhtr2jvvvl6j2lfiowszkxdpn52gokkq4yg5id.onion",
 ];
 
-/// Signatures required to finalize a checkpoint: `ceil(2/3 * validators)`.
+/// Bonded stake required to finalize a checkpoint: `ceil(2/3 * total_active_bond)`.
+///
+/// Quorum is stake-weighted: each active validator contributes its bond, not a
+/// flat one-address-one-vote. Equal bonds recover the old headcount rule.
 ///
 /// ```
-/// use sikka_common::constants::quorum_threshold;
-/// assert_eq!(quorum_threshold(30), 20);
-/// assert_eq!(quorum_threshold(4), 3);
-/// assert_eq!(quorum_threshold(1), 1);
+/// use sikka_common::constants::quorum_bond;
+/// assert_eq!(quorum_bond(30_000), 20_000);
+/// assert_eq!(quorum_bond(4), 3);
+/// assert_eq!(quorum_bond(1), 1);
 /// ```
-pub const fn quorum_threshold(validator_count: usize) -> usize {
-    if validator_count == 0 {
+pub const fn quorum_bond(total_active_bond: u64) -> u64 {
+    if total_active_bond == 0 {
         return 0;
     }
-    (2 * validator_count).div_ceil(3)
+    (2 * total_active_bond).div_ceil(3)
+}
+
+/// Headcount form kept for tests that use equal bonds (identical to
+/// [`quorum_bond`] when every validator has bond weight 1).
+pub const fn quorum_threshold(validator_count: usize) -> usize {
+    quorum_bond(validator_count as u64) as usize
 }
 
 /// Minimum bond for the given total supply.
@@ -93,21 +102,20 @@ mod tests {
 
     #[test]
     fn quorum_is_two_thirds_rounded_up() {
-        assert_eq!(quorum_threshold(0), 0);
-        assert_eq!(quorum_threshold(1), 1);
-        assert_eq!(quorum_threshold(2), 2);
-        assert_eq!(quorum_threshold(3), 2);
+        assert_eq!(quorum_bond(0), 0);
+        assert_eq!(quorum_bond(1), 1);
+        assert_eq!(quorum_bond(2), 2);
+        assert_eq!(quorum_bond(3), 2);
+        assert_eq!(quorum_bond(4), 3);
+        assert_eq!(quorum_bond(40_200), 26_800);
         assert_eq!(quorum_threshold(4), 3);
-        assert_eq!(quorum_threshold(5), 4);
-        assert_eq!(quorum_threshold(6), 4);
-        assert_eq!(quorum_threshold(30), 20);
         assert_eq!(quorum_threshold(100), 67);
     }
 
     #[test]
     fn quorum_always_exceeds_two_thirds() {
-        for n in 1..500usize {
-            let q = quorum_threshold(n);
+        for n in 1..500u64 {
+            let q = quorum_bond(n);
             assert!(q * 3 >= n * 2, "quorum {q} too small for {n}");
             assert!(
                 (q - 1) * 3 < n * 2,

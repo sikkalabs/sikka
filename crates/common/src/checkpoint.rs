@@ -1,14 +1,13 @@
 //! Checkpoints: the only thing consensus votes on.
 //!
 //! A checkpoint is a signed commitment to the *entire current state*, not a
-//! block of history. Once ≥2/3 of active validators sign one, the state it
-//! commits to is final and everything that produced it can be thrown away.
+//! block of history. Once ≥2/3 of the active bonded stake signs one, the state
+//! it commits to is final and everything that produced it can be thrown away.
 
 use serde::{Deserialize, Serialize};
 
 use crate::bytes::{Address, Hash, PublicKey, Signature};
 use crate::codec::{Decode, Encode, Reader, Writer};
-use crate::constants::quorum_threshold;
 use crate::error::{Error, Result};
 
 /// Domain tag for the checkpoint hash preimage.
@@ -171,26 +170,30 @@ impl Checkpoint {
         self.validator_signatures.sort_by_key(|a| a.validator);
     }
 
-    /// Verify every signature against `authorized`, requiring a ≥2/3 majority
-    /// of the active validator set.
+    /// Verify every signature against `authorized`, requiring ≥2/3 of the
+    /// **bonded stake** of the active set.
     ///
-    /// `authorized` is the set of validators active at this height, keyed by
-    /// address; signatures from anyone else are rejected outright rather than
-    /// ignored, so a proposer cannot pad a checkpoint.
+    /// `authorized` is `(address, public_key, bond)` for each validator active
+    /// at this height. Signatures from anyone else are rejected outright rather
+    /// than ignored, so a proposer cannot pad a checkpoint. Equal bonds reduce
+    /// to the old one-address-one-vote rule.
     pub fn verify_signatures<'a, I>(&self, authorized: I) -> Result<usize>
     where
-        I: IntoIterator<Item = (&'a Address, &'a PublicKey)>,
+        I: IntoIterator<Item = (&'a Address, &'a PublicKey, u64)>,
     {
-        let authorized: std::collections::HashMap<&Address, &PublicKey> =
-            authorized.into_iter().collect();
+        let authorized: std::collections::HashMap<&Address, (&PublicKey, u64)> = authorized
+            .into_iter()
+            .map(|(address, key, bond)| (address, (key, bond)))
+            .collect();
         let hash = self.hash();
         let mut seen = std::collections::HashSet::new();
+        let mut bonded: u64 = 0;
 
         for sig in &self.validator_signatures {
             if !seen.insert(sig.validator) {
                 return Err(Error::DuplicateSignature(sig.validator));
             }
-            let Some(expected_key) = authorized.get(&sig.validator) else {
+            let Some((expected_key, bond)) = authorized.get(&sig.validator) else {
                 return Err(Error::UnknownVoter(sig.validator));
             };
             if expected_key.as_slice() != sig.public_key.as_slice() {
@@ -204,12 +207,14 @@ impl Checkpoint {
             ) {
                 return Err(Error::InvalidSignature);
             }
+            bonded = bonded.saturating_add(*bond);
         }
 
-        let needed = quorum_threshold(authorized.len());
-        if seen.len() < needed {
+        let total_bond: u64 = authorized.values().map(|(_, bond)| *bond).sum();
+        let needed = crate::constants::quorum_bond(total_bond);
+        if bonded < needed {
             return Err(Error::QuorumNotReached {
-                got: seen.len(),
+                got: bonded,
                 needed,
             });
         }
@@ -304,9 +309,10 @@ mod tests {
             .iter()
             .map(|k| PublicKey::new(*k.public_bytes()))
             .collect();
-        let authorized: Vec<(Address, PublicKey)> = pubkeys
+        // Equal bonds of 1 → quorum is 3 of 4.
+        let authorized: Vec<(Address, PublicKey, u64)> = pubkeys
             .iter()
-            .map(|pk| (pk.address(), pk.clone()))
+            .map(|pk| (pk.address(), pk.clone(), 1))
             .collect();
 
         let mut cp = Checkpoint::new(header(1));
@@ -316,7 +322,10 @@ mod tests {
         for kp in keys.iter().take(2) {
             cp.add_signature(Vote::sign(kp, 1, hash).unwrap().into_signature());
         }
-        let refs: Vec<(&Address, &PublicKey)> = authorized.iter().map(|(a, k)| (a, k)).collect();
+        let refs: Vec<(&Address, &PublicKey, u64)> = authorized
+            .iter()
+            .map(|(a, k, b)| (a, k, *b))
+            .collect();
         assert!(matches!(
             cp.verify_signatures(refs.clone()),
             Err(Error::QuorumNotReached { got: 2, needed: 3 })
@@ -327,12 +336,37 @@ mod tests {
     }
 
     #[test]
+    fn stake_weighted_quorum_accepts_a_whale() {
+        let keys: Vec<Keypair> = (0..3).map(|_| Keypair::generate().unwrap()).collect();
+        let pubkeys: Vec<PublicKey> = keys
+            .iter()
+            .map(|k| PublicKey::new(*k.public_bytes()))
+            .collect();
+        let bonds = [70u64, 15, 15];
+        let authorized: Vec<(Address, PublicKey, u64)> = pubkeys
+            .iter()
+            .zip(bonds)
+            .map(|(pk, bond)| (pk.address(), pk.clone(), bond))
+            .collect();
+
+        let mut cp = Checkpoint::new(header(1));
+        let hash = cp.hash();
+        cp.add_signature(Vote::sign(&keys[0], 1, hash).unwrap().into_signature());
+        let refs: Vec<(&Address, &PublicKey, u64)> = authorized
+            .iter()
+            .map(|(a, k, b)| (a, k, *b))
+            .collect();
+        assert_eq!(cp.verify_signatures(refs).unwrap(), 1);
+    }
+
+    #[test]
     fn outsider_and_duplicate_signatures_are_rejected() {
         let insider = Keypair::generate().unwrap();
         let outsider = Keypair::generate().unwrap();
         let insider_pk = PublicKey::new(*insider.public_bytes());
-        let authorized = [(insider_pk.address(), insider_pk.clone())];
-        let refs: Vec<(&Address, &PublicKey)> = authorized.iter().map(|(a, k)| (a, k)).collect();
+        let authorized = [(insider_pk.address(), insider_pk.clone(), 1u64)];
+        let refs: Vec<(&Address, &PublicKey, u64)> =
+            authorized.iter().map(|(a, k, b)| (a, k, *b)).collect();
 
         let mut cp = Checkpoint::new(header(1));
         let hash = cp.hash();
@@ -360,8 +394,9 @@ mod tests {
     fn signature_over_another_height_is_rejected() {
         let kp = Keypair::generate().unwrap();
         let pk = PublicKey::new(*kp.public_bytes());
-        let authorized = [(pk.address(), pk.clone())];
-        let refs: Vec<(&Address, &PublicKey)> = authorized.iter().map(|(a, k)| (a, k)).collect();
+        let authorized = [(pk.address(), pk.clone(), 1u64)];
+        let refs: Vec<(&Address, &PublicKey, u64)> =
+            authorized.iter().map(|(a, k, b)| (a, k, *b)).collect();
 
         let mut cp = Checkpoint::new(header(1));
         let hash = cp.hash();

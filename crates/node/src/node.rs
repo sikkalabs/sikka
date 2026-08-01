@@ -6,7 +6,7 @@
 //! returns and sends it. That split keeps the consensus rules easy to test
 //! (there is no runtime involved) and makes deadlock structurally impossible.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -17,7 +17,7 @@ use sikka_checkpoint::{CheckpointStore, Commitment, CommitmentStore};
 use sikka_common::account::Account;
 use sikka_common::bytes::{Address, Hash, PublicKey};
 use sikka_common::checkpoint::Checkpoint;
-use sikka_common::constants::quorum_threshold;
+use sikka_common::constants::quorum_bond;
 use sikka_common::error::{Error, Result};
 use sikka_common::genesis::GenesisConfig;
 use sikka_common::time::now_secs;
@@ -44,14 +44,16 @@ use sikka_wallet::Keystore;
 
 use crate::config::NodeConfig;
 
-/// A finalized checkpoint and the transactions that produced it.
+/// A finalized checkpoint and the transactions (plus slashing evidence) that
+/// produced it.
 ///
-/// The transactions travel with it so a peer that missed the proposal can
-/// replay rather than fast-sync.
+/// The transactions and evidence travel with it so a peer that missed the
+/// proposal can replay rather than fast-sync.
 #[derive(Debug, Clone)]
 pub struct Finalized {
     pub checkpoint: Checkpoint,
     pub transactions: Vec<Transaction>,
+    pub evidence: Vec<Equivocation>,
 }
 
 /// Messages the caller should push to peers.
@@ -562,12 +564,11 @@ impl Node {
             }
         }
 
-        // Someone else has already signed at this height. Inventing a different
-        // checkpoint would leave two locked votes on different hashes. Wait for
-        // the proposal body (gossip or peer fetch) and adopt it instead.
-        if self.votes.lock().has_votes(height) {
-            return Ok(None);
-        }
+        // Do not invent while orphan votes exist without a body: peers are
+        // fetched first in the consensus loop. Blindly refusing to invent on
+        // *any* vote would let a byzantine orphan freeze the height forever.
+        // Honest nodes only vote after verifying a proposal body, so once peer
+        // fetch has run, inventing is safe.
 
         let active = chain.ledger.active_validators_at(height)?;
         let Some(proposer) = proposer_for_round(height, round, &active) else {
@@ -914,19 +915,20 @@ impl Node {
         self.finalize_if_quorum()
     }
 
-    /// Commit the pending checkpoint once ≥2/3 of the active set has signed it.
+    /// Commit the pending checkpoint once ≥2/3 of the active bonded stake has
+    /// signed it.
     ///
     /// Only the proposal's proposer assembles and commits the finalized
     /// artifact immediately. That makes the embedded signature set unique: if
     /// every node finalized locally with whichever quorum subset it had seen,
-    /// two committees of three out of four would commit different
-    /// `last_signers` for the same transactions, and the next height's reward
-    /// payout would fork the state root. Everyone else applies the proposer's
-    /// artifact via [`Self::handle_finalized`].
+    /// two committees would commit different `last_signers` for the same
+    /// transactions, and the next height's reward payout would fork the state
+    /// root. Everyone else applies the proposer's artifact via
+    /// [`Self::handle_finalized`].
     ///
     /// If the proposer never seals (it died after votes arrived), any voter may
     /// finalize once a proposer timeout has passed, using the lexicographically
-    /// first quorum of signatures so two late finalizers still agree.
+    /// first quorum of bonded stake so two late finalizers still agree.
     pub fn finalize_if_quorum(&self) -> Result<Option<Finalized>> {
         let now = now_secs();
         let mut chain = self.chain();
@@ -943,18 +945,21 @@ impl Node {
         }
 
         let active = chain.ledger.active_validators_at(height)?;
+        let bonds: HashMap<Address, u64> = active.iter().map(|v| (v.address, v.bond)).collect();
         let addresses: Vec<Address> = active.iter().map(|v| v.address).collect();
-        let needed = quorum_threshold(addresses.len());
+        let total_bond: u64 = active.iter().map(|v| v.bond).sum();
+        let needed = quorum_bond(total_bond);
         let mut signatures = self.votes.lock().signatures(height, &hash, &addresses);
-        if signatures.len() < needed {
+        let Some(take) = VoteTracker::quorum_prefix(&signatures, &bonds, needed) else {
             return Ok(None);
-        }
-        // Always seal with the lexicographically first quorum of voters. That
-        // way a late fallback finalizer embeds the same last_signers the
+        };
+        // Always seal with the lexicographically first quorum of bonded stake.
+        // That way a late fallback finalizer embeds the same last_signers the
         // proposer would have, as long as both have seen those voters.
-        signatures.truncate(needed);
+        signatures.truncate(take);
 
         let pending = chain.pending.take().expect("checked above");
+        let evidence = pending.proposal.evidence.clone();
         let mut checkpoint = pending.verified.checkpoint.clone();
         for signature in signatures {
             checkpoint.add_signature(signature);
@@ -973,6 +978,7 @@ impl Node {
         Ok(Some(Finalized {
             checkpoint,
             transactions,
+            evidence,
         }))
     }
 
@@ -985,6 +991,7 @@ impl Node {
         &self,
         checkpoint: &Checkpoint,
         transactions: &[Transaction],
+        evidence: &[Equivocation],
     ) -> Result<bool> {
         let now = now_secs();
         let mut chain = self.chain();
@@ -1003,11 +1010,11 @@ impl Node {
 
         // Signatures first: a checkpoint that lacks quorum is not worth replaying.
         let active = chain.ledger.active_validators_at(height)?;
-        let authorized: Vec<(Address, PublicKey)> = active
+        let authorized: Vec<(Address, PublicKey, u64)> = active
             .iter()
-            .map(|v| (v.address, v.public_key.clone()))
+            .map(|v| (v.address, v.public_key.clone(), v.bond))
             .collect();
-        checkpoint.verify_signatures(authorized.iter().map(|(a, k)| (a, k)))?;
+        checkpoint.verify_signatures(authorized.iter().map(|(a, k, b)| (a, k, *b)))?;
 
         let hash = checkpoint.hash();
         let matches_pending = chain.pending.as_ref().is_some_and(|p| p.hash == hash);
@@ -1033,7 +1040,7 @@ impl Node {
         let proposal = CheckpointProposal {
             header: checkpoint.header.clone(),
             transactions: transactions.to_vec(),
-            evidence: Vec::new(),
+            evidence: evidence.to_vec(),
         };
         let verified_ids: HashSet<Hash> = self.mempool.lock().verified_ids();
         let verified = match verify_proposal_with(
@@ -1233,17 +1240,17 @@ impl Node {
         }
         let height = manifest.checkpoint.header.height;
         let validators = chain.ledger.validators()?;
-        let authorized: Vec<(Address, PublicKey)> = validators
+        let authorized: Vec<(Address, PublicKey, u64)> = validators
             .iter()
             .filter(|validator| validator.is_active_at(height))
-            .map(|validator| (validator.address, validator.public_key.clone()))
+            .map(|validator| (validator.address, validator.public_key.clone(), validator.bond))
             .collect();
         if authorized.is_empty() {
             return Err(Error::NoActiveValidators);
         }
         manifest
             .checkpoint
-            .verify_signatures(authorized.iter().map(|(address, key)| (address, key)))?;
+            .verify_signatures(authorized.iter().map(|(address, key, bond)| (address, key, *bond)))?;
         Ok(())
     }
 
@@ -1270,17 +1277,17 @@ impl Node {
         } else {
             chain.ledger.validators()?
         };
-        let authorized: Vec<(Address, PublicKey)> = validators
+        let authorized: Vec<(Address, PublicKey, u64)> = validators
             .iter()
             .filter(|validator| validator.is_active_at(height))
-            .map(|validator| (validator.address, validator.public_key.clone()))
+            .map(|validator| (validator.address, validator.public_key.clone(), validator.bond))
             .collect();
         if authorized.is_empty() {
             return Err(Error::NoActiveValidators);
         }
         snapshot
             .checkpoint
-            .verify_signatures(authorized.iter().map(|(a, k)| (a, k)))?;
+            .verify_signatures(authorized.iter().map(|(a, k, b)| (a, k, *b)))?;
 
         if let Some(stale) = chain.pending.take() {
             chain.ledger.rollback(stale.verified.staged);
@@ -1846,7 +1853,11 @@ mod tests {
         assert_eq!(finalized.checkpoint.hash(), proposal.hash());
 
         assert!(restarted[voter]
-            .handle_finalized(&finalized.checkpoint, &finalized.transactions)
+            .handle_finalized(
+                &finalized.checkpoint,
+                &finalized.transactions,
+                &finalized.evidence,
+            )
             .unwrap());
         assert!(restarted.iter().all(|node| node.height() == 1));
         assert!(restarted
@@ -1855,7 +1866,10 @@ mod tests {
     }
 
     #[test]
-    fn foreign_votes_block_inventing_a_rival_checkpoint() {
+    fn orphan_votes_alone_do_not_freeze_inventing() {
+        // A vote without a body must not permanently block a later proposer —
+        // that was a byzantine halt (cast a fake vote, freeze the height).
+        // Honest adoption is via peer-fetch + note_open_proposal (covered below).
         let pair = validator_pair();
         let bob = Address([7u8; 32]);
         for node in &pair.nodes {
@@ -1877,14 +1891,9 @@ mod tests {
         };
         let other = 1 - proposer;
 
-        // The other validator learns only that a vote exists — not the body.
-        // Inventing a different checkpoint here is the deadlock that freezes a
-        // 2-of-3 committee when the third validator is offline.
         pair.nodes[other].handle_vote(vote.clone()).unwrap();
-        assert!(
-            pair.nodes[other].try_propose().unwrap().is_none(),
-            "must not invent a rival once any vote exists at this height"
-        );
+        // Still the proposer's round: the other node is not due to invent yet.
+        assert!(pair.nodes[other].try_propose().unwrap().is_none());
 
         let accepted = pair.nodes[other].handle_proposal(&proposal).unwrap();
         assert!(accepted.accepted);

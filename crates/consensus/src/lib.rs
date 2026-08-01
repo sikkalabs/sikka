@@ -2,8 +2,8 @@
 //!
 //! Consensus here is deliberately small. It does not order transactions, it does
 //! not vote on them individually, and it has no Tendermint prevote/precommit
-//! rounds. It answers one question: *do at least two thirds of the bonded
-//! validators agree that this is the state?*
+//! rounds. It answers one question: *does at least two thirds of the bonded
+//! stake agree that this is the state?*
 //!
 //! Round-robin proposer takeover still exists: after [`PROPOSER_TIMEOUT_SECS`]
 //! the next validator may act. A validator that has already signed at a height

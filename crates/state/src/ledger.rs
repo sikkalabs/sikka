@@ -683,7 +683,12 @@ impl Ledger {
                     });
                 }
                 let existing = overlay.validator(&tx.from)?;
-                let new_bond = existing.as_ref().map(|v| v.bond).unwrap_or(0) + tx.amount;
+                let new_bond = existing
+                    .as_ref()
+                    .map(|v| v.bond)
+                    .unwrap_or(0)
+                    .checked_add(tx.amount)
+                    .ok_or_else(|| Error::Other("bond overflow".into()))?;
                 let minimum = min_bond(total_supply);
                 if new_bond < minimum {
                     return Err(Error::BondTooSmall {

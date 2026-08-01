@@ -81,8 +81,8 @@ pub enum Error {
     StateRootMismatch { expected: Hash, computed: Hash },
     #[error("proposer {actual} is not the expected proposer {expected} for this height")]
     WrongProposer { expected: Address, actual: Address },
-    #[error("not enough validator signatures: {got} of {needed}")]
-    QuorumNotReached { got: usize, needed: usize },
+    #[error("quorum not reached: bonded {got}, need {needed}")]
+    QuorumNotReached { got: u64, needed: u64 },
     #[error("duplicate validator signature from {0}")]
     DuplicateSignature(Address),
     #[error("vote from {0} is not from an active validator")]

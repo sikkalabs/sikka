@@ -175,7 +175,7 @@ async fn run(cli: Cli) -> Result<()> {
                         .await?
                         .into_iter()
                         .filter(|v| v.active && !v.slashed)
-                        .map(|v| (v.address, v.public_key))
+                        .map(|v| (v.address, v.public_key, v.bond))
                         .collect(),
                 };
                 let verified = verify_account_proof(&proof, &validators)?;

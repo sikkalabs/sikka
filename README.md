@@ -30,7 +30,7 @@ every transfer ever made.
 - **Post-quantum** — every signature is **ML-DSA-87** (FIPS 204); hashes are
   **SHA3-256**.
 - **Proofs, not trust** — stateless light wallets verify inclusion and absence with Sparse Merkle Tree (SMT) proofs against the checkpoint root.
-- **Instant fast-sync** — new or returning nodes catch up in seconds via state snapshots verified against $\ge$ 2/3 validator signatures without replaying historical transactions.
+- **Instant fast-sync** — new or returning nodes catch up in seconds via state snapshots verified against $\ge$ 2/3 bonded stake without replaying historical transactions.
 - **Deterministic inflation** — 1.5%/year inflation compounding is calculated using 128-bit integer fixed-point math (`expm1_fixed`), avoiding floating-point non-determinism across CPU architectures.
 - **Non-punitive consensus** — round-robin proposer rotation with automatic 10-second timeout fallbacks. Downtime never burns stake; only double-signing (equivocation) is slashed. Inflation each round goes to validators that signed the previous checkpoint.
 - **Efficient mempool sync** — nodes exchange compact Bloom filters during peer reconciliation to request only missing transactions, minimizing network bandwidth.

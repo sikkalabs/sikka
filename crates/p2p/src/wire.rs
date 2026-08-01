@@ -91,6 +91,11 @@ pub struct SubmitCheckpoint {
     /// proposal and need to replay it.
     #[serde(default)]
     pub transactions: Vec<Transaction>,
+    /// Slashing evidence included in the proposal that produced this checkpoint.
+    /// Required so a peer that missed the proposal still applies the same
+    /// slashings when replaying.
+    #[serde(default)]
+    pub evidence: Vec<sikka_consensus::Equivocation>,
 }
 
 /// `POST /api/peers`

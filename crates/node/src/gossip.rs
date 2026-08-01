@@ -177,6 +177,7 @@ async fn worker(
                                 &endpoint,
                                 &finalized.checkpoint,
                                 &finalized.transactions,
+                                &finalized.evidence,
                             )
                             .await
                         {

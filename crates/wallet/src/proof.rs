@@ -42,11 +42,12 @@ impl VerifiedBalance {
 /// Verify an account proof.
 ///
 /// `validators` is the set the wallet trusts — normally read from a recent
-/// checkpoint or the genesis file. Pass an empty set to check only the Merkle
-/// path, which is appropriate when talking to a node you run yourself.
+/// checkpoint or the genesis file — as `(address, public_key, bond)`. Pass an
+/// empty set to check only the Merkle path, which is appropriate when talking
+/// to a node you run yourself.
 pub fn verify_account_proof(
     proof: &AccountProof,
-    validators: &[(Address, PublicKey)],
+    validators: &[(Address, PublicKey, u64)],
 ) -> Result<VerifiedBalance> {
     let checkpoint: &Checkpoint = &proof.checkpoint;
 
@@ -60,7 +61,8 @@ pub fn verify_account_proof(
     let signatures = if validators.is_empty() {
         checkpoint.validator_signatures.len()
     } else {
-        let refs: Vec<(&Address, &PublicKey)> = validators.iter().map(|(a, k)| (a, k)).collect();
+        let refs: Vec<(&Address, &PublicKey, u64)> =
+            validators.iter().map(|(a, k, b)| (a, k, *b)).collect();
         checkpoint.verify_signatures(refs)?
     };
 
@@ -95,7 +97,7 @@ mod tests {
 
     struct Fixture {
         proof: AccountProof,
-        validators: Vec<(Address, PublicKey)>,
+        validators: Vec<(Address, PublicKey, u64)>,
         account: Account,
         address: Address,
     }
@@ -124,11 +126,11 @@ mod tests {
         let state_root = smt.root();
 
         let keys: Vec<Keypair> = (0..4).map(|_| Keypair::generate().unwrap()).collect();
-        let validators: Vec<(Address, PublicKey)> = keys
+        let validators: Vec<(Address, PublicKey, u64)> = keys
             .iter()
             .map(|k| {
                 let pk = PublicKey::new(*k.public_bytes());
-                (pk.address(), pk)
+                (pk.address(), pk, 1)
             })
             .collect();
 
@@ -225,10 +227,10 @@ mod tests {
     #[test]
     fn signatures_from_unknown_validators_are_rejected() {
         let f = fixture();
-        let strangers: Vec<(Address, PublicKey)> = (0..4)
+        let strangers: Vec<(Address, PublicKey, u64)> = (0..4)
             .map(|_| {
                 let pk = PublicKey::new(*Keypair::generate().unwrap().public_bytes());
-                (pk.address(), pk)
+                (pk.address(), pk, 1)
             })
             .collect();
         assert!(matches!(

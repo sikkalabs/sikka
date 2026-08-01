@@ -159,16 +159,17 @@ impl Testnet {
                 .record(Vote::sign(&node.key, height, hash).unwrap())
                 .unwrap();
         }
-        let authorized: Vec<Address> = self.nodes[0]
+        let authorized: Vec<(Address, u64)> = self.nodes[0]
             .ledger
             .active_validators_at(height)
             .unwrap()
             .iter()
-            .map(|v| v.address)
+            .map(|v| (v.address, v.bond))
             .collect();
         assert!(tracker.has_quorum(height, &hash, &authorized));
 
-        let signatures = tracker.signatures(height, &hash, &authorized);
+        let addresses: Vec<Address> = authorized.iter().map(|(a, _)| *a).collect();
+        let signatures = tracker.signatures(height, &hash, &addresses);
         for (i, node) in self.nodes.iter_mut().enumerate() {
             let mut v = verified[i]
                 .take()
@@ -177,16 +178,16 @@ impl Testnet {
             v.checkpoint.canonicalize();
 
             // The signatures a node commits must be a genuine super-majority of
-            // the validators it believes are active.
-            let authorized: Vec<(Address, PublicKey)> = node
+            // the bonded stake it believes is active.
+            let authorized: Vec<(Address, PublicKey, u64)> = node
                 .ledger
                 .active_validators_at(height)
                 .unwrap()
                 .into_iter()
-                .map(|v| (v.address, v.public_key))
+                .map(|v| (v.address, v.public_key, v.bond))
                 .collect();
-            let refs: Vec<(&Address, &PublicKey)> =
-                authorized.iter().map(|(a, k)| (a, k)).collect();
+            let refs: Vec<(&Address, &PublicKey, u64)> =
+                authorized.iter().map(|(a, k, b)| (a, k, *b)).collect();
             v.checkpoint.verify_signatures(refs).unwrap();
 
             node.ledger.commit(v.staged, &v.checkpoint).unwrap();
@@ -564,12 +565,12 @@ fn quorum_is_two_thirds_and_a_stalled_vote_finalizes_nothing() {
     };
     let hash = proposal.hash();
 
-    let authorized: Vec<Address> = net.nodes[index]
+    let authorized: Vec<(Address, u64)> = net.nodes[index]
         .ledger
         .active_validators_at(height)
         .unwrap()
         .iter()
-        .map(|v| v.address)
+        .map(|v| (v.address, v.bond))
         .collect();
     assert_eq!(authorized.len(), VALIDATORS);
     assert_eq!(quorum_threshold(authorized.len()), 3);

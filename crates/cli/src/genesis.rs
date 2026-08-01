@@ -171,14 +171,14 @@ pub fn run(args: &GenesisArgs, json: bool) -> Result<()> {
 ///
 /// Anchoring on genesis rather than on what a node claims is the difference
 /// between verifying a balance and being told one.
-pub fn validator_keys_from_genesis(path: &Path) -> Result<Vec<(Address, PublicKey)>> {
+pub fn validator_keys_from_genesis(path: &Path) -> Result<Vec<(Address, PublicKey, u64)>> {
     let json = std::fs::read_to_string(path)
         .map_err(|e| Error::Other(format!("cannot read {}: {e}", path.display())))?;
     let genesis = GenesisConfig::from_json(&json)?;
     Ok(genesis
         .validators
         .iter()
-        .map(|v| (v.address(), v.public_key.clone()))
+        .map(|v| (v.address(), v.public_key.clone(), v.bond))
         .collect())
 }
 

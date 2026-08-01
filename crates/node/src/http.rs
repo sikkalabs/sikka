@@ -232,13 +232,14 @@ async fn submit_checkpoint(
 ) -> HttpResult<Json<Value>> {
     match state
         .node
-        .handle_finalized(&body.checkpoint, &body.transactions)
+        .handle_finalized(&body.checkpoint, &body.transactions, &body.evidence)
     {
         Ok(applied) => {
             if applied {
                 state.gossip.finalized(crate::node::Finalized {
                     checkpoint: body.checkpoint,
                     transactions: body.transactions,
+                    evidence: body.evidence,
                 });
             }
             Ok(Json(

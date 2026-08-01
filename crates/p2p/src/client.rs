@@ -300,10 +300,12 @@ impl PeerClient {
         endpoint: &str,
         checkpoint: &Checkpoint,
         transactions: &[Transaction],
+        evidence: &[sikka_consensus::Equivocation],
     ) -> Result<()> {
         let body = SubmitCheckpoint {
             checkpoint: checkpoint.clone(),
             transactions: transactions.to_vec(),
+            evidence: evidence.to_vec(),
         };
         let _: serde_json::Value = self
             .post_bulk(endpoint, "checkpoint/finalized", &body)

@@ -1,15 +1,16 @@
 //! Vote tallying.
 //!
-//! A checkpoint is final when ≥2/3 of the active validators have signed it. The
-//! tracker keeps one vote per validator per height, so a validator who tries to
-//! sign two different checkpoints at the same height is not just ignored — the
-//! attempt produces [`Equivocation`] evidence that burns their bond.
+//! A checkpoint is final when ≥2/3 of the **bonded stake** of the active set has
+//! signed it. The tracker keeps one vote per validator per height, so a
+//! validator who tries to sign two different checkpoints at the same height is
+//! not just ignored — the attempt produces [`Equivocation`] evidence that burns
+//! their bond.
 
 use std::collections::HashMap;
 
 use sikka_common::bytes::{Address, Hash};
 use sikka_common::checkpoint::ValidatorSignature;
-use sikka_common::constants::quorum_threshold;
+use sikka_common::constants::quorum_bond;
 use sikka_common::error::{Error, Result};
 use sikka_common::vote::Vote;
 
@@ -88,10 +89,7 @@ impl VoteTracker {
             .unwrap_or(0)
     }
 
-    /// Votes for a checkpoint restricted to an authorized validator set.
-    ///
-    /// Votes from validators outside the set are excluded rather than counted:
-    /// quorum is a fraction of the *active* set.
+    /// Headcount of votes for a checkpoint restricted to an authorized set.
     pub fn tally_among(
         &self,
         height: u64,
@@ -113,10 +111,40 @@ impl VoteTracker {
             .unwrap_or(0)
     }
 
-    /// Whether a checkpoint has reached the ≥2/3 threshold.
-    pub fn has_quorum(&self, height: u64, checkpoint_hash: &Hash, authorized: &[Address]) -> bool {
-        let needed = quorum_threshold(authorized.len());
-        needed > 0 && self.tally_among(height, checkpoint_hash, authorized) >= needed
+    /// Bonded stake among `authorized` that has voted for `checkpoint_hash`.
+    ///
+    /// `authorized` is `(address, bond)` for each active validator.
+    pub fn bond_among(
+        &self,
+        height: u64,
+        checkpoint_hash: &Hash,
+        authorized: &[(Address, u64)],
+    ) -> u64 {
+        let Some(votes) = self.heights.get(&height) else {
+            return 0;
+        };
+        authorized
+            .iter()
+            .filter(|(address, _)| {
+                votes
+                    .by_validator
+                    .get(address)
+                    .is_some_and(|v| &v.checkpoint_hash == checkpoint_hash)
+            })
+            .map(|(_, bond)| *bond)
+            .fold(0u64, |acc, bond| acc.saturating_add(bond))
+    }
+
+    /// Whether a checkpoint has reached ≥2/3 of the active bonded stake.
+    pub fn has_quorum(
+        &self,
+        height: u64,
+        checkpoint_hash: &Hash,
+        authorized: &[(Address, u64)],
+    ) -> bool {
+        let total: u64 = authorized.iter().map(|(_, bond)| *bond).sum();
+        let needed = quorum_bond(total);
+        needed > 0 && self.bond_among(height, checkpoint_hash, authorized) >= needed
     }
 
     /// Signatures to embed in a finalized checkpoint, ordered by validator
@@ -141,20 +169,33 @@ impl VoteTracker {
         signatures
     }
 
+    /// Lexicographically first prefix of `signatures` whose bonds sum to at
+    /// least `needed`. Returns `None` if the full set is still short.
+    ///
+    /// Used so a late fallback finalizer embeds the same `last_signers` the
+    /// proposer would have, as long as both have seen those voters.
+    pub fn quorum_prefix(
+        signatures: &[ValidatorSignature],
+        bonds: &HashMap<Address, u64>,
+        needed: u64,
+    ) -> Option<usize> {
+        if needed == 0 {
+            return None;
+        }
+        let mut bonded: u64 = 0;
+        for (i, sig) in signatures.iter().enumerate() {
+            bonded = bonded.saturating_add(*bonds.get(&sig.validator).unwrap_or(&0));
+            if bonded >= needed {
+                return Some(i + 1);
+            }
+        }
+        None
+    }
+
     /// A validator's vote at a height, if any. Used to build evidence when a
     /// conflicting vote shows up later.
     pub fn vote_by(&self, height: u64, validator: &Address) -> Option<&Vote> {
         self.heights.get(&height)?.by_validator.get(validator)
-    }
-
-    /// Whether any validator has cast a vote at `height`.
-    ///
-    /// Used to refuse inventing a rival checkpoint once the height already has
-    /// a signed commitment somewhere on the network.
-    pub fn has_votes(&self, height: u64) -> bool {
-        self.heights
-            .get(&height)
-            .is_some_and(|h| !h.by_validator.is_empty())
     }
 
     /// All checkpoint hashes seen at a height, with their vote counts.
@@ -222,15 +263,21 @@ mod tests {
                 .collect()
         }
 
+        /// Equal unit bonds — recovers the old headcount quorum.
+        fn bonds(&self) -> Vec<(Address, u64)> {
+            self.addresses().into_iter().map(|a| (a, 1)).collect()
+        }
+
         fn vote(&self, index: usize, height: u64, hash: Hash) -> Vote {
             Vote::sign(&self.keys[index], height, hash).unwrap()
         }
     }
 
     #[test]
-    fn quorum_needs_two_thirds_of_the_active_set() {
+    fn quorum_needs_two_thirds_of_the_active_bond() {
         let committee = Committee::new(4);
-        let authorized = committee.addresses();
+        let authorized = committee.bonds();
+        let addresses = committee.addresses();
         let hash = Hash([1u8; 32]);
         let mut tracker = VoteTracker::new();
 
@@ -241,15 +288,40 @@ mod tests {
         assert_eq!(tracker.tally(1, &hash), 2);
         assert!(
             !tracker.has_quorum(1, &hash, &authorized),
-            "2 of 4 is not enough"
+            "2 of 4 equal bonds is not enough"
         );
 
         tracker.record(committee.vote(2, 1, hash)).unwrap();
         assert!(
             tracker.has_quorum(1, &hash, &authorized),
-            "3 of 4 is enough"
+            "3 of 4 equal bonds is enough"
         );
-        assert_eq!(tracker.signatures(1, &hash, &authorized).len(), 3);
+        assert_eq!(tracker.signatures(1, &hash, &addresses).len(), 3);
+    }
+
+    #[test]
+    fn a_majority_of_stake_finalizes_even_with_a_minority_of_validators() {
+        let committee = Committee::new(3);
+        let addrs = committee.addresses();
+        // Whale holds 70%; two minnows hold 15% each. Quorum is ceil(2/3 * 100) = 67.
+        let authorized = vec![(addrs[0], 70), (addrs[1], 15), (addrs[2], 15)];
+        let hash = Hash([1u8; 32]);
+        let mut tracker = VoteTracker::new();
+
+        tracker.record(committee.vote(0, 1, hash)).unwrap();
+        assert!(
+            tracker.has_quorum(1, &hash, &authorized),
+            "70 of 100 bonded stake is a two-thirds majority"
+        );
+
+        // Minnows alone cannot finalize against the full active bond.
+        let mut without_whale = VoteTracker::new();
+        without_whale.record(committee.vote(1, 1, hash)).unwrap();
+        without_whale.record(committee.vote(2, 1, hash)).unwrap();
+        assert!(
+            !without_whale.has_quorum(1, &hash, &authorized),
+            "30 of 100 bonded stake is not enough"
+        );
     }
 
     #[test]
@@ -298,7 +370,8 @@ mod tests {
     fn votes_from_outsiders_do_not_count_towards_quorum() {
         let committee = Committee::new(3);
         let outsider = Keypair::generate().unwrap();
-        let authorized = committee.addresses();
+        let authorized = committee.bonds();
+        let addresses = committee.addresses();
         let hash = Hash([1u8; 32]);
 
         let mut tracker = VoteTracker::new();
@@ -310,16 +383,16 @@ mod tests {
 
         // Three votes recorded, but only two from the active set.
         assert_eq!(tracker.tally(1, &hash), 3);
-        assert_eq!(tracker.tally_among(1, &hash, &authorized), 2);
+        assert_eq!(tracker.tally_among(1, &hash, &addresses), 2);
         assert!(
             tracker.has_quorum(1, &hash, &authorized),
-            "2 of 3 is a two-thirds majority"
+            "2 of 3 equal bonds is a two-thirds majority"
         );
-        assert_eq!(tracker.signatures(1, &hash, &authorized).len(), 2);
+        assert_eq!(tracker.signatures(1, &hash, &addresses).len(), 2);
 
         let outsider_vote = Vote::sign(&outsider, 1, hash).unwrap();
-        assert!(check_voter_authorized(&outsider_vote, &authorized).is_err());
-        assert!(check_voter_authorized(&committee.vote(0, 1, hash), &authorized).is_ok());
+        assert!(check_voter_authorized(&outsider_vote, &addresses).is_err());
+        assert!(check_voter_authorized(&committee.vote(0, 1, hash), &addresses).is_ok());
     }
 
     #[test]
@@ -349,7 +422,7 @@ mod tests {
 
         // Neither reaches 4 of 5, so nothing finalizes: the chain stalls rather
         // than forking.
-        let authorized = committee.addresses();
+        let authorized = committee.bonds();
         assert!(!tracker.has_quorum(1, &a, &authorized));
         assert!(!tracker.has_quorum(1, &b, &authorized));
     }
@@ -373,7 +446,7 @@ mod tests {
     #[test]
     fn a_single_validator_chain_finalizes_alone() {
         let committee = Committee::new(1);
-        let authorized = committee.addresses();
+        let authorized = committee.bonds();
         let hash = Hash([1u8; 32]);
         let mut tracker = VoteTracker::new();
         tracker.record(committee.vote(0, 1, hash)).unwrap();
@@ -394,5 +467,21 @@ mod tests {
         tracker.record(vote.clone()).unwrap();
         assert_eq!(tracker.vote_by(3, &vote.validator), Some(&vote));
         assert_eq!(tracker.vote_by(4, &vote.validator), None);
+    }
+
+    #[test]
+    fn quorum_prefix_is_lex_first_until_bond_met() {
+        let committee = Committee::new(3);
+        let hash = Hash([1u8; 32]);
+        let mut tracker = VoteTracker::new();
+        for i in 0..3 {
+            tracker.record(committee.vote(i, 1, hash)).unwrap();
+        }
+        let addresses = committee.addresses();
+        let sigs = tracker.signatures(1, &hash, &addresses);
+        let bonds: HashMap<Address, u64> = addresses.iter().map(|a| (*a, 10)).collect();
+        assert_eq!(VoteTracker::quorum_prefix(&sigs, &bonds, 20), Some(2));
+        assert_eq!(VoteTracker::quorum_prefix(&sigs, &bonds, 30), Some(3));
+        assert_eq!(VoteTracker::quorum_prefix(&sigs, &bonds, 31), None);
     }
 }
