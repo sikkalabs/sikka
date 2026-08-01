@@ -11,7 +11,7 @@ Data in `/data`, key at `/data/node_key.json`, onion keys under `/data/tor/`,
 and resumable state snapshot chunks under `/data/snapshots/`. Snapshot sync is
 chunked and zstd-compressed so interrupted Tor downloads continue from the last
 verified chunk. Genesis is baked in (supply **19,960,907 SIKKA**: cold admin mint at
-`0x9949…447`, three validators bonded with **20,000 SIKKA** each).
+`0x9949…447`, three validators each with **20,000 bonded** + **20,000 liquid**).
 
 ---
 

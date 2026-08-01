@@ -23,8 +23,11 @@ const VALIDATORS_JSON: &str = include_str!("validators.json");
 /// Total coins minted at height 0, in SIKKA.
 pub const DEFAULT_GENESIS_SUPPLY_SIKKA: u64 = 19_960_907;
 
-/// SIKKA allocated to each genesis validator (fully bonded).
+/// SIKKA bonded for each genesis validator.
 pub const GENESIS_VALIDATOR_STAKE_SIKKA: u64 = 20_000;
+
+/// Extra liquid SIKKA each genesis validator keeps after bonding.
+pub const GENESIS_VALIDATOR_LIQUID_SIKKA: u64 = 20_000;
 
 /// Fixed genesis timestamp so every binary produces the same fingerprint.
 const DEFAULT_GENESIS_TIMESTAMP: u64 = 1_720_000_000;
@@ -41,6 +44,11 @@ struct ValidatorEntry {
     public_key: String,
 }
 
+/// Total SIKKA allocated to each genesis validator (bond + liquid).
+pub fn genesis_validator_allocation_sikka() -> u64 {
+    GENESIS_VALIDATOR_STAKE_SIKKA + GENESIS_VALIDATOR_LIQUID_SIKKA
+}
+
 /// Stake locked for each genesis validator, in CHILLAR.
 pub fn default_genesis_bond_chillar() -> u64 {
     GENESIS_VALIDATOR_STAKE_SIKKA
@@ -53,16 +61,23 @@ pub fn default_genesis_bond_sikka() -> u64 {
     GENESIS_VALIDATOR_STAKE_SIKKA
 }
 
+/// Full genesis allocation per validator, in CHILLAR.
+pub fn genesis_validator_allocation_chillar() -> u64 {
+    genesis_validator_allocation_sikka()
+        .checked_mul(CHILLAR_PER_SIKKA)
+        .expect("genesis validator allocation fits in u64")
+}
+
 /// Liquid mint kept by the cold admin address after funding genesis validators.
 pub fn admin_allocation_chillar() -> u64 {
     let supply = DEFAULT_GENESIS_SUPPLY_SIKKA
         .checked_mul(CHILLAR_PER_SIKKA)
         .expect("default supply fits in u64");
-    let bonded = default_genesis_bond_chillar()
+    let validators = genesis_validator_allocation_chillar()
         .checked_mul(3)
-        .expect("three genesis bonds fit in u64");
+        .expect("three genesis allocations fit in u64");
     supply
-        .checked_sub(bonded)
+        .checked_sub(validators)
         .expect("admin allocation non-negative")
 }
 
@@ -101,6 +116,7 @@ pub fn default_genesis() -> GenesisConfig {
     let admin = admin_public_key().expect("baked-in admin public key is valid");
     let admin_addr = admin.address();
     let bond = default_genesis_bond_chillar();
+    let allocation = genesis_validator_allocation_chillar();
     let validators = genesis_validators();
 
     let mut allocations = vec![GenesisAllocation {
@@ -116,7 +132,7 @@ pub fn default_genesis() -> GenesisConfig {
         );
         allocations.push(GenesisAllocation {
             to: address,
-            amount: bond,
+            amount: allocation,
         });
         genesis_validators.push(GenesisValidator {
             public_key,
@@ -154,12 +170,13 @@ mod tests {
     }
 
     #[test]
-    fn genesis_validator_stake_is_twenty_thousand_sikka() {
+    fn genesis_validators_get_bond_plus_liquid() {
         assert_eq!(default_genesis_bond_sikka(), 20_000);
-        assert_eq!(default_genesis_bond_chillar(), 20_000 * CHILLAR_PER_SIKKA);
+        assert_eq!(GENESIS_VALIDATOR_LIQUID_SIKKA, 20_000);
+        assert_eq!(genesis_validator_allocation_sikka(), 40_000);
         assert_eq!(
             admin_allocation_chillar(),
-            (DEFAULT_GENESIS_SUPPLY_SIKKA - 60_000) * CHILLAR_PER_SIKKA
+            (DEFAULT_GENESIS_SUPPLY_SIKKA - 120_000) * CHILLAR_PER_SIKKA
         );
     }
 
@@ -186,6 +203,16 @@ mod tests {
             .expect("admin allocation");
         assert_eq!(admin_alloc.amount, admin_allocation_chillar());
 
+        for validator in &genesis.validators {
+            let alloc = genesis
+                .allocations
+                .iter()
+                .find(|a| a.to == validator.address())
+                .expect("validator allocation");
+            assert_eq!(alloc.amount, genesis_validator_allocation_chillar());
+            assert_eq!(alloc.amount - validator.bond, GENESIS_VALIDATOR_LIQUID_SIKKA * CHILLAR_PER_SIKKA);
+        }
+
         assert_eq!(
             genesis.total_supply().unwrap(),
             DEFAULT_GENESIS_SUPPLY_SIKKA * CHILLAR_PER_SIKKA
@@ -193,9 +220,16 @@ mod tests {
 
         let bonded: u64 = genesis.validators.iter().map(|v| v.bond).sum();
         assert_eq!(bonded, 60_000 * CHILLAR_PER_SIKKA);
+        let validator_funded: u64 = genesis
+            .allocations
+            .iter()
+            .filter(|a| a.to != admin_address())
+            .map(|a| a.amount)
+            .sum();
+        assert_eq!(validator_funded, 120_000 * CHILLAR_PER_SIKKA);
         assert_eq!(
             admin_alloc.amount,
-            genesis.total_supply().unwrap() - bonded
+            genesis.total_supply().unwrap() - validator_funded
         );
     }
 }

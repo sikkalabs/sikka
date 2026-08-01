@@ -28,7 +28,9 @@ pub use codec::{Decode, Encode, Reader, Writer};
 pub use constants::*;
 pub use default_genesis::{
     admin_address, admin_allocation_chillar, default_genesis, default_genesis_bond_chillar,
-    default_genesis_bond_sikka, DEFAULT_GENESIS_SUPPLY_SIKKA, GENESIS_VALIDATOR_STAKE_SIKKA,
+    default_genesis_bond_sikka, genesis_validator_allocation_chillar,
+    genesis_validator_allocation_sikka, DEFAULT_GENESIS_SUPPLY_SIKKA, GENESIS_VALIDATOR_LIQUID_SIKKA,
+    GENESIS_VALIDATOR_STAKE_SIKKA,
 };
 pub use error::{Error, Result};
 pub use genesis::{GenesisAllocation, GenesisConfig, GenesisValidator};
