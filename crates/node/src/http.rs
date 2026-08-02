@@ -49,6 +49,7 @@ pub fn router(state: AppState) -> Router {
     let api = Router::new()
         .route("/", get(api_index))
         .route("/health", get(health))
+        .route("/ai", get(random_address))
         .route("/tx", post(submit_transaction))
         .route("/tx/{id}", get(has_transaction))
         .route("/vote", post(submit_vote))
@@ -69,6 +70,8 @@ pub fn router(state: AppState) -> Router {
         .route("/", get(site_index))
         .route("/wallet.html", get(wallet_page))
         .route("/wallet", get(wallet_page))
+        .route("/address.html", get(address_page))
+        .route("/address", get(address_page))
         .layer(middleware::from_fn(cors))
         .with_state(state)
 }
@@ -117,6 +120,7 @@ impl IntoResponse for HttpError {
     fn into_response(self) -> Response {
         let status = match &self.0 {
             Error::CheckpointNotFound(_) => StatusCode::NOT_FOUND,
+            Error::Other(msg) if msg.contains("no funded addresses") => StatusCode::NOT_FOUND,
             e if e.is_client_error() => StatusCode::BAD_REQUEST,
             _ => StatusCode::INTERNAL_SERVER_ERROR,
         };
@@ -135,6 +139,10 @@ async fn wallet_page() -> Html<&'static str> {
     Html(include_str!("../../../public/wallet.html"))
 }
 
+async fn address_page() -> Html<&'static str> {
+    Html(include_str!("../../../public/address.html"))
+}
+
 async fn site_index() -> Html<&'static str> {
     Html(include_str!("../../../public/index.html"))
 }
@@ -148,8 +156,9 @@ async fn api_index(State(state): State<AppState>) -> HttpResult<Json<Value>> {
         "node": state.node.address(),
         "site": "/",
         "wallet": "/wallet.html",
+        "address": "/address.html",
         "endpoints": [
-            "/api/health", "/api/rpc", "/api/tx", "/api/tx/sync", "/api/vote",
+            "/api/health", "/api/ai", "/api/rpc", "/api/tx", "/api/tx/sync", "/api/vote",
             "/api/checkpoint/proposal", "/api/checkpoint/finalized",
             "/api/checkpoint/latest", "/api/checkpoint/pending",
             "/api/checkpoint/{height}",
@@ -158,6 +167,19 @@ async fn api_index(State(state): State<AppState>) -> HttpResult<Json<Value>> {
         ],
         "rpc_methods": method::ALL,
     })))
+}
+
+/// Random account holding at least 1 SIKKA — for the landing-page teaser.
+async fn random_address(State(state): State<AppState>) -> HttpResult<Json<Value>> {
+    match state.node.random_funded_address()? {
+        Some(pick) => Ok(Json(json!({
+            "address": pick.address,
+            "balance": pick.balance,
+            "bond": pick.bond,
+            "total": pick.total,
+        }))),
+        None => Err(Error::Other("no funded addresses on this chain yet".into()).into()),
+    }
 }
 
 async fn health(State(state): State<AppState>) -> Json<sikka_p2p::wire::Health> {

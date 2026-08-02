@@ -9,6 +9,7 @@ Nodes listen on port **64552**. Locally: `http://localhost:64552`. Public:
 | --- | --- |
 | Landing | `GET /` → `public/index.html` |
 | Wallet | `GET /wallet.html` (also `/wallet`) |
+| Address | `GET /address.html?a=0x…` (also `/address`) |
 | API | `GET/POST /api/…` |
 
 All amounts in API payloads are **CHILLAR** integers (`1 SIKKA = 10⁹ CHILLAR`).
@@ -39,8 +40,10 @@ JSON-RPC errors use `{ "jsonrpc":"2.0", "error":{ "code", "message" }, "id" }`.
 | --- | --- | --- |
 | `GET` | `/` | site |
 | `GET` | `/wallet.html` | humans |
+| `GET` | `/address.html` | humans |
 | `GET` | `/api/` | discovery JSON |
 | `GET` | `/api/health` | ops / probes |
+| `GET` | `/api/ai` | landing teaser |
 | `POST` | `/api/rpc` | wallets / CLI |
 | `POST` | `/api/tx` | peers / clients |
 | `GET` | `/api/tx/{id}` | peers |
@@ -65,6 +68,25 @@ Network status page (`public/index.html`).
 ### `GET /wallet.html`
 
 Browser wallet (`public/wallet.html`).
+
+### `GET /address.html?a=0x…`
+
+Public account page (`public/address.html`).
+
+### `GET /api/ai`
+
+Returns a random account whose liquid balance plus bond is at least **1 SIKKA**:
+
+```json
+{
+  "address": "0x…",
+  "balance": 1234567890,
+  "bond": 0,
+  "total": 1234567890
+}
+```
+
+Used by the landing page teaser. HTTP 404 if the chain has no such account yet.
 
 ---
 

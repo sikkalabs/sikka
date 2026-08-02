@@ -1,0 +1,555 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>SIKKA address</title>
+  <style>
+    :root {
+      --ink: #1a1714;
+      --paper: #f3efe6;
+      --muted: #6b645a;
+      --line: #d4cdc0;
+      --accent: #0f6b4c;
+      --mono: "IBM Plex Mono", "SF Mono", ui-monospace, monospace;
+      --sans: "IBM Plex Sans", "Source Sans 3", system-ui, sans-serif;
+      --display: "Fraunces", "IBM Plex Serif", Georgia, serif;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      color: var(--ink);
+      background:
+        radial-gradient(1100px 520px at 8% -8%, #fff6e4 0%, transparent 55%),
+        radial-gradient(900px 480px at 100% 0%, #e4f0ea 0%, transparent 52%),
+        linear-gradient(180deg, #f7f2e8 0%, var(--paper) 40%, #ebe6db 100%);
+      font: 16px/1.5 var(--sans);
+    }
+    main {
+      max-width: 40rem;
+      margin: 0 auto;
+      padding: 2rem 1.25rem 4rem;
+    }
+    .top {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 0.75rem 1.5rem;
+      margin-bottom: 2.5rem;
+    }
+    .brand {
+      font-family: var(--display);
+      font-size: 1.65rem;
+      font-weight: 600;
+      letter-spacing: -0.04em;
+      color: var(--ink);
+      text-decoration: none;
+    }
+    .brand:hover { color: var(--accent); }
+    .nav {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 1rem 1.25rem;
+    }
+    .nav a {
+      color: var(--muted);
+      font: 600 0.9rem/1 var(--sans);
+      text-decoration: none;
+      border-bottom: 1px solid var(--line);
+      padding-bottom: 0.12rem;
+    }
+    .nav a:hover { color: var(--ink); border-color: var(--ink); }
+
+    .hero {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 1.25rem;
+      opacity: 0;
+      transform: translateY(0.6rem);
+      animation: rise 0.55s ease forwards;
+    }
+    @keyframes rise {
+      to { opacity: 1; transform: none; }
+    }
+    .avatar-wrap {
+      width: 5.5rem;
+      height: 5.5rem;
+      border-radius: 1.15rem;
+      overflow: hidden;
+      background: #fffdf8;
+      border: 1px solid var(--line);
+      box-shadow: 0 10px 28px rgba(26, 23, 20, 0.06);
+    }
+    .avatar-wrap img {
+      display: block;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      opacity: 0;
+      transition: opacity 0.35s ease;
+    }
+    .avatar-wrap img.ready { opacity: 1; }
+
+    .kicker {
+      margin: 0;
+      font-size: 0.72rem;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--muted);
+      font-weight: 600;
+    }
+    .addr {
+      margin: 0.35rem 0 0;
+      font: 600 0.95rem/1.45 var(--mono);
+      word-break: break-all;
+      color: var(--accent);
+      max-width: 100%;
+    }
+    .balance {
+      margin: 0.15rem 0 0;
+      font-family: var(--display);
+      font-size: clamp(2rem, 7vw, 2.85rem);
+      font-weight: 600;
+      letter-spacing: -0.035em;
+      line-height: 1.05;
+    }
+    .status-line {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.45rem;
+      margin: 0;
+      color: var(--muted);
+      font-size: 0.88rem;
+    }
+    .pill {
+      display: inline-block;
+      margin-left: 0.15rem;
+      padding: 0.15rem 0.45rem;
+      border: 1px solid var(--line);
+      font-size: 0.72rem;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+    .pill.on {
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+    .pill.warn {
+      border-color: #8a3b12;
+      color: #8a3b12;
+    }
+    .pill.bad {
+      border-color: #a11;
+      color: #a11;
+    }
+
+    .details {
+      margin-top: 2.75rem;
+      padding-top: 1.5rem;
+      border-top: 1px solid var(--line);
+      opacity: 0;
+      animation: rise 0.55s ease 0.12s forwards;
+    }
+    .details h2 {
+      margin: 0 0 1rem;
+      font-size: 0.72rem;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--muted);
+      font-weight: 600;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 1rem 1.5rem;
+    }
+    @media (max-width: 520px) { .grid { grid-template-columns: 1fr; } }
+    .label {
+      font-size: 0.72rem;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+    .value {
+      margin-top: 0.2rem;
+      font: 600 1.05rem/1.3 var(--mono);
+      word-break: break-all;
+    }
+
+    .actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.65rem;
+      margin-top: 1.75rem;
+      opacity: 0;
+      animation: rise 0.55s ease 0.22s forwards;
+    }
+    button, .cta {
+      appearance: none;
+      border: 1px solid var(--ink);
+      background: var(--ink);
+      color: var(--paper);
+      padding: 0.75rem 1.1rem;
+      font: 600 0.92rem/1 var(--sans);
+      cursor: pointer;
+      text-decoration: none;
+      display: inline-block;
+    }
+    button.secondary, a.secondary {
+      background: transparent;
+      color: var(--ink);
+    }
+    button:hover, .cta:hover { background: var(--accent); border-color: var(--accent); color: var(--paper); }
+    button.secondary:hover, a.secondary:hover {
+      background: transparent;
+      color: var(--accent);
+      border-color: var(--accent);
+    }
+    button:disabled { opacity: 0.4; cursor: not-allowed; }
+
+    .lookup {
+      margin-top: 2rem;
+      padding-top: 1.5rem;
+      border-top: 1px solid var(--line);
+    }
+    .lookup label {
+      display: block;
+      font-size: 0.72rem;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--muted);
+      font-weight: 600;
+      margin-bottom: 0.4rem;
+    }
+    .lookup-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.6rem;
+    }
+    .lookup input {
+      flex: 1 1 14rem;
+      border: 1px solid var(--line);
+      background: #fffdf8;
+      color: var(--ink);
+      padding: 0.75rem;
+      font: 0.85rem/1.4 var(--mono);
+    }
+
+    .err { color: #a11; font-size: 0.9rem; margin: 0.85rem 0 0; }
+    .ok { color: var(--accent); font-size: 0.9rem; margin: 0.85rem 0 0; }
+    .live { display: inline-flex; align-items: center; gap: 0.4rem; }
+    .dot {
+      width: 0.5rem;
+      height: 0.5rem;
+      border-radius: 50%;
+      background: var(--line);
+    }
+    .dot.on { background: var(--accent); }
+    .dot.off { background: #a11; }
+    [hidden] { display: none !important; }
+  </style>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,600&family=IBM+Plex+Sans:wght@400;600&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet" />
+</head>
+<body>
+  <main>
+    <div class="top">
+      <a class="brand" href="/">SIKKA</a>
+      <nav class="nav">
+        <a href="/wallet.html">Wallet</a>
+        <a href="https://github.com/sikkalabs/sikka">GitHub</a>
+      </nav>
+    </div>
+
+    <section class="hero" id="hero" aria-live="polite">
+      <div class="avatar-wrap" aria-hidden="true">
+        <img id="avatar" alt="" width="176" height="176" />
+      </div>
+      <div>
+        <p class="kicker">Address</p>
+        <p class="addr" id="address">—</p>
+        <p class="balance" id="balance">—</p>
+        <p class="status-line live">
+          <span class="dot" id="dot"></span>
+          <span id="status">Looking up…</span>
+          <span class="pill" id="existsPill" hidden></span>
+          <span class="pill" id="validatorPill" hidden></span>
+        </p>
+      </div>
+    </section>
+
+    <section class="details" id="details" hidden>
+      <h2>Account</h2>
+      <div class="grid">
+        <div>
+          <div class="label">Liquid</div>
+          <div class="value" id="liquid">—</div>
+        </div>
+        <div>
+          <div class="label">Bond</div>
+          <div class="value" id="bond">—</div>
+        </div>
+        <div>
+          <div class="label">Credits</div>
+          <div class="value" id="credits">—</div>
+        </div>
+        <div>
+          <div class="label">Nonce / next</div>
+          <div class="value" id="nonce">—</div>
+        </div>
+        <div>
+          <div class="label">Validator</div>
+          <div class="value" id="validator">—</div>
+        </div>
+        <div>
+          <div class="label">Proof</div>
+          <div class="value" id="proof">not checked</div>
+        </div>
+      </div>
+      <div class="actions">
+        <button type="button" id="verify" class="secondary">Check proof</button>
+        <button type="button" id="copy" class="secondary">Copy address</button>
+        <a class="cta secondary" id="walletLink" href="/wallet.html">Open wallet</a>
+      </div>
+      <p class="ok" id="verifyOk" hidden></p>
+      <p class="err" id="verifyErr" hidden></p>
+    </section>
+
+    <section class="lookup">
+      <label for="lookup">Look up another address</label>
+      <div class="lookup-row">
+        <input id="lookup" type="text" spellcheck="false" placeholder="0x…" />
+        <button type="button" id="go">Look up</button>
+      </div>
+      <p class="err" id="error" hidden></p>
+    </section>
+  </main>
+
+  <script type="module">
+    import JSONBig from "https://esm.sh/json-bigint@1.0.0";
+
+    const CHILLAR = 1_000_000_000n;
+    const jsonBig = JSONBig({ useNativeBigInt: true });
+    const $ = (id) => document.getElementById(id);
+
+    function asBig(v) {
+      if (typeof v === "bigint") return v;
+      if (typeof v === "number") return BigInt(Math.trunc(v));
+      if (typeof v === "string") return BigInt(v);
+      return 0n;
+    }
+
+    function formatSikka(chillar) {
+      const c = asBig(chillar);
+      const whole = c / CHILLAR;
+      const frac = c % CHILLAR;
+      if (frac === 0n) return `${whole} SIKKA`;
+      return `${whole}.${frac.toString().padStart(9, "0").replace(/0+$/, "")} SIKKA`;
+    }
+
+    function normalizeAddress(raw) {
+      let s = String(raw || "").trim().toLowerCase();
+      if (!s) throw new Error("enter an address");
+      if (!s.startsWith("0x")) s = "0x" + s;
+      if (!/^0x[0-9a-f]{64}$/.test(s)) {
+        throw new Error("address must be 0x plus 64 hex characters (32 bytes)");
+      }
+      return s;
+    }
+
+    function shortAddress(address) {
+      return `${address.slice(0, 10)}…${address.slice(-8)}`;
+    }
+
+    function avatarUrl(address) {
+      const seed = encodeURIComponent(address);
+      return `https://api.dicebear.com/10.x/adventurer/svg?seed=${seed}&size=176&radius=0&backgroundColor=f3efe6`;
+    }
+
+    async function rpc(method, params = null) {
+      const res = await fetch("/api/rpc", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
+      });
+      const parsed = jsonBig.parse(await res.text());
+      if (parsed.error) throw new Error(parsed.error.message || "RPC error");
+      return parsed.result;
+    }
+
+    function setAvatar(address) {
+      const img = $("avatar");
+      img.classList.remove("ready");
+      img.onload = () => img.classList.add("ready");
+      img.onerror = () => img.classList.add("ready");
+      img.src = avatarUrl(address);
+      img.alt = `Avatar for ${shortAddress(address)}`;
+    }
+
+    function showError(message) {
+      $("error").hidden = false;
+      $("error").textContent = message;
+      $("dot").className = "dot off";
+      $("status").textContent = "unavailable";
+    }
+
+    async function load(address) {
+      $("error").hidden = true;
+      $("verifyOk").hidden = true;
+      $("verifyErr").hidden = true;
+      $("proof").textContent = "not checked";
+      $("address").textContent = address;
+      $("lookup").value = address;
+      document.title = `SIKKA · ${shortAddress(address)}`;
+      setAvatar(address);
+      $("dot").className = "dot";
+      $("status").textContent = "Looking up…";
+      $("existsPill").hidden = true;
+      $("validatorPill").hidden = true;
+      $("details").hidden = true;
+      $("verify").disabled = true;
+
+      try {
+        const [info, validators] = await Promise.all([
+          rpc("account.get", { address }),
+          rpc("validator.list").catch(() => []),
+        ]);
+        const liquid = asBig(info.balance);
+        const bond = info.bond == null ? 0n : asBig(info.bond);
+        const total = liquid + bond;
+        const validator = (validators || []).find(
+          (v) => String(v.address).toLowerCase() === address
+        );
+
+        $("dot").className = "dot on";
+        $("status").textContent = info.exists ? "on chain" : "never funded";
+        $("balance").textContent = formatSikka(total);
+        $("liquid").textContent = formatSikka(liquid);
+        $("bond").textContent = bond > 0n ? formatSikka(bond) : "—";
+        $("credits").textContent = `${info.credits_now} / ${info.credits}`;
+        $("nonce").textContent = `${info.nonce} / ${info.next_nonce}`;
+
+        const existsPill = $("existsPill");
+        existsPill.hidden = false;
+        if (info.exists) {
+          existsPill.textContent = "exists";
+          existsPill.className = "pill on";
+        } else {
+          existsPill.textContent = "empty";
+          existsPill.className = "pill";
+        }
+
+        const vPill = $("validatorPill");
+        if (validator) {
+          vPill.hidden = false;
+          if (validator.slashed) {
+            vPill.textContent = "slashed";
+            vPill.className = "pill bad";
+            $("validator").textContent = "slashed";
+          } else if (validator.unbonding_since != null) {
+            vPill.textContent = "unbonding";
+            vPill.className = "pill warn";
+            $("validator").textContent = `unbonding since ${validator.unbonding_since}`;
+          } else if (validator.active) {
+            vPill.textContent = "validator";
+            vPill.className = "pill on";
+            $("validator").textContent = `active · bond ${formatSikka(validator.bond)}`;
+          } else {
+            vPill.textContent = "pending";
+            vPill.className = "pill";
+            $("validator").textContent = `pending · active from height ${validator.active_from}`;
+          }
+        } else {
+          vPill.hidden = true;
+          $("validator").textContent = "not a validator";
+        }
+
+        $("details").hidden = false;
+        $("verify").disabled = false;
+      } catch (e) {
+        showError(e.message || String(e));
+        $("balance").textContent = "—";
+      }
+    }
+
+    async function verify(address) {
+      $("verifyOk").hidden = true;
+      $("verifyErr").hidden = true;
+      $("verify").disabled = true;
+      try {
+        const proof = await rpc("account.proof", { address });
+        const height = proof.checkpoint?.header?.height;
+        const root = String(proof.state_root || "").toLowerCase();
+        const committed = String(proof.checkpoint?.header?.state_root || "").toLowerCase();
+        if (!root || root !== committed) {
+          throw new Error("proof state_root does not match the checkpoint");
+        }
+        const present = proof.account != null;
+        $("proof").textContent = present
+          ? `included · height ${height}`
+          : `absent · height ${height}`;
+        $("verifyOk").hidden = false;
+        $("verifyOk").textContent = present
+          ? `Proof root matches the checkpoint at height ${height}.`
+          : `Absence proof root matches the checkpoint at height ${height}.`;
+      } catch (e) {
+        $("proof").textContent = "failed";
+        $("verifyErr").hidden = false;
+        $("verifyErr").textContent = e.message || String(e);
+      } finally {
+        $("verify").disabled = false;
+      }
+    }
+
+    function goTo(raw) {
+      try {
+        const address = normalizeAddress(raw);
+        const url = new URL(location.href);
+        url.searchParams.set("a", address);
+        history.replaceState(null, "", url);
+        load(address);
+      } catch (e) {
+        showError(e.message || String(e));
+      }
+    }
+
+    $("go").addEventListener("click", () => goTo($("lookup").value));
+    $("lookup").addEventListener("keydown", (e) => {
+      if (e.key === "Enter") goTo($("lookup").value);
+    });
+    $("copy").addEventListener("click", async () => {
+      const address = $("address").textContent;
+      try {
+        await navigator.clipboard.writeText(address);
+        $("verifyOk").hidden = false;
+        $("verifyOk").textContent = "Address copied.";
+        $("verifyErr").hidden = true;
+      } catch {
+        $("verifyErr").hidden = false;
+        $("verifyErr").textContent = "Could not copy address.";
+      }
+    });
+    $("verify").addEventListener("click", () => {
+      const address = $("address").textContent;
+      if (address.startsWith("0x")) verify(address);
+    });
+
+    const params = new URLSearchParams(location.search);
+    const initial = params.get("a") || params.get("address");
+    if (initial) {
+      goTo(initial);
+    } else {
+      $("dot").className = "dot";
+      $("status").textContent = "paste an address to begin";
+      $("address").textContent = "No address selected";
+      $("balance").textContent = "—";
+      $("avatar").removeAttribute("src");
+    }
+  </script>
+</body>
+</html>

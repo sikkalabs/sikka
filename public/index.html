@@ -86,6 +86,76 @@
       padding-bottom: 0.15rem;
     }
     .links a.secondary:hover { color: var(--ink); border-color: var(--ink); }
+
+    .holder {
+      margin-top: 2.25rem;
+      padding-top: 1.5rem;
+      border-top: 1px solid var(--line);
+      opacity: 0;
+      transform: translateY(0.4rem);
+      transition: opacity 0.45s ease, transform 0.45s ease;
+    }
+    .holder.show {
+      opacity: 1;
+      transform: none;
+    }
+    .holder-label {
+      margin: 0 0 0.85rem;
+      font-size: 0.72rem;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--muted);
+      font-weight: 600;
+    }
+    .holder-card {
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+      text-decoration: none;
+      color: inherit;
+      max-width: 100%;
+    }
+    .holder-card:hover .holder-addr { color: var(--ink); }
+    .holder-card:hover .holder-meta { color: var(--accent); }
+    .holder-avatar {
+      flex: 0 0 auto;
+      width: 3.5rem;
+      height: 3.5rem;
+      border-radius: 0.85rem;
+      overflow: hidden;
+      background: #fffdf8;
+      border: 1px solid var(--line);
+    }
+    .holder-avatar img {
+      display: block;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+    .holder-text { min-width: 0; }
+    .holder-addr {
+      font: 600 0.92rem/1.35 var(--mono);
+      color: var(--accent);
+      word-break: break-all;
+    }
+    .holder-meta {
+      margin-top: 0.2rem;
+      color: var(--muted);
+      font-size: 0.9rem;
+    }
+    .holder-shuffle {
+      margin-top: 0.85rem;
+      appearance: none;
+      border: 0;
+      background: transparent;
+      color: var(--muted);
+      font: 600 0.85rem/1 var(--sans);
+      padding: 0;
+      cursor: pointer;
+      border-bottom: 1px solid var(--line);
+      padding-bottom: 0.12rem;
+    }
+    .holder-shuffle:hover { color: var(--ink); border-color: var(--ink); }
     .stats {
       margin-top: 3.5rem;
       padding-top: 1.5rem;
@@ -150,8 +220,23 @@
     </p>
     <div class="links">
       <a class="cta" href="/wallet.html">Open wallet</a>
+      <a class="secondary" href="/address.html">Look up address</a>
       <a class="secondary" href="https://github.com/sikkalabs/sikka">GitHub</a>
     </div>
+
+    <section class="holder" id="holder" hidden>
+      <p class="holder-label">Someone on this chain</p>
+      <a class="holder-card" id="holderLink" href="/address.html">
+        <div class="holder-avatar" aria-hidden="true">
+          <img id="holderAvatar" alt="" width="112" height="112" />
+        </div>
+        <div class="holder-text">
+          <div class="holder-addr" id="holderAddr">—</div>
+          <div class="holder-meta" id="holderMeta">—</div>
+        </div>
+      </a>
+      <button type="button" class="holder-shuffle" id="holderShuffle">Show another</button>
+    </section>
 
     <section class="stats" aria-live="polite">
       <div class="live"><span class="dot" id="dot"></span><span id="status">Connecting…</span></div>
@@ -200,6 +285,37 @@
       return parsed.result;
     }
 
+    function shortAddress(address) {
+      return `${address.slice(0, 10)}…${address.slice(-8)}`;
+    }
+
+    function avatarUrl(address) {
+      return `https://api.dicebear.com/10.x/adventurer/svg?seed=${encodeURIComponent(address)}&size=112&backgroundColor=f3efe6`;
+    }
+
+    async function loadHolder() {
+      const section = $("holder");
+      try {
+        const res = await fetch("/api/ai");
+        if (!res.ok) throw new Error("no funded address");
+        const data = jsonBig.parse(await res.text());
+        const address = String(data.address);
+        const page = `/address.html?a=${address}`;
+        $("holderLink").href = page;
+        $("holderAddr").textContent = shortAddress(address);
+        $("holderAddr").title = address;
+        $("holderMeta").textContent = formatSikka(data.total ?? data.balance);
+        const img = $("holderAvatar");
+        img.alt = `Avatar for ${shortAddress(address)}`;
+        img.src = avatarUrl(address);
+        section.hidden = false;
+        requestAnimationFrame(() => section.classList.add("show"));
+      } catch {
+        section.hidden = true;
+        section.classList.remove("show");
+      }
+    }
+
     async function refresh() {
       try {
         const info = await rpc("chain.info");
@@ -219,7 +335,13 @@
       }
     }
 
+    $("holderShuffle").addEventListener("click", () => {
+      $("holder").classList.remove("show");
+      loadHolder();
+    });
+
     refresh();
+    loadHolder();
     setInterval(refresh, 12_000);
   </script>
 </body>

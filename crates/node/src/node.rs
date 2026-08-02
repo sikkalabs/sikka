@@ -18,7 +18,7 @@ use sikka_checkpoint::{CheckpointStore, Commitment, CommitmentStore};
 use sikka_common::account::Account;
 use sikka_common::bytes::{Address, Hash, PublicKey, Signature};
 use sikka_common::checkpoint::Checkpoint;
-use sikka_common::constants::quorum_bond;
+use sikka_common::constants::{quorum_bond, CHILLAR_PER_SIKKA};
 use sikka_common::error::{Error, Result};
 use sikka_common::genesis::GenesisConfig;
 use sikka_common::time::now_secs;
@@ -1617,9 +1617,61 @@ impl Node {
         self.chain().ledger.all_accounts()
     }
 
+    /// Pick a random address whose liquid balance plus bond is at least 1 SIKKA.
+    ///
+    /// Used by the public `/api/ai` teaser so the landing page can link into a
+    /// real holder without hard-coding addresses.
+    pub fn random_funded_address(&self) -> Result<Option<FundedAddress>> {
+        let chain = self.chain();
+        let bonds: HashMap<Address, u64> = chain
+            .ledger
+            .validators()?
+            .into_iter()
+            .filter(|v| !v.slashed && v.bond > 0)
+            .map(|v| (v.address, v.bond))
+            .collect();
+
+        let mut funded = Vec::new();
+        for (address, account) in chain.ledger.all_accounts()? {
+            let bond = bonds.get(&address).copied().unwrap_or(0);
+            let total = account.balance.saturating_add(bond);
+            if total >= CHILLAR_PER_SIKKA {
+                funded.push(FundedAddress {
+                    address,
+                    balance: account.balance,
+                    bond,
+                    total,
+                });
+            }
+        }
+        if funded.is_empty() {
+            return Ok(None);
+        }
+
+        // Per-request counter mixed with tip height so consecutive loads rotate
+        // holders without pulling in an RNG crate.
+        static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let mix = COUNTER
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+            .wrapping_mul(0x9E37_79B9)
+            .wrapping_add(chain.ledger.height().wrapping_mul(0x85EB_CA6B))
+            .wrapping_add(now_secs());
+        let index = (mix as usize) % funded.len();
+        Ok(Some(funded.swap_remove(index)))
+    }
+
     pub fn audit_supply(&self) -> Result<u64> {
         self.chain().ledger.audit_supply()
     }
+}
+
+/// A randomly selected account holding at least one SIKKA (liquid + bond).
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct FundedAddress {
+    pub address: Address,
+    pub balance: u64,
+    pub bond: u64,
+    pub total: u64,
 }
 
 fn refused(reason: impl Into<String>) -> ProposalResponse {
