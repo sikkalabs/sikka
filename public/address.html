@@ -75,9 +75,9 @@
       to { opacity: 1; transform: none; }
     }
     .avatar-wrap {
-      width: 5.5rem;
-      height: 5.5rem;
-      border-radius: 1.15rem;
+      width: 8rem;
+      height: 8rem;
+      border-radius: 1.35rem;
       overflow: hidden;
       background: #fffdf8;
       border: 1px solid var(--line);
@@ -268,7 +268,7 @@
 
     <section class="hero" id="hero" aria-live="polite">
       <div class="avatar-wrap" aria-hidden="true">
-        <img id="avatar" alt="" width="176" height="176" />
+        <img id="avatar" alt="" width="256" height="256" />
       </div>
       <div>
         <p class="kicker">Address</p>
@@ -368,7 +368,7 @@
 
     function avatarUrl(address) {
       const seed = encodeURIComponent(address);
-      return `https://api.dicebear.com/10.x/adventurer/svg?seed=${seed}&size=176&radius=0&backgroundColor=f3efe6`;
+      return `https://api.dicebear.com/10.x/adventurer/svg?seed=${seed}&size=256&radius=0&backgroundColor=f3efe6`;
     }
 
     async function rpc(method, params = null) {
