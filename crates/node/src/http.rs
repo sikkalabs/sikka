@@ -49,7 +49,7 @@ pub fn router(state: AppState) -> Router {
     let api = Router::new()
         .route("/", get(api_index))
         .route("/health", get(health))
-        .route("/ai", get(random_address))
+        .route("/address/random", get(random_address))
         .route("/tx", post(submit_transaction))
         .route("/tx/{id}", get(has_transaction))
         .route("/vote", post(submit_vote))
@@ -158,7 +158,7 @@ async fn api_index(State(state): State<AppState>) -> HttpResult<Json<Value>> {
         "wallet": "/wallet.html",
         "address": "/address.html",
         "endpoints": [
-            "/api/health", "/api/ai", "/api/rpc", "/api/tx", "/api/tx/sync", "/api/vote",
+            "/api/health", "/api/address/random", "/api/rpc", "/api/tx", "/api/tx/sync", "/api/vote",
             "/api/checkpoint/proposal", "/api/checkpoint/finalized",
             "/api/checkpoint/latest", "/api/checkpoint/pending",
             "/api/checkpoint/{height}",

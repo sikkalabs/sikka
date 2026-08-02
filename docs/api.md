@@ -43,7 +43,7 @@ JSON-RPC errors use `{ "jsonrpc":"2.0", "error":{ "code", "message" }, "id" }`.
 | `GET` | `/address.html` | humans |
 | `GET` | `/api/` | discovery JSON |
 | `GET` | `/api/health` | ops / probes |
-| `GET` | `/api/ai` | landing teaser |
+| `GET` | `/api/address/random` | landing teaser |
 | `POST` | `/api/rpc` | wallets / CLI |
 | `POST` | `/api/tx` | peers / clients |
 | `GET` | `/api/tx/{id}` | peers |
@@ -73,7 +73,7 @@ Browser wallet (`public/wallet.html`).
 
 Public account page (`public/address.html`).
 
-### `GET /api/ai`
+### `GET /api/address/random`
 
 Returns a random account whose liquid balance plus bond is at least **1 SIKKA**:
 

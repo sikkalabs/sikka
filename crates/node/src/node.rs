@@ -1619,8 +1619,8 @@ impl Node {
 
     /// Pick a random address whose liquid balance plus bond is at least 1 SIKKA.
     ///
-    /// Used by the public `/api/ai` teaser so the landing page can link into a
-    /// real holder without hard-coding addresses.
+    /// Used by the public `/api/address/random` teaser so the landing page can
+    /// link into a real holder without hard-coding addresses.
     pub fn random_funded_address(&self) -> Result<Option<FundedAddress>> {
         let chain = self.chain();
         let bonds: HashMap<Address, u64> = chain

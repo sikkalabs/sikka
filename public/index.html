@@ -296,7 +296,7 @@
     async function loadHolder() {
       const section = $("holder");
       try {
-        const res = await fetch("/api/ai");
+        const res = await fetch("/api/address/random");
         if (!res.ok) throw new Error("no funded address");
         const data = jsonBig.parse(await res.text());
         const address = String(data.address);
