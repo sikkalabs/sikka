@@ -126,6 +126,7 @@ pub fn run(args: &GenesisArgs, json: bool) -> Result<()> {
         allocations,
         validators,
         checkpoint_tx_interval: args.interval,
+        max_missed_proposer_slots: None,
     };
 
     // Validate before writing: a genesis file that no node will accept is worse

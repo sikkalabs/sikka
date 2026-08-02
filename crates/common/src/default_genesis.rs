@@ -186,6 +186,7 @@ pub fn default_genesis() -> GenesisConfig {
         allocations,
         validators: genesis_validators,
         checkpoint_tx_interval: None,
+        max_missed_proposer_slots: None,
     };
     genesis
         .validate()

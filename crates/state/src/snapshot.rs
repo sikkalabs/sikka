@@ -18,7 +18,7 @@ use sikka_common::validator::Validator;
 
 use crate::ledger::StateSnapshot;
 
-pub const SNAPSHOT_FORMAT_VERSION: u32 = 1;
+pub const SNAPSHOT_FORMAT_VERSION: u32 = 2;
 pub const SNAPSHOT_CHUNK_TARGET_BYTES: usize = 4 * 1024 * 1024;
 pub const SNAPSHOT_MAX_COMPRESSED_CHUNK_BYTES: usize = 8 * 1024 * 1024;
 pub const SNAPSHOT_MAX_UNCOMPRESSED_CHUNK_BYTES: usize = 8 * 1024 * 1024;
@@ -89,6 +89,7 @@ pub struct SnapshotManifest {
     pub chain_id: String,
     pub genesis_fingerprint: Hash,
     pub checkpoint_tx_interval: u32,
+    pub max_missed_proposer_slots: u32,
     pub checkpoint: Checkpoint,
     pub account_count: u64,
     pub validator_count: u64,
@@ -196,6 +197,7 @@ pub struct SnapshotHeader {
     pub chain_id: String,
     pub genesis_fingerprint: Hash,
     pub checkpoint_tx_interval: u32,
+    pub max_missed_proposer_slots: u32,
     pub checkpoint: Checkpoint,
 }
 
@@ -336,6 +338,7 @@ impl SnapshotArchiveWriter {
             chain_id: self.header.chain_id,
             genesis_fingerprint: self.header.genesis_fingerprint,
             checkpoint_tx_interval: self.header.checkpoint_tx_interval,
+            max_missed_proposer_slots: self.header.max_missed_proposer_slots,
             checkpoint: self.header.checkpoint,
             account_count: self.account_count,
             validator_count: self.validator_count,
@@ -500,6 +503,7 @@ impl SnapshotDownload {
             chain_id: self.manifest.chain_id.clone(),
             genesis_fingerprint: self.manifest.genesis_fingerprint,
             checkpoint_tx_interval: self.manifest.checkpoint_tx_interval,
+            max_missed_proposer_slots: self.manifest.max_missed_proposer_slots,
             checkpoint: self.manifest.checkpoint.clone(),
             accounts,
             validators,
@@ -686,6 +690,7 @@ mod tests {
                 chain_id: "test".into(),
                 genesis_fingerprint: Hash([9; 32]),
                 checkpoint_tx_interval: 10,
+                max_missed_proposer_slots: 100,
                 checkpoint: checkpoint(),
             },
         )
@@ -768,6 +773,7 @@ mod tests {
                 chain_id: "large-test".into(),
                 genesis_fingerprint: Hash([9; 32]),
                 checkpoint_tx_interval: 10,
+                max_missed_proposer_slots: 100,
                 checkpoint: checkpoint(),
             },
         )
@@ -838,6 +844,7 @@ mod tests {
                 chain_id: "large-test".into(),
                 genesis_fingerprint: Hash([9; 32]),
                 checkpoint_tx_interval: 10,
+                max_missed_proposer_slots: 100,
                 checkpoint: checkpoint(),
             },
         )

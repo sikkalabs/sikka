@@ -49,6 +49,11 @@ pub struct GenesisConfig {
     /// a small value so checkpoints happen without generating 10,000 signatures.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub checkpoint_tx_interval: Option<u32>,
+    /// Overrides [`crate::constants::DEFAULT_MAX_MISSED_PROPOSER_SLOTS`]. Test
+    /// networks use a small value so an offline validator is forced to unbond
+    /// without waiting for a hundred missed turns.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_missed_proposer_slots: Option<u32>,
 }
 
 fn default_chain_id() -> String {
@@ -96,6 +101,7 @@ impl GenesisConfig {
             w.raw(v.public_key.as_slice()).u64(v.bond);
         }
         w.opt_u64(self.checkpoint_tx_interval.map(u64::from));
+        w.opt_u64(self.max_missed_proposer_slots.map(u64::from));
         Hash::digest(&[GENESIS_TAG, w.as_slice()])
     }
 
@@ -113,6 +119,11 @@ impl GenesisConfig {
         if let Some(0) = self.checkpoint_tx_interval {
             return Err(Error::InvalidGenesis(
                 "checkpoint_tx_interval must be > 0".into(),
+            ));
+        }
+        if let Some(0) = self.max_missed_proposer_slots {
+            return Err(Error::InvalidGenesis(
+                "max_missed_proposer_slots must be > 0".into(),
             ));
         }
 
@@ -205,6 +216,7 @@ mod tests {
                 endpoint: None,
             }],
             checkpoint_tx_interval: Some(4),
+            max_missed_proposer_slots: None,
         };
         (config, kp)
     }
@@ -291,6 +303,12 @@ mod tests {
 
         let mut other = config;
         other.checkpoint_tx_interval = Some(5);
+        assert_ne!(base, other.fingerprint());
+
+        let (config, _) = genesis_with(1_000, 5_000_000);
+        let base = config.fingerprint();
+        let mut other = config;
+        other.max_missed_proposer_slots = Some(3);
         assert_ne!(base, other.fingerprint());
     }
 }

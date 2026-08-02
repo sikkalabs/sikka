@@ -369,6 +369,7 @@ impl Node {
                 active: v.is_active_at(height),
                 unbonding_since: v.unbonding_since,
                 slashed: v.slashed,
+                missed_proposer_slots: v.missed_proposer_slots,
             })
             .collect())
     }
@@ -1712,6 +1713,7 @@ mod tests {
             chain_id: "sikka-test".into(),
             timestamp: now_secs() - 10,
             checkpoint_tx_interval: Some(2),
+            max_missed_proposer_slots: None,
             allocations: vec![
                 GenesisAllocation {
                     to: Address(validator.address_bytes()),
@@ -1774,6 +1776,7 @@ mod tests {
             chain_id: "sikka-pair".into(),
             timestamp: now_secs() - 10,
             checkpoint_tx_interval: Some(2),
+            max_missed_proposer_slots: None,
             allocations: keys
                 .iter()
                 .map(|kp| GenesisAllocation {

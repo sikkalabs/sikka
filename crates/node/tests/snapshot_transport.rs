@@ -28,6 +28,7 @@ async fn spawn_solo() -> (String, Arc<Node>, tempfile::TempDir) {
         chain_id: "sikka-snapshot-transport".into(),
         timestamp: now_secs() - 10,
         checkpoint_tx_interval: Some(2),
+            max_missed_proposer_slots: None,
         allocations: vec![GenesisAllocation {
             to: Address(validator.address_bytes()),
             amount: 1_000_000 * CHILLAR_PER_SIKKA,

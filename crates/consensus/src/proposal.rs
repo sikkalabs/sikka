@@ -211,6 +211,7 @@ pub fn build_proposal(
 ) -> Result<(CheckpointProposal, VerifiedProposal, Vec<Hash>)> {
     let height = ledger.height() + 1;
     let mut context = ExecutionContext::new(height, timestamp, proposer);
+    context.round = round;
     context.slashings = slashings(ledger, &evidence)?;
 
     let ordered = canonical_order(candidates);
@@ -427,6 +428,7 @@ pub fn verify_proposal_with(
     }
 
     let mut context = ExecutionContext::new(header.height, header.timestamp, header.proposer);
+    context.round = header.round;
     context.slashings = slashings(ledger, &proposal.evidence)?;
 
     let outcome = ledger.execute(&proposal.transactions, context)?;

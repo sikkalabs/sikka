@@ -1,6 +1,6 @@
 //! Ledger execution tests: transfers, credits, bonding, inflation, snapshots.
 
-use sikka_common::bytes::{Address, Hash, PublicKey};
+use sikka_common::bytes::{Address, PublicKey};
 use sikka_common::checkpoint::Checkpoint;
 use sikka_common::constants::{MAX_CREDITS, UNBONDING_SECS};
 use sikka_common::error::Error;
@@ -49,6 +49,7 @@ impl Fixture {
                 endpoint: None,
             }],
             checkpoint_tx_interval: Some(4),
+        max_missed_proposer_slots: None,
         };
 
         let dir = tempfile::tempdir().unwrap();
@@ -137,6 +138,7 @@ fn reopening_keeps_state_and_rejects_a_different_genesis() {
             endpoint: None,
         }],
         checkpoint_tx_interval: Some(4),
+        max_missed_proposer_slots: None,
     };
 
     let dir = tempfile::tempdir().unwrap();
@@ -336,6 +338,7 @@ fn execution_is_deterministic_across_two_ledgers() {
             endpoint: None,
         }],
         checkpoint_tx_interval: Some(4),
+        max_missed_proposer_slots: None,
     };
     let dir = tempfile::tempdir().unwrap();
     let (mut b, _) = Ledger::open(dir.path().join("state.redb"), &genesis).unwrap();
@@ -767,4 +770,212 @@ fn many_accounts_stay_consistent() {
             .map(|(a, acc)| (a.to_array(), acc.leaf_hash(&a))),
     );
     assert_eq!(rebuilt.root(), f.ledger.state_root());
+}
+
+#[test]
+fn repeated_full_batch_proposer_misses_force_unbond() {
+    use sikka_common::validator::Validator;
+
+    let alice_kp = Keypair::generate().unwrap();
+    let bob_kp = Keypair::generate().unwrap();
+    let alice_pk = PublicKey::new(*alice_kp.public_bytes());
+    let bob_pk = PublicKey::new(*bob_kp.public_bytes());
+
+    let genesis = GenesisConfig {
+        chain_id: "sikka-miss-test".into(),
+        timestamp: GENESIS_TIME,
+        allocations: vec![
+            GenesisAllocation {
+                to: alice_pk.address(),
+                amount: ALLOCATION,
+            },
+            GenesisAllocation {
+                to: bob_pk.address(),
+                amount: ALLOCATION,
+            },
+        ],
+        validators: vec![
+            GenesisValidator {
+                public_key: alice_pk.clone(),
+                bond: BOND,
+                endpoint: None,
+            },
+            GenesisValidator {
+                public_key: bob_pk.clone(),
+                bond: BOND,
+                endpoint: None,
+            },
+        ],
+        checkpoint_tx_interval: Some(2),
+        max_missed_proposer_slots: Some(2),
+    };
+
+    let dir = tempfile::tempdir().unwrap();
+    let (mut ledger, _) = Ledger::open(dir.path().join("state.redb"), &genesis).unwrap();
+
+    let mut active = ledger.active_validators_at(1).unwrap();
+    active.sort_by_key(|v| v.address);
+    let round0 = Validator::proposer_for_round(1, 0, &active).unwrap();
+    let round1 = Validator::proposer_for_round(1, 1, &active).unwrap();
+    assert_ne!(round0, round1);
+
+    let payer = if round1 == alice_pk.address() {
+        &alice_kp
+    } else {
+        &bob_kp
+    };
+    let now = GENESIS_TIME + 60;
+    let txs = vec![
+        Transaction::transfer(payer, Address([0x11; 32]), 1_000, 0, now, &genesis.chain_id)
+            .unwrap(),
+        Transaction::transfer(payer, Address([0x22; 32]), 1_000, 1, now, &genesis.chain_id)
+            .unwrap(),
+    ];
+    let mut context = ExecutionContext::new(1, now, round1);
+    context.round = 1;
+    let outcome = ledger.execute(&txs, context).unwrap();
+    assert!(outcome.forced_unbonds.is_empty());
+    assert_eq!(
+        outcome
+            .validators
+            .get(&round0)
+            .and_then(|v| v.as_ref())
+            .unwrap()
+            .missed_proposer_slots,
+        1
+    );
+
+    let prev = ledger.meta().last_checkpoint_hash;
+    let staged = ledger.stage(outcome);
+    let header = ledger.build_header(&staged, prev, round1, 1);
+    ledger.commit(staged, &Checkpoint::new(header)).unwrap();
+    assert_eq!(
+        ledger.validator(&round0).unwrap().unwrap().missed_proposer_slots,
+        1
+    );
+
+    let mut active = ledger.active_validators_at(2).unwrap();
+    active.sort_by_key(|v| v.address);
+    let (h, absentee, winner) = (2u64..50)
+        .find_map(|h| {
+            let a0 = Validator::proposer_for_round(h, 0, &active).unwrap();
+            let a1 = Validator::proposer_for_round(h, 1, &active).unwrap();
+            (a0 == round0).then_some((h, a0, a1))
+        })
+        .expect("round-robin eventually reselects the absentee");
+    let payer = if winner == alice_pk.address() {
+        &alice_kp
+    } else {
+        &bob_kp
+    };
+    let payer_addr = PublicKey::new(*payer.public_bytes()).address();
+    let nonce = ledger.next_nonce(&payer_addr).unwrap();
+    let later = now + 60;
+    let txs = vec![
+        Transaction::transfer(payer, Address([0x33; 32]), 1_000, nonce, later, &genesis.chain_id)
+            .unwrap(),
+        Transaction::transfer(
+            payer,
+            Address([0x44; 32]),
+            1_000,
+            nonce + 1,
+            later,
+            &genesis.chain_id,
+        )
+        .unwrap(),
+    ];
+    let mut context = ExecutionContext::new(h, later, winner);
+    context.round = 1;
+    let outcome = ledger.execute(&txs, context).unwrap();
+    assert_eq!(outcome.forced_unbonds, vec![absentee]);
+    let forced = outcome
+        .validators
+        .get(&absentee)
+        .and_then(|v| v.as_ref())
+        .unwrap();
+    assert_eq!(forced.bond, BOND);
+    assert!(forced.unbonding_since.is_some());
+
+    let prev = ledger.meta().last_checkpoint_hash;
+    let staged = ledger.stage(outcome);
+    let header = ledger.build_header(&staged, prev, winner, 1);
+    ledger.commit(staged, &Checkpoint::new(header)).unwrap();
+    let record = ledger.validator(&absentee).unwrap().unwrap();
+    assert!(record.unbonding_since.is_some());
+    assert!(!record.is_active_at(h + 1));
+    assert!(record.is_slashable());
+}
+
+#[test]
+fn short_batch_delay_seals_do_not_charge_proposer_misses() {
+    use sikka_common::validator::Validator;
+
+    let alice_kp = Keypair::generate().unwrap();
+    let bob_kp = Keypair::generate().unwrap();
+    let alice_pk = PublicKey::new(*alice_kp.public_bytes());
+    let bob_pk = PublicKey::new(*bob_kp.public_bytes());
+
+    let genesis = GenesisConfig {
+        chain_id: "sikka-miss-idle".into(),
+        timestamp: GENESIS_TIME,
+        allocations: vec![
+            GenesisAllocation {
+                to: alice_pk.address(),
+                amount: ALLOCATION,
+            },
+            GenesisAllocation {
+                to: bob_pk.address(),
+                amount: ALLOCATION,
+            },
+        ],
+        validators: vec![
+            GenesisValidator {
+                public_key: alice_pk.clone(),
+                bond: BOND,
+                endpoint: None,
+            },
+            GenesisValidator {
+                public_key: bob_pk.clone(),
+                bond: BOND,
+                endpoint: None,
+            },
+        ],
+        checkpoint_tx_interval: Some(4),
+        max_missed_proposer_slots: Some(2),
+    };
+
+    let dir = tempfile::tempdir().unwrap();
+    let (ledger, _) = Ledger::open(dir.path().join("state.redb"), &genesis).unwrap();
+    let mut active = ledger.active_validators_at(1).unwrap();
+    active.sort_by_key(|v| v.address);
+    let round0 = Validator::proposer_for_round(1, 0, &active).unwrap();
+    let round1 = Validator::proposer_for_round(1, 1, &active).unwrap();
+    let payer = if round1 == alice_pk.address() {
+        &alice_kp
+    } else {
+        &bob_kp
+    };
+    let now = GENESIS_TIME + 60;
+    let txs = vec![Transaction::transfer(
+        payer,
+        Address([0x55; 32]),
+        1_000,
+        0,
+        now,
+        &genesis.chain_id,
+    )
+    .unwrap()];
+    let mut context = ExecutionContext::new(1, now, round1);
+    context.round = 1;
+    let mut ledger = ledger;
+    let outcome = ledger.execute(&txs, context).unwrap();
+    assert!(outcome.forced_unbonds.is_empty());
+    // Unchanged validators may be absent from the outcome map.
+    let missed = outcome
+        .validators
+        .get(&round0)
+        .and_then(|v| v.as_ref())
+        .map(|v| v.missed_proposer_slots)
+        .unwrap_or(0);
+    assert_eq!(missed, 0);
 }

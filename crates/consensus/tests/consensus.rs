@@ -79,6 +79,7 @@ impl Testnet {
                 })
                 .collect(),
             checkpoint_tx_interval: Some(4),
+            max_missed_proposer_slots: None,
         };
 
         let nodes = keys

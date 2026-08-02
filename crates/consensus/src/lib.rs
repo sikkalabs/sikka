@@ -18,7 +18,8 @@
 //! * [`CheckpointProposal`] — a header, the transactions that produced it, and
 //!   any slashing evidence, all independently re-checkable.
 //! * [`VoteTracker`] — tallies signatures and notices equivocation.
-//! * [`Equivocation`] — the only slashable offence. Being offline is free.
+//! * [`Equivocation`] — the only slashable offence. Being offline does not burn
+//!   stake; repeated full-batch proposer timeouts force a normal unbond instead.
 
 pub mod equivocation;
 pub mod proposal;
@@ -56,11 +57,7 @@ pub fn proposer_for(height: u64, active: &[Validator]) -> Option<Address> {
 /// takes over, and the round it used is recorded in the header so every node can
 /// check the takeover was legitimate.
 pub fn proposer_for_round(height: u64, round: u32, active: &[Validator]) -> Option<Address> {
-    if active.is_empty() {
-        return None;
-    }
-    let index = ((height.wrapping_add(u64::from(round))) % active.len() as u64) as usize;
-    Some(active[index].address)
+    Validator::proposer_for_round(height, round, active)
 }
 
 /// Which round is due, given how long the previous checkpoint has stood.

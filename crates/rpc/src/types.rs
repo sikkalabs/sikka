@@ -139,6 +139,10 @@ pub struct ValidatorInfo {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub unbonding_since: Option<u64>,
     pub slashed: bool,
+    /// Consecutive full-batch proposer timeouts; forced unbond at the chain's
+    /// `max_missed_proposer_slots` threshold.
+    #[serde(default)]
+    pub missed_proposer_slots: u32,
 }
 
 /// `mempool.info`

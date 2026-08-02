@@ -16,7 +16,9 @@ use std::path::Path;
 use sikka_common::account::Account;
 use sikka_common::bytes::{Address, Hash};
 use sikka_common::checkpoint::{Checkpoint, CheckpointHeader};
-use sikka_common::constants::{min_bond, CREDIT_COST_PER_TX};
+use sikka_common::constants::{
+    min_bond, CREDIT_COST_PER_TX, DEFAULT_MAX_MISSED_PROPOSER_SLOTS,
+};
 use sikka_common::error::{Error, Result};
 use sikka_common::genesis::GenesisConfig;
 use sikka_common::inflation::{checkpoint_inflation, distribute_rewards};
@@ -48,6 +50,10 @@ pub struct ExecutionContext {
     /// Round-robin proposer for this height; receives the rounding remainder of
     /// the inflation payout.
     pub proposer: Address,
+    /// Which turn of the round-robin produced this checkpoint.
+    ///
+    /// Used to attribute full-batch proposer timeouts toward forced unbonding.
+    pub round: u32,
     /// Validators proven to have equivocated, whose bonds are burned here.
     pub slashings: Vec<Address>,
 }
@@ -58,6 +64,7 @@ impl ExecutionContext {
             height,
             timestamp,
             proposer,
+            round: 0,
             slashings: Vec::new(),
         }
     }
@@ -85,6 +92,8 @@ pub struct ExecutionOutcome {
     pub released: Vec<Address>,
     /// Bonds burned by slashing.
     pub burned: u64,
+    /// Validators forced into the unbonding cooldown for repeated proposer misses.
+    pub forced_unbonds: Vec<Address>,
 }
 
 impl ExecutionOutcome {
@@ -319,6 +328,9 @@ impl Ledger {
                 checkpoint_tx_interval: genesis
                     .checkpoint_tx_interval
                     .unwrap_or(DEFAULT_CHECKPOINT_TX_INTERVAL),
+                max_missed_proposer_slots: genesis
+                    .max_missed_proposer_slots
+                    .unwrap_or(DEFAULT_MAX_MISSED_PROPOSER_SLOTS),
                 height: 0,
                 last_checkpoint_hash: Hash::ZERO,
                 last_checkpoint_time: genesis.timestamp,
@@ -562,6 +574,7 @@ impl Ledger {
             rewards: Vec::new(),
             released: Vec::new(),
             burned: 0,
+            forced_unbonds: Vec::new(),
         };
 
         // 1. Slash equivocators before they can be paid.
@@ -594,13 +607,28 @@ impl Ledger {
             }
         }
 
-        // 4. Mint inflation for the elapsed period and pay every validator
+        // 4. Attribute full-batch proposer timeouts and force-unbond absentees.
+        // Only a full transaction batch counts: idle-delay seals with a short
+        // batch would otherwise charge every quiet-chain timeout as a miss.
+        let full_batch = outcome.applied.len() as u32 >= self.meta.checkpoint_tx_interval;
+        outcome.forced_unbonds = Self::apply_proposer_misses(
+            &mut overlay,
+            context.height,
+            context.round,
+            context.timestamp,
+            context.proposer,
+            full_batch,
+            self.meta.max_missed_proposer_slots,
+        )?;
+
+        // 5. Mint inflation for the elapsed period and pay every validator
         // active at this height, weighted by bond. Rewards must not depend on
         // which exact ≥2/3 signature subset was embedded in the previous
         // checkpoint: the checkpoint hash ignores signatures, so two valid
         // certificates for the same header would otherwise fork H+1 state via
         // divergent `last_signers`. Downtime still never burns stake; only
-        // equivocation does.
+        // equivocation does. Forced unbonding above removes absentees from
+        // this payout.
         let elapsed = context
             .timestamp
             .saturating_sub(self.meta.last_checkpoint_time);
@@ -623,7 +651,7 @@ impl Ledger {
             .checked_add(paid)
             .ok_or(Error::BalanceOverflow)?;
 
-        // 5. Collect final values.
+        // 6. Collect final values.
         for (address, account) in overlay.accounts {
             if let Some(account) = account {
                 outcome.accounts.insert(address, account);
@@ -648,6 +676,65 @@ impl Ledger {
         };
 
         Ok(outcome)
+    }
+
+    /// Charge consecutive full-batch proposer timeouts and force-unbond at the
+    /// configured threshold. The successful proposer is always reset to zero
+    /// misses, even when they also appear in the timed-out prefix.
+    fn apply_proposer_misses(
+        overlay: &mut Overlay<'_>,
+        height: u64,
+        round: u32,
+        timestamp: u64,
+        proposer: Address,
+        full_batch: bool,
+        max_missed: u32,
+    ) -> Result<Vec<Address>> {
+        let mut active: Vec<Validator> = overlay
+            .all_validators()?
+            .into_iter()
+            .filter(|v| v.is_active_at(height))
+            .collect();
+        active.sort_by_key(|v| v.address);
+
+        if full_batch && round > 0 {
+            for r in 0..round {
+                let Some(address) = Validator::proposer_for_round(height, r, &active) else {
+                    break;
+                };
+                let Some(mut validator) = overlay.validator(&address)? else {
+                    continue;
+                };
+                if !validator.is_active_at(height) {
+                    continue;
+                }
+                validator.missed_proposer_slots =
+                    validator.missed_proposer_slots.saturating_add(1);
+                overlay.set_validator(validator);
+            }
+        }
+
+        if let Some(mut validator) = overlay.validator(&proposer)? {
+            if validator.missed_proposer_slots != 0 {
+                validator.missed_proposer_slots = 0;
+                overlay.set_validator(validator);
+            }
+        }
+
+        let mut forced = Vec::new();
+        for validator in overlay.all_validators()? {
+            if !validator.is_active_at(height) {
+                continue;
+            }
+            if validator.missed_proposer_slots < max_missed {
+                continue;
+            }
+            let mut validator = validator;
+            validator.unbonding_since = Some(timestamp);
+            forced.push(validator.address);
+            overlay.set_validator(validator);
+        }
+        Ok(forced)
     }
 
     fn apply_transaction(
@@ -838,6 +925,7 @@ impl Ledger {
             chain_id: self.meta.chain_id.clone(),
             genesis_fingerprint: self.meta.genesis_fingerprint,
             checkpoint_tx_interval: self.meta.checkpoint_tx_interval,
+            max_missed_proposer_slots: self.meta.max_missed_proposer_slots,
             height: checkpoint.header.height,
             last_checkpoint_hash: checkpoint.hash(),
             last_checkpoint_time: checkpoint.header.timestamp,
@@ -915,6 +1003,7 @@ impl Ledger {
                 chain_id: self.meta.chain_id.clone(),
                 genesis_fingerprint: self.meta.genesis_fingerprint,
                 checkpoint_tx_interval: self.meta.checkpoint_tx_interval,
+                max_missed_proposer_slots: self.meta.max_missed_proposer_slots,
                 checkpoint,
             },
         )?;
@@ -931,6 +1020,7 @@ impl Ledger {
             chain_id: self.meta.chain_id.clone(),
             genesis_fingerprint: self.meta.genesis_fingerprint,
             checkpoint_tx_interval: self.meta.checkpoint_tx_interval,
+            max_missed_proposer_slots: self.meta.max_missed_proposer_slots,
             checkpoint,
             accounts: self.store.all_accounts()?,
             validators: self.store.all_validators()?,
@@ -969,6 +1059,7 @@ impl Ledger {
             chain_id: snapshot.chain_id.clone(),
             genesis_fingerprint: snapshot.genesis_fingerprint,
             checkpoint_tx_interval: snapshot.checkpoint_tx_interval,
+            max_missed_proposer_slots: snapshot.max_missed_proposer_slots,
             height: snapshot.checkpoint.header.height,
             last_checkpoint_hash: snapshot.checkpoint.hash(),
             last_checkpoint_time: snapshot.checkpoint.header.timestamp,
@@ -1017,6 +1108,7 @@ impl Ledger {
             chain_id: self.meta.chain_id.clone(),
             genesis_fingerprint: self.meta.genesis_fingerprint,
             checkpoint_tx_interval: snapshot.checkpoint_tx_interval,
+            max_missed_proposer_slots: snapshot.max_missed_proposer_slots,
             height: snapshot.checkpoint.header.height,
             last_checkpoint_hash: snapshot.checkpoint.hash(),
             last_checkpoint_time: snapshot.checkpoint.header.timestamp,
@@ -1054,6 +1146,7 @@ pub struct StateSnapshot {
     pub chain_id: String,
     pub genesis_fingerprint: Hash,
     pub checkpoint_tx_interval: u32,
+    pub max_missed_proposer_slots: u32,
     pub checkpoint: Checkpoint,
     pub accounts: Vec<(Address, Account)>,
     pub validators: Vec<Validator>,

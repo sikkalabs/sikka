@@ -3,7 +3,8 @@
 //! A validator that signs two different checkpoint hashes for the same
 //! `(height, round, kind)` is trying to split the network. That is provable
 //! with nothing more than the two signatures. Being offline, being slow, or
-//! prevoting differently across rounds never burns stake.
+//! prevoting differently across rounds never burns stake. Persistent full-batch
+//! proposer timeouts instead start the normal unbonding cooldown.
 
 use serde::{Deserialize, Serialize};
 

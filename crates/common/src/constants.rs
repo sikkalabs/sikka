@@ -40,6 +40,15 @@ pub const MIN_BOND_SUPPLY_DIVISOR: u64 = 100_000;
 /// Unbonding cooldown: seven days without rewards, still slashable.
 pub const UNBONDING_SECS: u64 = 7 * 24 * 60 * 60;
 
+/// Consecutive missed full-batch proposer turns before a validator is forced
+/// to unbond (stake is not burned; the normal cooldown still applies).
+///
+/// Only charged when a checkpoint seals a full transaction batch after the
+/// scheduled proposer timed out (`round > 0`). Partial / idle-delay seals do
+/// not increment the counter, so quiet-chain timeouts are not treated as
+/// faults. Genesis may lower this for test networks.
+pub const DEFAULT_MAX_MISSED_PROPOSER_SLOTS: u32 = 100;
+
 /// Number of recent checkpoints retained; older ones are pruned.
 pub const CHECKPOINT_HISTORY: u64 = 100;
 

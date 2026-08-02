@@ -34,6 +34,8 @@ pub struct LedgerMeta {
     pub genesis_fingerprint: Hash,
     /// Transactions per checkpoint for this chain (10,000 on mainnet).
     pub checkpoint_tx_interval: u32,
+    /// Consecutive full-batch proposer misses before forced unbond.
+    pub max_missed_proposer_slots: u32,
     /// Height of the last finalized checkpoint.
     pub height: u64,
     pub last_checkpoint_hash: Hash,
@@ -44,9 +46,9 @@ pub struct LedgerMeta {
     pub total_bonded: u64,
     /// Validators that signed the last finalized checkpoint.
     ///
-    /// The next height's inflation is shared only among these addresses (∩ still
-    /// active). Empty means "pay every active validator" — used right after
-    /// genesis, which carries no signatures.
+    /// Recorded for diagnostics and light-client sync. Inflation at the next
+    /// height is paid to every still-active bonded validator, not this subset —
+    /// otherwise two valid certificates for the same header could fork H+1.
     pub last_signers: Vec<Address>,
 }
 
@@ -55,6 +57,7 @@ impl Encode for LedgerMeta {
         w.str(&self.chain_id)
             .raw(self.genesis_fingerprint.as_bytes())
             .u32(self.checkpoint_tx_interval)
+            .u32(self.max_missed_proposer_slots)
             .u64(self.height)
             .raw(self.last_checkpoint_hash.as_bytes())
             .u64(self.last_checkpoint_time)
@@ -72,6 +75,7 @@ impl Decode for LedgerMeta {
             chain_id: r.str()?,
             genesis_fingerprint: Hash::decode(r)?,
             checkpoint_tx_interval: r.u32()?,
+            max_missed_proposer_slots: r.u32()?,
             height: r.u64()?,
             last_checkpoint_hash: Hash::decode(r)?,
             last_checkpoint_time: r.u64()?,
@@ -373,6 +377,7 @@ mod tests {
             chain_id: "sikka-test".into(),
             genesis_fingerprint: Hash([1u8; 32]),
             checkpoint_tx_interval: 4,
+            max_missed_proposer_slots: 100,
             height: 7,
             last_checkpoint_hash: Hash([2u8; 32]),
             last_checkpoint_time: 1_700_000_000,

@@ -11,7 +11,7 @@ use crate::constants::UNBONDING_SECS;
 use crate::error::Result;
 
 /// Domain tag for validator leaves in the validator Sparse Merkle Tree.
-pub const VALIDATOR_LEAF_TAG: &[u8] = b"SIKKA/validator-leaf/v1";
+pub const VALIDATOR_LEAF_TAG: &[u8] = b"SIKKA/validator-leaf/v2";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Validator {
@@ -29,6 +29,13 @@ pub struct Validator {
     pub unbonding_since: Option<u64>,
     /// Set when the validator equivocated. Slashed validators never return.
     pub slashed: bool,
+    /// Consecutive full-batch proposer turns this validator timed out on.
+    ///
+    /// Reset when they successfully propose. At
+    /// [`crate::constants::DEFAULT_MAX_MISSED_PROPOSER_SLOTS`] (or the genesis
+    /// override) the ledger starts a normal unbond — stake is not burned.
+    #[serde(default)]
+    pub missed_proposer_slots: u32,
 }
 
 impl Validator {
@@ -40,7 +47,19 @@ impl Validator {
             active_from,
             unbonding_since: None,
             slashed: false,
+            missed_proposer_slots: 0,
         }
+    }
+
+    /// Round-robin proposer for `height` at `round`.
+    ///
+    /// `active` must be in canonical address order (as returned by the ledger).
+    pub fn proposer_for_round(height: u64, round: u32, active: &[Self]) -> Option<Address> {
+        if active.is_empty() {
+            return None;
+        }
+        let index = ((height.wrapping_add(u64::from(round))) % active.len() as u64) as usize;
+        Some(active[index].address)
     }
 
     /// Whether this validator votes on checkpoints at `height`.
@@ -79,7 +98,8 @@ impl Encode for Validator {
             .u64(self.bond)
             .u64(self.active_from)
             .opt_u64(self.unbonding_since)
-            .bool(self.slashed);
+            .bool(self.slashed)
+            .u32(self.missed_proposer_slots);
     }
 }
 
@@ -92,6 +112,7 @@ impl Decode for Validator {
             active_from: r.u64()?,
             unbonding_since: r.opt_u64()?,
             slashed: r.bool()?,
+            missed_proposer_slots: r.u32()?,
         })
     }
 }

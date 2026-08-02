@@ -115,6 +115,9 @@ impl Testnet {
             allocations,
             validators,
             checkpoint_tx_interval: Some(tx_interval),
+            // Low threshold when some genesis validators stay offline so the
+            // forced-unbond path is reachable in a short testnet run.
+            max_missed_proposer_slots: if offline > 0 { Some(3) } else { None },
         };
         genesis.validate().unwrap();
 
@@ -597,6 +600,42 @@ async fn two_of_three_validators_finalize_while_one_stays_offline() {
     let root_a = net.rpc(0).chain_info().await.unwrap().state_root;
     let root_b = net.rpc(1).chain_info().await.unwrap().state_root;
     assert_eq!(root_a, root_b);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn offline_validator_is_forced_to_unbond_after_missed_proposer_slots() {
+    // Genesis lists 3 validators but only 2 run; max_missed_proposer_slots is 3
+    // for offline testnets. Drive heights until the absentee is force-unbonded.
+    let net = Testnet::start_with_offline(3, 1, 2).await;
+    net.await_peers(Duration::from_secs(10)).await;
+
+    let offline = net.validator_keys[2].0;
+    let bob = Address([0x2e; 32]);
+    let mut next_nonce = 0u64;
+    let mut unbonding = false;
+    for round in 0..24u64 {
+        net.alice_pays(bob, CHILLAR_PER_SIKKA, 2, next_nonce).await;
+        next_nonce += 2;
+        net.await_height(round + 1, Duration::from_secs(90))
+            .await;
+        let validators = net.rpc(0).validators().await.unwrap();
+        let record = validators.iter().find(|v| v.address == offline).unwrap();
+        assert!(!record.slashed, "forced unbond must not burn stake");
+        if record.unbonding_since.is_some() {
+            assert!(!record.active);
+            unbonding = true;
+            break;
+        }
+    }
+    assert!(
+        unbonding,
+        "offline genesis validator should be forced to unbond"
+    );
+
+    // Chain keeps finalizing with the remaining active set.
+    let height = net.nodes[0].node.height();
+    net.alice_pays(bob, CHILLAR_PER_SIKKA, 2, next_nonce).await;
+    net.await_height(height + 1, Duration::from_secs(90)).await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
