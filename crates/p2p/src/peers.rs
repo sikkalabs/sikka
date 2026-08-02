@@ -21,8 +21,27 @@ pub const ANNOUNCE_TAG: &[u8] = b"SIKKA/peer-announce/v3";
 /// Maximum peers tracked, so discovery cannot exhaust memory.
 pub const DEFAULT_MAX_PEERS: usize = 512;
 
-/// Consecutive failures before a peer is dropped.
+/// Consecutive failures before a peer may be dropped — and only when the book
+/// is already at [`DEFAULT_MAX_PEERS`]. Below that, failed endpoints are kept
+/// and retried with exponential backoff so a short outage cannot empty the mesh.
 pub const MAX_FAILURES: u32 = 10;
+
+/// Base delay (seconds) after the first failure: `base * 2^(failures-1)`.
+pub const BACKOFF_BASE_SECS: u64 = 2;
+
+/// Cap on per-peer dial backoff so a long outage still recovers within minutes.
+pub const BACKOFF_MAX_SECS: u64 = 300;
+
+/// Seconds to wait before dialing again after `failures` consecutive errors.
+pub fn backoff_secs(failures: u32) -> u64 {
+    if failures == 0 {
+        return 0;
+    }
+    let shift = (failures - 1).min(16);
+    BACKOFF_BASE_SECS
+        .saturating_mul(1u64 << shift)
+        .min(BACKOFF_MAX_SECS)
+}
 
 /// A signed claim: "this key is reachable at this endpoint".
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -103,6 +122,15 @@ pub struct Peer {
     pub last_seen: u64,
     #[serde(default)]
     pub failures: u32,
+    /// Unix seconds; dials are skipped until this time while backing off.
+    #[serde(default)]
+    pub backoff_until: u64,
+}
+
+impl Peer {
+    pub fn due(&self, now: u64) -> bool {
+        self.backoff_until <= now
+    }
 }
 
 /// The set of peers a node talks to.
@@ -172,6 +200,7 @@ impl PeerBook {
             existing.endpoint = endpoint;
             existing.last_seen = now;
             existing.failures = 0;
+            existing.backoff_until = 0;
             return changed;
         }
         if self.peers.len() >= self.max_peers {
@@ -202,6 +231,7 @@ impl PeerBook {
                 endpoint,
                 last_seen: now,
                 failures: 0,
+                backoff_until: 0,
             },
         );
         true
@@ -231,13 +261,29 @@ impl PeerBook {
         self.all().into_iter().map(|p| p.endpoint).collect()
     }
 
-    /// Note a failed request; the peer is dropped after too many.
-    pub fn record_failure(&mut self, endpoint: &str) {
+    /// Endpoints that are not sitting out a backoff window.
+    pub fn endpoints_due(&self, now: u64) -> Vec<String> {
+        self.all()
+            .into_iter()
+            .filter(|p| p.due(now))
+            .map(|p| p.endpoint)
+            .collect()
+    }
+
+    /// Note a failed request.
+    ///
+    /// Below [`DEFAULT_MAX_PEERS`] the endpoint is kept and retried later with
+    /// exponential backoff. Only a full book may drop a peer after
+    /// [`MAX_FAILURES`] consecutive failures — otherwise a two-node mesh dies
+    /// permanently after a brief outage.
+    pub fn record_failure(&mut self, endpoint: &str, now: u64) {
         let mut drop_address = None;
+        let at_capacity = self.peers.len() >= self.max_peers;
         for (address, peer) in self.peers.iter_mut() {
             if peer.endpoint == endpoint {
-                peer.failures += 1;
-                if peer.failures >= MAX_FAILURES {
+                peer.failures = peer.failures.saturating_add(1);
+                peer.backoff_until = now.saturating_add(backoff_secs(peer.failures));
+                if at_capacity && peer.failures >= MAX_FAILURES {
                     drop_address = Some(*address);
                 }
                 break;
@@ -252,6 +298,7 @@ impl PeerBook {
         for peer in self.peers.values_mut() {
             if peer.endpoint == endpoint {
                 peer.failures = 0;
+                peer.backoff_until = 0;
                 peer.last_seen = now;
                 break;
             }
@@ -365,24 +412,54 @@ mod tests {
     }
 
     #[test]
-    fn failing_peers_are_eventually_dropped() {
+    fn failing_peers_backoff_instead_of_dropping_a_small_book() {
         let me = Keypair::generate().unwrap();
         let peer = Keypair::generate().unwrap();
         let mut book = PeerBook::new(PublicKey::new(*me.public_bytes()).address());
         book.record(&announce(&peer, "http://a:8080", NOW), NOW, chain_id())
             .unwrap();
 
-        for _ in 0..MAX_FAILURES - 1 {
-            book.record_failure("http://a:8080");
+        for i in 1..=MAX_FAILURES {
+            book.record_failure("http://a:8080", NOW + i as u64);
+        }
+        assert_eq!(book.len(), 1, "small books must keep failed endpoints");
+        let kept = &book.all()[0];
+        assert_eq!(kept.failures, MAX_FAILURES);
+        assert_eq!(kept.backoff_until, NOW + MAX_FAILURES as u64 + backoff_secs(MAX_FAILURES));
+        assert!(book.endpoints_due(NOW + MAX_FAILURES as u64).is_empty());
+        assert_eq!(
+            book.endpoints_due(kept.backoff_until),
+            vec!["http://a:8080".to_string()]
+        );
+
+        book.record_success("http://a:8080", NOW + 100);
+        assert_eq!(book.all()[0].failures, 0);
+        assert_eq!(book.all()[0].backoff_until, 0);
+    }
+
+    #[test]
+    fn full_books_may_drop_peers_after_max_failures() {
+        let me = Keypair::generate().unwrap();
+        let mut book = PeerBook::with_max(PublicKey::new(*me.public_bytes()).address(), 2);
+        book.add_endpoint("http://a:8080", NOW);
+        book.add_endpoint("http://b:8080", NOW);
+        assert_eq!(book.len(), 2);
+
+        for i in 1..=MAX_FAILURES {
+            book.record_failure("http://a:8080", NOW + i as u64);
         }
         assert_eq!(book.len(), 1);
-        book.record_success("http://a:8080", NOW + 1);
-        assert_eq!(book.all()[0].failures, 0);
+        assert_eq!(book.endpoints(), vec!["http://b:8080".to_string()]);
+    }
 
-        for _ in 0..MAX_FAILURES {
-            book.record_failure("http://a:8080");
-        }
-        assert!(book.is_empty());
+    #[test]
+    fn backoff_doubles_until_the_cap() {
+        assert_eq!(backoff_secs(0), 0);
+        assert_eq!(backoff_secs(1), 2);
+        assert_eq!(backoff_secs(2), 4);
+        assert_eq!(backoff_secs(3), 8);
+        assert_eq!(backoff_secs(10), BACKOFF_MAX_SECS);
+        assert_eq!(backoff_secs(20), BACKOFF_MAX_SECS);
     }
 
     #[test]

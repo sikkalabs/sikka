@@ -457,7 +457,7 @@ impl Node {
     }
 
     pub fn peer_endpoints(&self) -> Vec<String> {
-        self.peers.lock().endpoints()
+        self.peers.lock().endpoints_due(now_secs())
     }
 
     // ---- transactions ----------------------------------------------------
@@ -1440,7 +1440,7 @@ impl Node {
     }
 
     pub fn record_peer_failure(&self, endpoint: &str) {
-        self.peers.lock().record_failure(endpoint);
+        self.peers.lock().record_failure(endpoint, now_secs());
     }
 
     pub fn record_peer_success(&self, endpoint: &str) {
