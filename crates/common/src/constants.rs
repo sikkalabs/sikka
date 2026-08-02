@@ -3,14 +3,14 @@
 /// Smallest divisible unit per SIKKA: 1 SIKKA = 10^9 CHILLAR.
 pub const CHILLAR_PER_SIKKA: u64 = 1_000_000_000;
 
-/// Anti-spam quota ceiling per account.
-pub const MAX_CREDITS: u32 = 100;
+/// Anti-spam battery ceiling per account.
+pub const MAX_BATTERY: u32 = 100;
 
-/// One credit regenerates every 60 seconds of signed transaction time.
-pub const CREDIT_REGEN_SECS: u64 = 60;
+/// One battery unit regenerates every 60 seconds of signed transaction time.
+pub const BATTERY_REGEN_SECS: u64 = 60;
 
-/// Every transaction burns exactly one credit.
-pub const CREDIT_COST_PER_TX: u32 = 1;
+/// Every transaction burns exactly one battery unit.
+pub const BATTERY_COST_PER_TX: u32 = 1;
 
 /// A checkpoint is produced every 10,000 confirmed transactions. There is no
 /// time-based fallback: an idle network produces no checkpoints.

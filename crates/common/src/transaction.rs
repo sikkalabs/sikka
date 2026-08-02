@@ -2,7 +2,7 @@
 //!
 //! SIKKA does one thing — move value — so there are only three transaction
 //! kinds and no fee field: validators are paid by protocol inflation, and spam
-//! is bounded by per-account credits instead of price.
+//! is bounded by per-account battery instead of price.
 
 use serde::{Deserialize, Serialize};
 
@@ -67,7 +67,7 @@ pub struct Transaction {
     /// Amount in CHILLAR.
     pub amount: u64,
     pub nonce: u64,
-    /// Sender-signed unix timestamp; the consensus clock for credit regen.
+    /// Sender-signed unix timestamp; the consensus clock for battery regen.
     pub timestamp: u64,
     /// Human-readable chain this transaction is valid for.
     pub chain_id: String,

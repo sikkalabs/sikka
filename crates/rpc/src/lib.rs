@@ -1,7 +1,7 @@
 //! JSON-RPC 2.0 protocol for wallets and clients.
 //!
 //! The RPC surface is shaped by what a stateless wallet actually needs: a
-//! balance, a nonce, a credit count, a way to submit a signed transaction, and a
+//! balance, a nonce, a battery level, a way to submit a signed transaction, and a
 //! Merkle proof it can check against a signed checkpoint. There are no
 //! history-walking methods, because there is no history to walk.
 

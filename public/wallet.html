@@ -175,8 +175,8 @@
           <div class="stat-value accent" id="balance">—</div>
         </div>
         <div>
-          <div class="stat-label">Credits</div>
-          <div class="stat-value" id="credits">—</div>
+          <div class="stat-label">Battery</div>
+          <div class="stat-value" id="battery">—</div>
         </div>
         <div>
           <div class="stat-label">Nonce / next</div>
@@ -403,7 +403,7 @@
       try {
         const info = await rpc("account.get", { address: wallet.address });
         $("balance").textContent = `${formatSikka(info.balance)} SIKKA`;
-        $("credits").textContent = `${info.credits_now} available`;
+        $("battery").textContent = `${info.battery_now} / 100`;
         $("nonce").textContent = `${info.nonce} → ${info.next_nonce}`;
         $("bond").textContent =
           info.bond == null ? "none" : `${formatSikka(info.bond)} SIKKA`;

@@ -47,10 +47,10 @@ pub enum Error {
         balance: u64,
         needed: u64,
     },
-    #[error("insufficient credits for {address}: has {credits}, needs {needed}")]
-    InsufficientCredits {
+    #[error("insufficient battery for {address}: has {battery}, needs {needed}")]
+    InsufficientBattery {
         address: Address,
-        credits: u32,
+        battery: u32,
         needed: u32,
     },
     #[error("amount must be greater than zero")]

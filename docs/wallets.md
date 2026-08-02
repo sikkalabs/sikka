@@ -91,7 +91,7 @@ const signature = ml_dsa87.sign(msg, secretKey, {
 ```
 
 `timestamp` is unix seconds; must be within ±5 minutes of the node clock. Each
-send burns **1 credit** (regen +1/min, cap 100).
+send burns **1 battery** (regen +1/min, cap 100).
 
 ---
 

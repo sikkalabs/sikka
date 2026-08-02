@@ -17,7 +17,7 @@ use sikka_common::account::Account;
 use sikka_common::bytes::{Address, Hash};
 use sikka_common::checkpoint::{Checkpoint, CheckpointHeader};
 use sikka_common::constants::{
-    min_bond, CREDIT_COST_PER_TX, DEFAULT_MAX_MISSED_PROPOSER_SLOTS,
+    min_bond, BATTERY_COST_PER_TX, DEFAULT_MAX_MISSED_PROPOSER_SLOTS,
 };
 use sikka_common::error::{Error, Result};
 use sikka_common::genesis::GenesisConfig;
@@ -210,9 +210,9 @@ impl<'a> Overlay<'a> {
         self.validators.insert(address, None);
     }
 
-    /// Credit an account, creating it if it does not exist.
+    /// Credit an account's balance, creating it if it does not exist.
     ///
-    /// A newly created account starts with zero credits anchored at `now`, so
+    /// A newly created account starts with an empty battery anchored at `now`, so
     /// funding a fresh address does not hand the recipient a spam allowance.
     fn credit(&mut self, address: Address, amount: u64, now: u64) -> Result<()> {
         let account = match self.account(&address)? {
@@ -355,7 +355,7 @@ impl Ledger {
                 Account {
                     balance: allocation.amount,
                     nonce: 0,
-                    credits: GenesisConfig::initial_credits(),
+                    battery: GenesisConfig::initial_battery(),
                     last_regen_time: genesis.timestamp,
                 },
             );
@@ -537,7 +537,7 @@ impl Ledger {
     /// never be afforded by the checkpoint that would carry it, since inflation
     /// pays validators rather than senders, so keeping it out of the mempool
     /// costs nothing and refusing to is a free way for anyone to fill every
-    /// node's mempool — credits are only charged when a transaction executes.
+    /// node's mempool — battery is only charged when a transaction executes.
     ///
     /// The rules come from `apply_transaction`, the same code a checkpoint runs,
     /// so admission cannot drift away from execution.
@@ -763,13 +763,13 @@ impl Ledger {
             });
         }
 
-        // Credits regenerate from the transaction's own signed timestamp.
-        sender.settle_credits(tx.timestamp);
-        if sender.credits < CREDIT_COST_PER_TX {
-            return Err(Error::InsufficientCredits {
+        // Battery regenerates from the transaction's own signed timestamp.
+        sender.settle_battery(tx.timestamp);
+        if sender.battery < BATTERY_COST_PER_TX {
+            return Err(Error::InsufficientBattery {
                 address: tx.from,
-                credits: sender.credits,
-                needed: CREDIT_COST_PER_TX,
+                battery: sender.battery,
+                needed: BATTERY_COST_PER_TX,
             });
         }
 
@@ -845,7 +845,7 @@ impl Ledger {
         }
 
         sender.nonce += 1;
-        sender.credits -= CREDIT_COST_PER_TX;
+        sender.battery -= BATTERY_COST_PER_TX;
         overlay.set_account(tx.from, sender);
 
         if tx.kind == TxKind::Transfer {

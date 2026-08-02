@@ -41,14 +41,14 @@ pub struct AccountInfo {
     pub exists: bool,
     pub balance: u64,
     pub nonce: u64,
-    /// Credits as of the last transaction this account sent.
-    pub credits: u64,
-    /// Credits available right now, including regeneration since then.
-    pub credits_now: u64,
+    /// Battery as of the last transaction this account sent.
+    pub battery: u64,
+    /// Battery available right now, including regeneration since then.
+    pub battery_now: u64,
     pub last_regen_time: u64,
-    /// Seconds until the next credit, when there are none left.
+    /// Seconds until the next battery unit, when there are none left.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub seconds_until_credit: Option<u64>,
+    pub seconds_until_battery: Option<u64>,
     /// The nonce a new transaction should use, counting anything pending.
     pub next_nonce: u64,
     /// Bond, if this account is a validator.
@@ -70,10 +70,10 @@ impl AccountInfo {
                 exists: true,
                 balance: account.balance,
                 nonce: account.nonce,
-                credits: u64::from(account.credits),
-                credits_now: u64::from(account.credits_at(now)),
+                battery: u64::from(account.battery),
+                battery_now: u64::from(account.battery_at(now)),
                 last_regen_time: account.last_regen_time,
-                seconds_until_credit: account.seconds_until_credit(now),
+                seconds_until_battery: account.seconds_until_battery(now),
                 next_nonce,
                 bond,
             },
@@ -82,10 +82,10 @@ impl AccountInfo {
                 exists: false,
                 balance: 0,
                 nonce: 0,
-                credits: 0,
-                credits_now: 0,
+                battery: 0,
+                battery_now: 0,
                 last_regen_time: 0,
-                seconds_until_credit: None,
+                seconds_until_battery: None,
                 next_nonce: 0,
                 bond: None,
             },
@@ -159,19 +159,19 @@ mod tests {
     use super::*;
 
     #[test]
-    fn account_info_reflects_credit_regeneration() {
+    fn account_info_reflects_battery_regeneration() {
         let account = Account {
             balance: 500,
             nonce: 3,
-            credits: 2,
+            battery: 2,
             last_regen_time: 1_000,
         };
         let info =
             AccountInfo::from_account(Address([1u8; 32]), Some(account), 1_000 + 180, 3, None);
         assert!(info.exists);
-        assert_eq!(info.credits, 2);
-        assert_eq!(info.credits_now, 5);
-        assert_eq!(info.seconds_until_credit, None);
+        assert_eq!(info.battery, 2);
+        assert_eq!(info.battery_now, 5);
+        assert_eq!(info.seconds_until_battery, None);
     }
 
     #[test]
@@ -184,16 +184,16 @@ mod tests {
     }
 
     #[test]
-    fn a_credit_starved_account_reports_the_wait() {
+    fn a_battery_starved_account_reports_the_wait() {
         let account = Account {
             balance: 1,
             nonce: 0,
-            credits: 0,
+            battery: 0,
             last_regen_time: 1_000,
         };
         let info = AccountInfo::from_account(Address([1u8; 32]), Some(account), 1_020, 0, None);
-        assert_eq!(info.credits_now, 0);
-        assert_eq!(info.seconds_until_credit, Some(40));
+        assert_eq!(info.battery_now, 0);
+        assert_eq!(info.seconds_until_battery, Some(40));
     }
 
     #[test]
@@ -203,7 +203,7 @@ mod tests {
             Some(Account {
                 balance: 1,
                 nonce: 2,
-                credits: 3,
+                battery: 3,
                 last_regen_time: 4,
             }),
             4,

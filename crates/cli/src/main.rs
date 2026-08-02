@@ -57,7 +57,7 @@ enum Command {
     },
     /// Show the address of a keystore.
     Address,
-    /// Show an account's balance, nonce and spam credits.
+    /// Show an account's balance, nonce and spam battery.
     Balance {
         /// Address to look up; defaults to the keystore's own.
         address: Option<Address>,
@@ -211,9 +211,9 @@ async fn run(cli: Cli) -> Result<()> {
             } else {
                 println!("sent {} SIKKA to {}", format_sikka(amount), to);
                 println!("transaction {}", receipt.id);
-                if account.credits_now <= 1 {
+                if account.battery_now <= 1 {
                     println!(
-                        "note: this account is out of spam credits; the next transaction has to wait"
+                        "note: this account's spam battery is empty; the next transaction has to wait"
                     );
                 }
             }

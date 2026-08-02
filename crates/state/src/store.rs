@@ -398,7 +398,7 @@ mod tests {
         let account = Account {
             balance: 500,
             nonce: 2,
-            credits: 90,
+            battery: 90,
             last_regen_time: 123,
         };
         store
@@ -418,7 +418,7 @@ mod tests {
         let account = Account {
             balance: 1,
             nonce: 0,
-            credits: 0,
+            battery: 0,
             last_regen_time: 0,
         };
         store
@@ -447,7 +447,7 @@ mod tests {
                 Some(Account {
                     balance: u64::from(i),
                     nonce: 0,
-                    credits: 0,
+                    battery: 0,
                     last_regen_time: 0,
                 }),
             ));
@@ -501,7 +501,7 @@ mod tests {
         let account = Account {
             balance: 42,
             nonce: 1,
-            credits: 10,
+            battery: 10,
             last_regen_time: 5,
         };
         {

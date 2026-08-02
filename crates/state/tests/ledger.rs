@@ -1,8 +1,8 @@
-//! Ledger execution tests: transfers, credits, bonding, inflation, snapshots.
+//! Ledger execution tests: transfers, battery, bonding, inflation, snapshots.
 
 use sikka_common::bytes::{Address, PublicKey};
 use sikka_common::checkpoint::Checkpoint;
-use sikka_common::constants::{MAX_CREDITS, UNBONDING_SECS};
+use sikka_common::constants::{MAX_BATTERY, UNBONDING_SECS};
 use sikka_common::error::Error;
 use sikka_common::genesis::{GenesisAllocation, GenesisConfig, GenesisValidator};
 use sikka_common::transaction::Transaction;
@@ -111,7 +111,7 @@ fn genesis_creates_the_committed_state() {
         ALLOCATION - BOND
     );
     assert_eq!(f.ledger.account(&alice).unwrap().balance, ALLOCATION);
-    assert_eq!(f.ledger.account(&alice).unwrap().credits, MAX_CREDITS);
+    assert_eq!(f.ledger.account(&alice).unwrap().battery, MAX_BATTERY);
 
     assert_eq!(
         f.genesis_checkpoint.header.state_root,
@@ -184,12 +184,12 @@ fn transfer_moves_value_and_advances_nonce() {
     assert_eq!(f.ledger.height(), 1);
 
     // A brand new account starts with no spam allowance.
-    assert_eq!(f.ledger.account(&bob).unwrap().credits, 0);
+    assert_eq!(f.ledger.account(&bob).unwrap().battery, 0);
     assert_eq!(f.ledger.account(&bob).unwrap().last_regen_time, now);
 }
 
 #[test]
-fn credits_are_spent_and_regenerate() {
+fn battery_is_spent_and_regenerates() {
     let mut f = Fixture::new();
     let alice = Fixture::address(&f.alice);
     let bob = Fixture::address(&f.bob);
@@ -200,25 +200,25 @@ fn credits_are_spent_and_regenerate() {
         .collect();
     f.apply(&txs, now);
 
-    // Alice had a full quota at genesis and spent three credits.
-    assert_eq!(f.ledger.account(&alice).unwrap().credits, MAX_CREDITS - 3);
+    // Alice had a full quota at genesis and spent three battery units.
+    assert_eq!(f.ledger.account(&alice).unwrap().battery, MAX_BATTERY - 3);
     assert_eq!(f.ledger.account(&alice).unwrap().nonce, 3);
 
-    // Ten minutes later ten credits have come back, capped at the maximum.
+    // Ten minutes later ten units have come back, capped at the maximum.
     let later = now + 60 * 10;
     assert_eq!(
-        f.ledger.account(&alice).unwrap().credits_at(later),
-        MAX_CREDITS
+        f.ledger.account(&alice).unwrap().battery_at(later),
+        MAX_BATTERY
     );
 }
 
 #[test]
-fn spending_more_than_the_credit_quota_is_rejected() {
+fn spending_more_than_the_battery_quota_is_rejected() {
     let mut f = Fixture::new();
     let bob = Fixture::address(&f.bob);
     let now = GENESIS_TIME + 600;
 
-    // Bob receives funds, so he exists but has zero credits.
+    // Bob receives funds, so he exists but has an empty battery.
     f.apply(
         &[Transaction::transfer(&f.alice, bob, 1_000, 0, now, f.chain_id()).unwrap()],
         now,
@@ -232,10 +232,10 @@ fn spending_more_than_the_credit_quota_is_rejected() {
     assert!(outcome.applied.is_empty());
     assert!(matches!(
         outcome.rejected[0].1,
-        Error::InsufficientCredits { .. }
+        Error::InsufficientBattery { .. }
     ));
 
-    // One minute later Bob has exactly one credit and can spend.
+    // One minute later Bob has exactly one battery and can spend.
     let later = now + 60;
     let tx = Transaction::transfer(&f.bob, Address([7u8; 32]), 10, 0, later, f.chain_id()).unwrap();
     let outcome = f.apply(&[tx], later);

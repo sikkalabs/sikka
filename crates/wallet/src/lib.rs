@@ -51,7 +51,7 @@ impl Wallet {
 
     /// Sign a transfer.
     ///
-    /// `timestamp` is signed and becomes the credit-regeneration clock for the
+    /// `timestamp` is signed and becomes the battery-regeneration clock for the
     /// sending account, so it must be the wallet's honest view of now: a node
     /// rejects anything more than five minutes from its own clock.
     ///

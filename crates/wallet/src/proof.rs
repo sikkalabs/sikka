@@ -110,13 +110,13 @@ mod tests {
         let account = Account {
             balance: 5_000,
             nonce: 2,
-            credits: 40,
+            battery: 40,
             last_regen_time: 1_000,
         };
         let other_account = Account {
             balance: 1,
             nonce: 0,
-            credits: 0,
+            battery: 0,
             last_regen_time: 1_000,
         };
 
@@ -186,7 +186,7 @@ mod tests {
         f.proof.account = Some(Account {
             balance: 999_999,
             nonce: 2,
-            credits: 40,
+            battery: 40,
             last_regen_time: 1_000,
         });
         assert_eq!(
@@ -251,7 +251,7 @@ mod tests {
         let other_account = Account {
             balance: 1,
             nonce: 0,
-            credits: 0,
+            battery: 0,
             last_regen_time: 1_000,
         };
         smt.insert(other.to_array(), other_account.leaf_hash(&other));
@@ -272,7 +272,7 @@ mod tests {
         lying.account = Some(Account {
             balance: 1,
             nonce: 0,
-            credits: 0,
+            battery: 0,
             last_regen_time: 0,
         });
         assert_eq!(
@@ -291,7 +291,7 @@ mod tests {
         tampered.account = Some(Account {
             balance: 1,
             nonce: 0,
-            credits: 0,
+            battery: 0,
             last_regen_time: 0,
         });
         assert!(verify_account_proof(&tampered, &[]).is_err());

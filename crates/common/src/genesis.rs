@@ -8,7 +8,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::bytes::{Address, Hash, PublicKey};
-use crate::constants::{min_bond, DEFAULT_CHAIN_ID, MAX_CREDITS};
+use crate::constants::{min_bond, DEFAULT_CHAIN_ID, MAX_BATTERY};
 use crate::error::{Error, Result};
 
 /// Domain tag for the genesis fingerprint.
@@ -41,7 +41,7 @@ impl GenesisValidator {
 pub struct GenesisConfig {
     #[serde(default = "default_chain_id")]
     pub chain_id: String,
-    /// Genesis unix timestamp; also the credit clock anchor for allocations.
+    /// Genesis unix timestamp; also the battery clock anchor for allocations.
     pub timestamp: u64,
     pub allocations: Vec<GenesisAllocation>,
     pub validators: Vec<GenesisValidator>,
@@ -75,14 +75,14 @@ impl GenesisConfig {
         Ok(total)
     }
 
-    /// Credits every genesis account starts with.
+    /// Battery every genesis account starts with.
     ///
     /// Allocations are chosen by the network rather than created by a
-    /// transaction, so they start with a full quota; the "new accounts start at
+    /// transaction, so they start with a full charge; the "new accounts start at
     /// zero" rule exists to stop an attacker minting fresh spam identities,
     /// which genesis by definition cannot do.
-    pub const fn initial_credits() -> u32 {
-        MAX_CREDITS
+    pub const fn initial_battery() -> u32 {
+        MAX_BATTERY
     }
 
     /// A stable fingerprint of the genesis configuration.

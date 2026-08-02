@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::bytes::{Address, Hash};
 use crate::codec::{Decode, Encode, Reader, Writer};
-use crate::constants::{CREDIT_REGEN_SECS, MAX_CREDITS};
+use crate::constants::{BATTERY_REGEN_SECS, MAX_BATTERY};
 use crate::error::Result;
 
 /// Domain tag for account leaves in the Sparse Merkle Tree.
@@ -17,61 +17,60 @@ pub struct Account {
     pub balance: u64,
     /// Next expected transaction nonce; replay protection.
     pub nonce: u64,
-    /// Anti-spam quota as of `last_regen_time`.
-    pub credits: u32,
-    /// Timestamp the credit quota was last settled at.
+    /// Anti-spam battery as of `last_regen_time`.
+    pub battery: u32,
+    /// Timestamp the battery was last settled at.
     pub last_regen_time: u64,
 }
 
 impl Account {
     /// An account created as the recipient of a transfer.
     ///
-    /// It starts with zero credits and its regeneration clock anchored at the
-    /// creating transaction's timestamp, so a freshly funded account cannot
-    /// immediately spam: credits must accrue in real time first.
+    /// It starts with an empty battery and its regeneration clock anchored at
+    /// the creating transaction's timestamp, so a freshly funded account cannot
+    /// immediately spam: charge must accrue in real time first.
     pub fn new_funded(balance: u64, created_at: u64) -> Self {
         Self {
             balance,
             nonce: 0,
-            credits: 0,
+            battery: 0,
             last_regen_time: created_at,
         }
     }
 
-    /// Credits available at time `now`, without mutating state.
+    /// Battery available at time `now`, without mutating state.
     ///
-    /// This is also the read model behind the `getCredits` RPC: it answers "how
-    /// many transactions could this account send right now".
-    pub fn credits_at(&self, now: u64) -> u32 {
-        let elapsed = now.saturating_sub(self.last_regen_time) / CREDIT_REGEN_SECS;
-        let regenerated = u64::from(self.credits).saturating_add(elapsed);
-        u32::try_from(regenerated.min(u64::from(MAX_CREDITS))).unwrap_or(MAX_CREDITS)
+    /// Answers "how many transactions could this account send right now".
+    pub fn battery_at(&self, now: u64) -> u32 {
+        let elapsed = now.saturating_sub(self.last_regen_time) / BATTERY_REGEN_SECS;
+        let regenerated = u64::from(self.battery).saturating_add(elapsed);
+        u32::try_from(regenerated.min(u64::from(MAX_BATTERY))).unwrap_or(MAX_BATTERY)
     }
 
-    /// Settle credit regeneration up to `now`.
+    /// Settle battery regeneration up to `now`.
     ///
     /// `now` is always a transaction's signed timestamp during execution, never
     /// a validator's wall clock, so every node computes the same result.
-    pub fn settle_credits(&mut self, now: u64) {
+    pub fn settle_battery(&mut self, now: u64) {
         if now <= self.last_regen_time {
-            // Ignore non-monotonic timestamps rather than handing out credits.
+            // Ignore non-monotonic timestamps rather than handing out charge.
             return;
         }
-        self.credits = self.credits_at(now);
+        self.battery = self.battery_at(now);
         self.last_regen_time = now;
     }
 
-    /// Seconds until at least one credit is available, or `None` if one already
-    /// is.
-    pub fn seconds_until_credit(&self, now: u64) -> Option<u64> {
-        if self.credits_at(now) > 0 {
+    /// Seconds until at least one battery unit is available, or `None` if one
+    /// already is.
+    pub fn seconds_until_battery(&self, now: u64) -> Option<u64> {
+        if self.battery_at(now) > 0 {
             return None;
         }
-        let elapsed = now.saturating_sub(self.last_regen_time) % CREDIT_REGEN_SECS;
-        Some(CREDIT_REGEN_SECS - elapsed)
+        let elapsed = now.saturating_sub(self.last_regen_time) % BATTERY_REGEN_SECS;
+        Some(BATTERY_REGEN_SECS - elapsed)
     }
 
-    /// SMT leaf value: `SHA3-256(tag || address || balance || nonce || credits || last_regen_time)`.
+    /// SMT leaf value: `SHA3-256(tag || address || balance || nonce || battery || last_regen_time)`.
     pub fn leaf_hash(&self, address: &Address) -> Hash {
         let mut w = Writer::with_capacity(64);
         w.raw(address.as_bytes());
@@ -88,7 +87,7 @@ impl Encode for Account {
     fn encode(&self, w: &mut Writer) {
         w.u64(self.balance)
             .u64(self.nonce)
-            .u32(self.credits)
+            .u32(self.battery)
             .u64(self.last_regen_time);
     }
 }
@@ -98,7 +97,7 @@ impl Decode for Account {
         Ok(Self {
             balance: r.u64()?,
             nonce: r.u64()?,
-            credits: r.u32()?,
+            battery: r.u32()?,
             last_regen_time: r.u64()?,
         })
     }
@@ -113,7 +112,7 @@ mod tests {
         let a = Account {
             balance: 1_000,
             nonce: 5,
-            credits: 92,
+            battery: 92,
             last_regen_time: 1_700_000_000,
         };
         let bytes = a.to_bytes();
@@ -122,42 +121,42 @@ mod tests {
     }
 
     #[test]
-    fn credits_regenerate_one_per_minute() {
+    fn battery_regenerates_one_per_minute() {
         let a = Account {
             balance: 0,
             nonce: 0,
-            credits: 10,
+            battery: 10,
             last_regen_time: 1_000,
         };
-        assert_eq!(a.credits_at(1_000), 10);
-        assert_eq!(a.credits_at(1_059), 10);
-        assert_eq!(a.credits_at(1_060), 11);
-        assert_eq!(a.credits_at(1_000 + 60 * 5), 15);
+        assert_eq!(a.battery_at(1_000), 10);
+        assert_eq!(a.battery_at(1_059), 10);
+        assert_eq!(a.battery_at(1_060), 11);
+        assert_eq!(a.battery_at(1_000 + 60 * 5), 15);
     }
 
     #[test]
-    fn credits_saturate_at_max() {
+    fn battery_saturates_at_max() {
         let a = Account {
             balance: 0,
             nonce: 0,
-            credits: 99,
+            battery: 99,
             last_regen_time: 0,
         };
-        assert_eq!(a.credits_at(60 * 1_000_000), MAX_CREDITS);
-        assert_eq!(a.credits_at(u64::MAX), MAX_CREDITS);
+        assert_eq!(a.battery_at(60 * 1_000_000), MAX_BATTERY);
+        assert_eq!(a.battery_at(u64::MAX), MAX_BATTERY);
     }
 
     #[test]
-    fn credits_never_go_backwards_in_time() {
+    fn battery_never_goes_backwards_in_time() {
         let mut a = Account {
             balance: 0,
             nonce: 0,
-            credits: 5,
+            battery: 5,
             last_regen_time: 10_000,
         };
-        assert_eq!(a.credits_at(5_000), 5);
-        a.settle_credits(5_000);
-        assert_eq!(a.credits, 5);
+        assert_eq!(a.battery_at(5_000), 5);
+        a.settle_battery(5_000);
+        assert_eq!(a.battery, 5);
         assert_eq!(a.last_regen_time, 10_000);
     }
 
@@ -166,21 +165,21 @@ mod tests {
         let mut a = Account {
             balance: 0,
             nonce: 0,
-            credits: 0,
+            battery: 0,
             last_regen_time: 1_000,
         };
-        a.settle_credits(1_000 + 3 * 60);
-        assert_eq!(a.credits, 3);
+        a.settle_battery(1_000 + 3 * 60);
+        assert_eq!(a.battery, 3);
         assert_eq!(a.last_regen_time, 1_180);
     }
 
     #[test]
-    fn new_account_starts_with_no_credits() {
+    fn new_account_starts_with_empty_battery() {
         let a = Account::new_funded(500, 1_000);
-        assert_eq!(a.credits_at(1_000), 0);
-        assert_eq!(a.seconds_until_credit(1_000), Some(60));
-        assert_eq!(a.credits_at(1_060), 1);
-        assert_eq!(a.seconds_until_credit(1_060), None);
+        assert_eq!(a.battery_at(1_000), 0);
+        assert_eq!(a.seconds_until_battery(1_000), Some(60));
+        assert_eq!(a.battery_at(1_060), 1);
+        assert_eq!(a.seconds_until_battery(1_060), None);
     }
 
     #[test]
@@ -190,7 +189,7 @@ mod tests {
         let a = Account {
             balance: 1,
             nonce: 2,
-            credits: 3,
+            battery: 3,
             last_regen_time: 4,
         };
 
@@ -205,7 +204,7 @@ mod tests {
         assert_ne!(a.leaf_hash(&addr), c.leaf_hash(&addr));
 
         let mut d = a;
-        d.credits += 1;
+        d.battery += 1;
         assert_ne!(a.leaf_hash(&addr), d.leaf_hash(&addr));
 
         let mut e = a;

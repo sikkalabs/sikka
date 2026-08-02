@@ -416,7 +416,7 @@ async fn a_wallet_can_verify_a_balance_without_trusting_the_node() {
     tampered.account = Some(sikka_common::account::Account {
         balance: 1_000_000 * CHILLAR_PER_SIKKA,
         nonce: 0,
-        credits: 0,
+        battery: 0,
         last_regen_time: 0,
     });
     assert!(verify_account_proof(&tampered, &net.validator_keys).is_err());

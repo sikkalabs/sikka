@@ -25,9 +25,9 @@ pub fn print_account(info: &AccountInfo) {
     println!("balance      {} SIKKA", format_sikka(info.balance));
     println!("nonce        {}", info.nonce);
     println!("next nonce   {}", info.next_nonce);
-    println!("credits      {} available now", info.credits_now);
-    if let Some(seconds) = info.seconds_until_credit {
-        println!("             next credit in {seconds}s");
+    println!("battery      {} available now", info.battery_now);
+    if let Some(seconds) = info.seconds_until_battery {
+        println!("             next charge in {seconds}s");
     }
     if let Some(bond) = info.bond {
         println!("bond         {} SIKKA", format_sikka(bond));

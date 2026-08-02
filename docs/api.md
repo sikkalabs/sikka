@@ -146,8 +146,8 @@ remains. Confirm a payment by reading the recipient's balance.
 
 **Params:** `{ "address": "0x…" }`
 
-**Result:** `address`, `exists`, `balance`, `nonce`, `credits`, `credits_now`,
-`last_regen_time`, `seconds_until_credit?`, `next_nonce`, `bond?`.
+**Result:** `address`, `exists`, `balance`, `nonce`, `battery`, `battery_now`,
+`last_regen_time`, `seconds_until_battery?`, `next_nonce`, `bond?`.
 
 ### `account.proof`
 

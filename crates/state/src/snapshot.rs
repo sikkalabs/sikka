@@ -701,7 +701,7 @@ mod tests {
                 Account {
                     balance: 90,
                     nonce: 2,
-                    credits: 3,
+                    battery: 3,
                     last_regen_time: 4,
                 },
             )
@@ -787,7 +787,7 @@ mod tests {
                     Account {
                         balance: 1,
                         nonce: index,
-                        credits: 1,
+                        battery: 1,
                         last_regen_time: 1_700_000_000,
                     },
                 )
@@ -865,7 +865,7 @@ mod tests {
                     Account {
                         balance: index + 1,
                         nonce: index,
-                        credits: index as u32,
+                        battery: index as u32,
                         last_regen_time: 1_700_000_000 + index,
                     },
                 )

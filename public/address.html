@@ -295,8 +295,8 @@
           <div class="value" id="bond">—</div>
         </div>
         <div>
-          <div class="label">Credits</div>
-          <div class="value" id="credits">—</div>
+          <div class="label">Battery</div>
+          <div class="value" id="battery">—</div>
         </div>
         <div>
           <div class="label">Nonce / next</div>
@@ -431,7 +431,7 @@
         $("balance").textContent = formatSikka(total);
         $("liquid").textContent = formatSikka(liquid);
         $("bond").textContent = bond > 0n ? formatSikka(bond) : "—";
-        $("credits").textContent = `${info.credits_now} / ${info.credits}`;
+        $("battery").textContent = `${info.battery_now} / 100`;
         $("nonce").textContent = `${info.nonce} / ${info.next_nonce}`;
 
         const existsPill = $("existsPill");
