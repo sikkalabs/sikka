@@ -483,10 +483,12 @@
       $("verify").disabled = true;
       try {
         const proof = await rpc("account.proof", { address });
-        const height = proof.checkpoint?.header?.height;
+        // CheckpointHeader is serde-flattened onto Checkpoint, so state_root
+        // lives on checkpoint itself — not checkpoint.header.
+        const height = proof.checkpoint?.height;
         const root = String(proof.state_root || "").toLowerCase();
-        const committed = String(proof.checkpoint?.header?.state_root || "").toLowerCase();
-        if (!root || root !== committed) {
+        const committed = String(proof.checkpoint?.state_root || "").toLowerCase();
+        if (!root || !committed || root !== committed) {
           throw new Error("proof state_root does not match the checkpoint");
         }
         const present = proof.account != null;
