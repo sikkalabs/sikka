@@ -219,11 +219,11 @@
     </div>
   </main>
 
+  <script type="module" src="wallet_deps.js"
+          integrity="sha384-wi/Kzjza9dsxdaH/lEdLTMxZB7x4bK0vSJAf5Cvy2bfys1GrQrSI65nE7MnjcC0C"
+          crossorigin="anonymous"></script>
   <script type="module">
-    import { ml_dsa87 } from "https://esm.sh/@noble/post-quantum@0.6.1/ml-dsa.js";
-    import { randomBytes } from "https://esm.sh/@noble/post-quantum@0.6.1/utils.js";
-    import { sha3_256 } from "https://esm.sh/@noble/hashes@2.2.0/sha3.js";
-    import JSONBig from "https://esm.sh/json-bigint@1.0.0";
+    const { ml_dsa87, randomBytes, sha3_256, JSONBig } = globalThis.__sikkaWalletDeps;
 
     const SEED_LEN = 32;
     const SK_LEN = 4896;
