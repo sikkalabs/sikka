@@ -1,6 +1,6 @@
 # SIKKA — The Whitepaper
 
-**Version 0.4** · SIKKA chain `sikka` · Genesis supply **19,960,907 SIKKA**
+**SIKKA chain `sikka`** · Genesis supply **19,960,907 SIKKA**
 
 > *sikkā* (Punjabi, from Persian) — the die used for minting coins, and by
 > extension the authority to coin money.
@@ -1234,4 +1234,4 @@ loop (relayer, watching Burned):                         // native side
 
 ---
 
-*End of whitepaper v0.4.*
+*End of whitepaper.*
