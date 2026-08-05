@@ -54,6 +54,7 @@ every transfer ever made.
 
 ## Docs
 
+- Whitepaper: [`docs/whitepaper.md`](docs/whitepaper.md)
 - Run a node: [`docs/docker.md`](docs/docker.md)
 - Wallets: [`docs/wallets.md`](docs/wallets.md)
 - HTTP + JSON-RPC: [`docs/api.md`](docs/api.md)
