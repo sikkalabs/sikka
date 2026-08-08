@@ -86,8 +86,25 @@ impl CommitmentStore {
 
     /// Record a vote we just signed and what we signed it over. Must succeed
     /// before the vote is broadcast.
+    ///
+    /// Keyed by height: a prevote may be upgraded to a precommit for the *same*
+    /// checkpoint hash, but a second hash at the same height is rejected — that
+    /// would be durable equivocation against ourselves.
     pub fn put(&self, commitment: &Commitment) -> Result<()> {
         commitment.verify()?;
+        let height = commitment.height();
+        if let Some(existing) = self.get(height)? {
+            if existing.vote.checkpoint_hash != commitment.vote.checkpoint_hash {
+                return Err(Error::Other(format!(
+                    "conflicting commitment at height {height}"
+                )));
+            }
+            if &existing == commitment {
+                return Ok(());
+            }
+            // Same hash, different step (prevote → precommit) or proposal body:
+            // overwrite below.
+        }
         let write = self.db.begin_write().map_err(storage_error)?;
         {
             let mut table = write.open_table(COMMITMENTS).map_err(storage_error)?;
@@ -182,16 +199,17 @@ mod tests {
                 total_supply: 1_000_000,
                 total_bonded: 1_000,
                 chain_id: "sikka-test".into(),
+                genesis_fingerprint: Hash([0xAA; 32]),
             },
             transactions: vec![
-                Transaction::transfer(kp, Address([fill; 32]), 1, 0, 1_700_000_000, "sikka-test").unwrap(),
+                Transaction::transfer(kp, Address([fill; 32]), 1, 0, 1_700_000_000, "sikka-test", Hash([0xAA; 32])).unwrap(),
             ],
             evidence: Vec::new(),
             proposer_signature: sikka_common::bytes::Signature::default(),
         };
         let mut proposal = proposal;
         proposal.sign(kp).unwrap();
-        let vote = Vote::sign(kp, "sikka-test", height, 0, sikka_common::vote::VoteKind::Prevote, proposal.hash()).unwrap();
+        let vote = Vote::sign(kp, "sikka-test", Hash([0xAA; 32]), height, 0, sikka_common::vote::VoteKind::Prevote, proposal.hash()).unwrap();
         Commitment { vote, proposal }
     }
 

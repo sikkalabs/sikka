@@ -17,12 +17,12 @@
 use serde::{Deserialize, Serialize};
 
 use crate::bytes::{Address, Hash, PublicKey, Signature};
-use crate::checkpoint::ValidatorSignature;
+use crate::checkpoint::{Checkpoint, ValidatorSignature};
 use crate::codec::{Decode, Encode, Reader, Writer};
 use crate::error::{Error, Result};
 
 /// Domain tag for the signed vote payload.
-pub const VOTE_TAG: &[u8] = b"SIKKA/vote/v4";
+pub const VOTE_TAG: &[u8] = b"SIKKA/vote/v5";
 
 /// Which consensus step a vote belongs to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -54,18 +54,21 @@ impl VoteKind {
 
 /// The exact bytes a validator signs when voting.
 ///
-/// Height, round, kind, and chain id are all bound so a signature cannot be
-/// replayed across steps, rounds, or chains.
+/// Height, round, kind, chain id, and genesis fingerprint are all bound so a
+/// signature cannot be replayed across steps, rounds, chains, or networks that
+/// share the same chain id string.
 pub fn vote_signing_bytes(
     chain_id: &str,
+    genesis_fingerprint: &Hash,
     height: u64,
     round: u32,
     kind: VoteKind,
     checkpoint_hash: &Hash,
 ) -> Vec<u8> {
-    let mut w = Writer::with_capacity(88 + chain_id.len());
+    let mut w = Writer::with_capacity(120 + chain_id.len());
     w.raw(VOTE_TAG)
         .str(chain_id)
+        .raw(genesis_fingerprint.as_bytes())
         .u64(height)
         .u32(round)
         .u8(kind.tag())
@@ -88,6 +91,7 @@ impl Vote {
     pub fn sign(
         keypair: &sikka_crypto::Keypair,
         chain_id: &str,
+        genesis_fingerprint: Hash,
         height: u64,
         round: u32,
         kind: VoteKind,
@@ -96,6 +100,7 @@ impl Vote {
         let public_key = PublicKey::new(*keypair.public_bytes());
         let signature = Signature::new(keypair.sign(&vote_signing_bytes(
             chain_id,
+            &genesis_fingerprint,
             height,
             round,
             kind,
@@ -112,12 +117,13 @@ impl Vote {
         })
     }
 
-    pub fn verify(&self, chain_id: &str) -> Result<()> {
+    pub fn verify(&self, chain_id: &str, genesis_fingerprint: &Hash) -> Result<()> {
         if self.public_key.address() != self.validator {
             return Err(Error::AddressKeyMismatch);
         }
         let payload = vote_signing_bytes(
             chain_id,
+            genesis_fingerprint,
             self.height,
             self.round,
             self.kind,
@@ -140,6 +146,19 @@ impl Vote {
             public_key: self.public_key,
             signature: self.signature,
         }
+    }
+}
+
+/// Reconstruct the precommit vote a validator signed for a finalized checkpoint.
+pub fn vote_from_checkpoint(checkpoint: &Checkpoint, sig: &ValidatorSignature) -> Vote {
+    Vote {
+        height: checkpoint.header.height,
+        round: checkpoint.header.round,
+        kind: VoteKind::Precommit,
+        checkpoint_hash: checkpoint.hash(),
+        validator: sig.validator,
+        public_key: sig.public_key.clone(),
+        signature: sig.signature.clone(),
     }
 }
 
@@ -178,11 +197,24 @@ mod tests {
         "sikka-test"
     }
 
+    fn fingerprint() -> Hash {
+        Hash([0xAA; 32])
+    }
+
     #[test]
     fn a_signed_vote_verifies() {
         let kp = Keypair::generate().unwrap();
-        let vote = Vote::sign(&kp, chain_id(), 42, 1, VoteKind::Prevote, Hash([7u8; 32])).unwrap();
-        vote.verify(chain_id()).unwrap();
+        let vote = Vote::sign(
+            &kp,
+            chain_id(),
+            fingerprint(),
+            42,
+            1,
+            VoteKind::Prevote,
+            Hash([7u8; 32]),
+        )
+        .unwrap();
+        vote.verify(chain_id(), &fingerprint()).unwrap();
         assert_eq!(vote.validator, PublicKey::new(*kp.public_bytes()).address());
         assert_eq!(vote.kind, VoteKind::Prevote);
         assert_eq!(vote.round, 1);
@@ -191,7 +223,16 @@ mod tests {
     #[test]
     fn vote_survives_a_codec_roundtrip() {
         let kp = Keypair::generate().unwrap();
-        let vote = Vote::sign(&kp, chain_id(), 42, 3, VoteKind::Precommit, Hash([7u8; 32])).unwrap();
+        let vote = Vote::sign(
+            &kp,
+            chain_id(),
+            fingerprint(),
+            42,
+            3,
+            VoteKind::Precommit,
+            Hash([7u8; 32]),
+        )
+        .unwrap();
         let decoded = Vote::from_bytes(&vote.to_bytes()).unwrap();
         assert_eq!(decoded, vote);
     }
@@ -199,27 +240,60 @@ mod tests {
     #[test]
     fn tampering_invalidates_a_vote() {
         let kp = Keypair::generate().unwrap();
-        let mut vote = Vote::sign(&kp, chain_id(), 1, 0, VoteKind::Prevote, Hash([1u8; 32])).unwrap();
+        let mut vote = Vote::sign(
+            &kp,
+            chain_id(),
+            fingerprint(),
+            1,
+            0,
+            VoteKind::Prevote,
+            Hash([1u8; 32]),
+        )
+        .unwrap();
         vote.checkpoint_hash = Hash([9u8; 32]);
-        assert_eq!(vote.verify(chain_id()).unwrap_err(), Error::InvalidSignature);
+        assert_eq!(
+            vote.verify(chain_id(), &fingerprint()).unwrap_err(),
+            Error::InvalidSignature
+        );
     }
 
     #[test]
     fn prevote_and_precommit_have_distinct_domains() {
         let kp = Keypair::generate().unwrap();
         let hash = Hash([1u8; 32]);
-        let prevote = Vote::sign(&kp, chain_id(), 1, 0, VoteKind::Prevote, hash).unwrap();
+        let prevote = Vote::sign(
+            &kp,
+            chain_id(),
+            fingerprint(),
+            1,
+            0,
+            VoteKind::Prevote,
+            hash,
+        )
+        .unwrap();
         let mut forged = prevote.clone();
         forged.kind = VoteKind::Precommit;
-        assert_eq!(forged.verify(chain_id()).unwrap_err(), Error::InvalidSignature);
+        assert_eq!(
+            forged.verify(chain_id(), &fingerprint()).unwrap_err(),
+            Error::InvalidSignature
+        );
     }
 
     #[test]
     fn a_vote_from_another_chain_is_rejected() {
         let kp = Keypair::generate().unwrap();
-        let vote = Vote::sign(&kp, chain_id(), 1, 0, VoteKind::Prevote, Hash([1u8; 32])).unwrap();
+        let vote = Vote::sign(
+            &kp,
+            chain_id(),
+            fingerprint(),
+            1,
+            0,
+            VoteKind::Prevote,
+            Hash([1u8; 32]),
+        )
+        .unwrap();
         assert_eq!(
-            vote.verify("other").unwrap_err(),
+            vote.verify("other", &fingerprint()).unwrap_err(),
             Error::InvalidSignature
         );
     }

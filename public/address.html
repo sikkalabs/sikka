@@ -332,10 +332,13 @@
 
   <script type="module">
     import JSONBig from "https://esm.sh/json-bigint@1.0.0";
+    import { verifyAccountProof, validatorsFromList } from "./proof.js";
 
     const CHILLAR = 1_000_000_000n;
     const jsonBig = JSONBig({ useNativeBigInt: true });
     const $ = (id) => document.getElementById(id);
+    /** Active validators from the last load(), for proof quorum checks. */
+    let cachedValidators = [];
 
     function asBig(v) {
       if (typeof v === "bigint") return v;
@@ -422,6 +425,7 @@
         const liquid = asBig(info.balance);
         const bond = info.bond == null ? 0n : asBig(info.bond);
         const total = liquid + bond;
+        cachedValidators = validatorsFromList(validators || []);
         const validator = (validators || []).find(
           (v) => String(v.address).toLowerCase() === address
         );
@@ -482,23 +486,27 @@
       $("verifyErr").hidden = true;
       $("verify").disabled = true;
       try {
-        const proof = await rpc("account.proof", { address });
-        // CheckpointHeader is serde-flattened onto Checkpoint, so state_root
-        // lives on checkpoint itself — not checkpoint.header.
-        const height = proof.checkpoint?.height;
-        const root = String(proof.state_root || "").toLowerCase();
-        const committed = String(proof.checkpoint?.state_root || "").toLowerCase();
-        if (!root || !committed || root !== committed) {
-          throw new Error("proof state_root does not match the checkpoint");
-        }
+        const [proof, validators, chainInfo] = await Promise.all([
+          rpc("account.proof", { address }),
+          cachedValidators.length
+            ? Promise.resolve(cachedValidators)
+            : rpc("validator.list").then((list) => validatorsFromList(list)),
+          rpc("chain.info").catch(() => null),
+        ]);
+        const activeValidators =
+          cachedValidators.length > 0 ? cachedValidators : validators;
+        const verified = verifyAccountProof(proof, {
+          validators: activeValidators,
+          chainInfo,
+        });
         const present = proof.account != null;
         $("proof").textContent = present
-          ? `included · height ${height}`
-          : `absent · height ${height}`;
+          ? `verified · height ${verified.height}`
+          : `absent · height ${verified.height}`;
         $("verifyOk").hidden = false;
         $("verifyOk").textContent = present
-          ? `Proof root matches the checkpoint at height ${height}.`
-          : `Absence proof root matches the checkpoint at height ${height}.`;
+          ? `Balance ${formatSikka(verified.balance)} verified at height ${verified.height} (${verified.signatures} validator signatures, quorum OK).`
+          : `Absence verified at height ${verified.height} (${verified.signatures} validator signatures, quorum OK).`;
       } catch (e) {
         $("proof").textContent = "failed";
         $("verifyErr").hidden = false;

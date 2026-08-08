@@ -77,6 +77,10 @@ impl Fixture {
         &self.ledger.meta().chain_id
     }
 
+    fn genesis_fingerprint(&self) -> sikka_common::bytes::Hash {
+        self.ledger.meta().genesis_fingerprint
+    }
+
     /// Execute, stage, wrap in a checkpoint and commit — the happy path a
     /// proposer and every verifier follow.
     fn apply(&mut self, txs: &[Transaction], timestamp: u64) -> sikka_state::ExecutionOutcome {
@@ -170,7 +174,7 @@ fn transfer_moves_value_and_advances_nonce() {
     let bob = Fixture::address(&f.bob);
     let now = GENESIS_TIME + 600;
 
-    let tx = Transaction::transfer(&f.alice, bob, 5_000, 0, now, f.chain_id()).unwrap();
+    let tx = Transaction::transfer(&f.alice, bob, 5_000, 0, now, f.chain_id(), f.genesis_fingerprint()).unwrap();
     let outcome = f.apply(&[tx], now);
 
     assert_eq!(outcome.applied.len(), 1);
@@ -196,7 +200,7 @@ fn battery_is_spent_and_regenerates() {
     let now = GENESIS_TIME + 600;
 
     let txs: Vec<Transaction> = (0..3)
-        .map(|nonce| Transaction::transfer(&f.alice, bob, 10, nonce, now, f.chain_id()).unwrap())
+        .map(|nonce| Transaction::transfer(&f.alice, bob, 10, nonce, now, f.chain_id(), f.genesis_fingerprint()).unwrap())
         .collect();
     f.apply(&txs, now);
 
@@ -220,11 +224,11 @@ fn spending_more_than_the_battery_quota_is_rejected() {
 
     // Bob receives funds, so he exists but has an empty battery.
     f.apply(
-        &[Transaction::transfer(&f.alice, bob, 1_000, 0, now, f.chain_id()).unwrap()],
+        &[Transaction::transfer(&f.alice, bob, 1_000, 0, now, f.chain_id(), f.genesis_fingerprint()).unwrap()],
         now,
     );
 
-    let tx = Transaction::transfer(&f.bob, Address([7u8; 32]), 10, 0, now, f.chain_id()).unwrap();
+    let tx = Transaction::transfer(&f.bob, Address([7u8; 32]), 10, 0, now, f.chain_id(), f.genesis_fingerprint()).unwrap();
     let height = f.ledger.height() + 1;
     let context = ExecutionContext::new(height, now, Fixture::address(&f.validator));
     let outcome = f.ledger.execute(&[tx], context).unwrap();
@@ -235,11 +239,22 @@ fn spending_more_than_the_battery_quota_is_rejected() {
         Error::InsufficientBattery { .. }
     ));
 
-    // One minute later Bob has exactly one battery and can spend.
+    // One minute later Bob has exactly one battery and can spend. Economic time
+    // advances at most one proposer timeout per round, so round 5 permits the
+    // full 60s gap from the prior checkpoint.
     let later = now + 60;
-    let tx = Transaction::transfer(&f.bob, Address([7u8; 32]), 10, 0, later, f.chain_id()).unwrap();
-    let outcome = f.apply(&[tx], later);
+    let tx = Transaction::transfer(&f.bob, Address([7u8; 32]), 10, 0, later, f.chain_id(), f.genesis_fingerprint()).unwrap();
+    let height = f.ledger.height() + 1;
+    let proposer = Fixture::address(&f.validator);
+    let mut context = ExecutionContext::new(height, later, proposer);
+    context.round = 5;
+    let outcome = f.ledger.execute(&[tx], context).unwrap();
     assert_eq!(outcome.applied.len(), 1);
+    let staged = f.ledger.stage(outcome);
+    let prev = f.ledger.meta().last_checkpoint_hash;
+    let header = f.ledger.build_header(&staged, prev, proposer, 5);
+    let checkpoint = Checkpoint::new(header);
+    f.ledger.commit(staged, &checkpoint).unwrap();
 }
 
 #[test]
@@ -252,15 +267,15 @@ fn invalid_transactions_are_rejected_without_touching_state() {
 
     let cases = vec![
         // Wrong nonce.
-        Transaction::transfer(&f.alice, bob, 10, 5, now, f.chain_id()).unwrap(),
+        Transaction::transfer(&f.alice, bob, 10, 5, now, f.chain_id(), f.genesis_fingerprint()).unwrap(),
         // More than the balance.
-        Transaction::transfer(&f.alice, bob, ALLOCATION * 2, 0, now, f.chain_id()).unwrap(),
+        Transaction::transfer(&f.alice, bob, ALLOCATION * 2, 0, now, f.chain_id(), f.genesis_fingerprint()).unwrap(),
         // Timestamp far outside the tolerance window.
-        Transaction::transfer(&f.alice, bob, 10, 0, now + 3_600, f.chain_id()).unwrap(),
+        Transaction::transfer(&f.alice, bob, 10, 0, now + 3_600, f.chain_id(), f.genesis_fingerprint()).unwrap(),
         // Unknown sender.
-        Transaction::transfer(&f.bob, alice, 10, 0, now, f.chain_id()).unwrap(),
+        Transaction::transfer(&f.bob, alice, 10, 0, now, f.chain_id(), f.genesis_fingerprint()).unwrap(),
         // Unbond from a non-validator.
-        Transaction::unbond(&f.alice, 0, now, f.chain_id()).unwrap(),
+        Transaction::unbond(&f.alice, 0, now, f.chain_id(), f.genesis_fingerprint()).unwrap(),
     ];
 
     for tx in cases {
@@ -282,9 +297,9 @@ fn a_rejected_transaction_does_not_stop_the_batch() {
     let bob = Fixture::address(&f.bob);
     let now = GENESIS_TIME + 600;
 
-    let good = Transaction::transfer(&f.alice, bob, 100, 0, now, f.chain_id()).unwrap();
-    let bad = Transaction::transfer(&f.alice, bob, 100, 9, now, f.chain_id()).unwrap();
-    let also_good = Transaction::transfer(&f.alice, bob, 100, 1, now, f.chain_id()).unwrap();
+    let good = Transaction::transfer(&f.alice, bob, 100, 0, now, f.chain_id(), f.genesis_fingerprint()).unwrap();
+    let bad = Transaction::transfer(&f.alice, bob, 100, 9, now, f.chain_id(), f.genesis_fingerprint()).unwrap();
+    let also_good = Transaction::transfer(&f.alice, bob, 100, 1, now, f.chain_id(), f.genesis_fingerprint()).unwrap();
 
     let outcome = f.apply(&[good, bad, also_good], now);
     assert_eq!(outcome.applied.len(), 2);
@@ -300,7 +315,7 @@ fn staging_is_reversible() {
     let root_before = f.ledger.state_root();
     let validator_root_before = f.ledger.validator_root();
 
-    let tx = Transaction::transfer(&f.alice, bob, 1_000, 0, now, f.chain_id()).unwrap();
+    let tx = Transaction::transfer(&f.alice, bob, 1_000, 0, now, f.chain_id(), f.genesis_fingerprint()).unwrap();
     let context = ExecutionContext::new(1, now, Fixture::address(&f.validator));
     let outcome = f.ledger.execute(&[tx], context).unwrap();
 
@@ -346,7 +361,7 @@ fn execution_is_deterministic_across_two_ledgers() {
 
     let bob = Fixture::address(&a.bob);
     let txs: Vec<Transaction> = (0..5)
-        .map(|nonce| Transaction::transfer(&a.alice, bob, 100 + nonce, nonce, now, a.chain_id()).unwrap())
+        .map(|nonce| Transaction::transfer(&a.alice, bob, 100 + nonce, nonce, now, a.chain_id(), a.genesis_fingerprint()).unwrap())
         .collect();
 
     let proposer = Fixture::address(&a.validator);
@@ -374,7 +389,7 @@ fn bonding_makes_a_validator_at_the_next_boundary() {
     let alice = Fixture::address(&f.alice);
     let now = GENESIS_TIME + 600;
 
-    let tx = Transaction::bond(&f.alice, BOND, 0, now, f.chain_id()).unwrap();
+    let tx = Transaction::bond(&f.alice, BOND, 0, now, f.chain_id(), f.genesis_fingerprint()).unwrap();
     f.apply(&[tx], now);
 
     let validator = f.ledger.validator(&alice).unwrap().unwrap();
@@ -408,12 +423,12 @@ fn bond_below_the_minimum_is_rejected() {
     let minimum = f.ledger.total_supply() / 100_000;
     assert_eq!(minimum, 200_000);
 
-    let tx = Transaction::bond(&f.alice, minimum - 1, 0, now, f.chain_id()).unwrap();
+    let tx = Transaction::bond(&f.alice, minimum - 1, 0, now, f.chain_id(), f.genesis_fingerprint()).unwrap();
     let context = ExecutionContext::new(1, now, Fixture::address(&f.validator));
     let outcome = f.ledger.execute(&[tx], context).unwrap();
     assert!(matches!(outcome.rejected[0].1, Error::BondTooSmall { .. }));
 
-    let tx = Transaction::bond(&f.alice, minimum, 0, now, f.chain_id()).unwrap();
+    let tx = Transaction::bond(&f.alice, minimum, 0, now, f.chain_id(), f.genesis_fingerprint()).unwrap();
     let outcome = f.apply(&[tx], now);
     assert_eq!(outcome.applied.len(), 1);
 }
@@ -424,9 +439,9 @@ fn unbonding_waits_out_the_cooldown_then_returns_the_bond() {
     let alice = Fixture::address(&f.alice);
     let now = GENESIS_TIME + 600;
 
-    f.apply(&[Transaction::bond(&f.alice, BOND, 0, now, f.chain_id()).unwrap()], now);
+    f.apply(&[Transaction::bond(&f.alice, BOND, 0, now, f.chain_id(), f.genesis_fingerprint()).unwrap()], now);
     f.apply(
-        &[Transaction::unbond(&f.alice, 1, now + 60, f.chain_id()).unwrap()],
+        &[Transaction::unbond(&f.alice, 1, now + 60, f.chain_id(), f.genesis_fingerprint()).unwrap()],
         now + 60,
     );
 
@@ -459,8 +474,8 @@ fn unbonding_waits_out_the_cooldown_then_returns_the_bond() {
 fn double_unbond_and_bond_while_unbonding_are_rejected() {
     let mut f = Fixture::new();
     let now = GENESIS_TIME + 600;
-    f.apply(&[Transaction::bond(&f.alice, BOND, 0, now, f.chain_id()).unwrap()], now);
-    f.apply(&[Transaction::unbond(&f.alice, 1, now, f.chain_id()).unwrap()], now);
+    f.apply(&[Transaction::bond(&f.alice, BOND, 0, now, f.chain_id(), f.genesis_fingerprint()).unwrap()], now);
+    f.apply(&[Transaction::unbond(&f.alice, 1, now, f.chain_id(), f.genesis_fingerprint()).unwrap()], now);
 
     let context = ExecutionContext::new(3, now, Fixture::address(&f.validator));
     let outcome = f
@@ -469,8 +484,8 @@ fn double_unbond_and_bond_while_unbonding_are_rejected() {
             // Both carry the same nonce: the first is rejected, so the second
             // is still the next one Alice owes.
             &[
-                Transaction::unbond(&f.alice, 2, now, f.chain_id()).unwrap(),
-                Transaction::bond(&f.alice, BOND, 2, now, f.chain_id()).unwrap(),
+                Transaction::unbond(&f.alice, 2, now, f.chain_id(), f.genesis_fingerprint()).unwrap(),
+                Transaction::bond(&f.alice, BOND, 2, now, f.chain_id(), f.genesis_fingerprint()).unwrap(),
             ],
             context,
         )
@@ -510,7 +525,7 @@ fn inflation_is_split_by_bond_share() {
 
     // Alice bonds three times the genesis validator's stake.
     f.apply(
-        &[Transaction::bond(&f.alice, BOND * 3, 0, now, f.chain_id()).unwrap()],
+        &[Transaction::bond(&f.alice, BOND * 3, 0, now, f.chain_id(), f.genesis_fingerprint()).unwrap()],
         now,
     );
 
@@ -544,7 +559,7 @@ fn inflation_pays_every_active_validator_not_just_prior_signers() {
 
     // Both are active from the next height.
     f.apply(
-        &[Transaction::bond(&f.alice, BOND, 0, now, f.chain_id()).unwrap()],
+        &[Transaction::bond(&f.alice, BOND, 0, now, f.chain_id(), f.genesis_fingerprint()).unwrap()],
         now,
     );
     assert_eq!(f.ledger.active_validators_at(f.ledger.height() + 1).unwrap().len(), 2);
@@ -562,7 +577,7 @@ fn inflation_pays_every_active_validator_not_just_prior_signers() {
     let mut checkpoint = Checkpoint::new(header);
     let hash = checkpoint.hash();
     checkpoint.add_signature(
-        Vote::sign(&f.validator, f.chain_id(), height, 0, VoteKind::Precommit, hash)
+        Vote::sign(&f.validator, f.chain_id(), f.genesis_fingerprint(), height, 0, VoteKind::Precommit, hash)
             .unwrap()
             .into_signature(),
     );
@@ -591,7 +606,7 @@ fn slashing_burns_the_bond_and_removes_the_validator() {
     let mut f = Fixture::new();
     let alice = Fixture::address(&f.alice);
     let now = GENESIS_TIME + 600;
-    f.apply(&[Transaction::bond(&f.alice, BOND, 0, now, f.chain_id()).unwrap()], now);
+    f.apply(&[Transaction::bond(&f.alice, BOND, 0, now, f.chain_id(), f.genesis_fingerprint()).unwrap()], now);
 
     let supply_before = f.ledger.total_supply();
     let height = f.ledger.height() + 1;
@@ -626,7 +641,7 @@ fn state_proofs_verify_against_the_committed_root() {
     let bob = Fixture::address(&f.bob);
     let now = GENESIS_TIME + 600;
     f.apply(
-        &[Transaction::transfer(&f.alice, bob, 777, 0, now, f.chain_id()).unwrap()],
+        &[Transaction::transfer(&f.alice, bob, 777, 0, now, f.chain_id(), f.genesis_fingerprint()).unwrap()],
         now,
     );
 
@@ -654,11 +669,11 @@ fn snapshot_restores_an_identical_ledger() {
     let bob = Fixture::address(&f.bob);
     let now = GENESIS_TIME + 600;
     f.apply(
-        &[Transaction::transfer(&f.alice, bob, 1_234, 0, now, f.chain_id()).unwrap()],
+        &[Transaction::transfer(&f.alice, bob, 1_234, 0, now, f.chain_id(), f.genesis_fingerprint()).unwrap()],
         now,
     );
     f.apply(
-        &[Transaction::bond(&f.alice, BOND, 1, now + 60, f.chain_id()).unwrap()],
+        &[Transaction::bond(&f.alice, BOND, 1, now + 60, f.chain_id(), f.genesis_fingerprint()).unwrap()],
         now + 60,
     );
 
@@ -676,6 +691,7 @@ fn snapshot_restores_an_identical_ledger() {
         total_supply: f.ledger.total_supply(),
         total_bonded: f.ledger.total_bonded(),
         chain_id: f.chain_id().into(),
+        genesis_fingerprint: f.genesis_fingerprint(),
     };
     let snapshot = f.ledger.snapshot(Checkpoint::new(header)).unwrap();
     snapshot.verify().unwrap();
@@ -696,7 +712,7 @@ fn tampered_snapshots_are_rejected() {
     let bob = Fixture::address(&f.bob);
     let now = GENESIS_TIME + 600;
     f.apply(
-        &[Transaction::transfer(&f.alice, bob, 1_000, 0, now, f.chain_id()).unwrap()],
+        &[Transaction::transfer(&f.alice, bob, 1_000, 0, now, f.chain_id(), f.genesis_fingerprint()).unwrap()],
         now,
     );
 
@@ -713,6 +729,7 @@ fn tampered_snapshots_are_rejected() {
         total_supply: f.ledger.total_supply(),
         total_bonded: f.ledger.total_bonded(),
         chain_id: f.chain_id().into(),
+        genesis_fingerprint: f.genesis_fingerprint(),
     };
     let snapshot: StateSnapshot = f.ledger.snapshot(Checkpoint::new(header)).unwrap();
 
@@ -749,7 +766,7 @@ fn many_accounts_stay_consistent() {
                 let mut raw = [0u8; 32];
                 raw[0] = (round * 20 + i) as u8;
                 raw[1] = 0xaa;
-                let tx = Transaction::transfer(&f.alice, Address(raw), 1_000, nonce, now, f.chain_id()).unwrap();
+                let tx = Transaction::transfer(&f.alice, Address(raw), 1_000, nonce, now, f.chain_id(), f.genesis_fingerprint()).unwrap();
                 nonce += 1;
                 tx
             })
@@ -826,9 +843,9 @@ fn repeated_full_batch_proposer_misses_force_unbond() {
     };
     let now = GENESIS_TIME + 60;
     let txs = vec![
-        Transaction::transfer(payer, Address([0x11; 32]), 1_000, 0, now, &genesis.chain_id)
+        Transaction::transfer(payer, Address([0x11; 32]), 1_000, 0, now, &genesis.chain_id, genesis.fingerprint())
             .unwrap(),
-        Transaction::transfer(payer, Address([0x22; 32]), 1_000, 1, now, &genesis.chain_id)
+        Transaction::transfer(payer, Address([0x22; 32]), 1_000, 1, now, &genesis.chain_id, genesis.fingerprint())
             .unwrap(),
     ];
     let mut context = ExecutionContext::new(1, now, round1);
@@ -872,7 +889,7 @@ fn repeated_full_batch_proposer_misses_force_unbond() {
     let nonce = ledger.next_nonce(&payer_addr).unwrap();
     let later = now + 60;
     let txs = vec![
-        Transaction::transfer(payer, Address([0x33; 32]), 1_000, nonce, later, &genesis.chain_id)
+        Transaction::transfer(payer, Address([0x33; 32]), 1_000, nonce, later, &genesis.chain_id, genesis.fingerprint())
             .unwrap(),
         Transaction::transfer(
             payer,
@@ -881,6 +898,7 @@ fn repeated_full_batch_proposer_misses_force_unbond() {
             nonce + 1,
             later,
             &genesis.chain_id,
+            genesis.fingerprint(),
         )
         .unwrap(),
     ];
@@ -963,6 +981,7 @@ fn short_batch_delay_seals_do_not_charge_proposer_misses() {
         0,
         now,
         &genesis.chain_id,
+        genesis.fingerprint(),
     )
     .unwrap()];
     let mut context = ExecutionContext::new(1, now, round1);
@@ -978,4 +997,96 @@ fn short_batch_delay_seals_do_not_charge_proposer_misses() {
         .map(|v| v.missed_proposer_slots)
         .unwrap_or(0);
     assert_eq!(missed, 0);
+}
+
+#[test]
+fn proposer_misses_only_charge_rounds_due_by_checkpoint_time() {
+    use sikka_common::constants::round_at;
+    use sikka_common::validator::Validator;
+
+    let alice_kp = Keypair::generate().unwrap();
+    let bob_kp = Keypair::generate().unwrap();
+    let alice_pk = PublicKey::new(*alice_kp.public_bytes());
+    let bob_pk = PublicKey::new(*bob_kp.public_bytes());
+
+    let genesis = GenesisConfig {
+        chain_id: "sikka-miss-cap".into(),
+        timestamp: GENESIS_TIME,
+        allocations: vec![
+            GenesisAllocation {
+                to: alice_pk.address(),
+                amount: ALLOCATION,
+            },
+            GenesisAllocation {
+                to: bob_pk.address(),
+                amount: ALLOCATION,
+            },
+        ],
+        validators: vec![
+            GenesisValidator {
+                public_key: alice_pk.clone(),
+                bond: BOND,
+                endpoint: None,
+            },
+            GenesisValidator {
+                public_key: bob_pk.clone(),
+                bond: BOND,
+                endpoint: None,
+            },
+        ],
+        checkpoint_tx_interval: Some(2),
+        max_missed_proposer_slots: Some(10),
+    };
+
+    let dir = tempfile::tempdir().unwrap();
+    let (ledger, _) = Ledger::open(dir.path().join("state.redb"), &genesis).unwrap();
+    let mut active = ledger.active_validators_at(1).unwrap();
+    active.sort_by_key(|v| v.address);
+    let round0 = Validator::proposer_for_round(1, 0, &active).unwrap();
+    let round3 = Validator::proposer_for_round(1, 3, &active).unwrap();
+
+    let timestamp = GENESIS_TIME + 15;
+    assert_eq!(round_at(timestamp, GENESIS_TIME), 1);
+
+    let payer = if round3 == alice_pk.address() {
+        &alice_kp
+    } else {
+        &bob_kp
+    };
+    let txs = vec![
+        Transaction::transfer(payer, Address([0x66; 32]), 1_000, 0, timestamp, &genesis.chain_id, genesis.fingerprint())
+            .unwrap(),
+        Transaction::transfer(
+            payer,
+            Address([0x77; 32]),
+            1_000,
+            1,
+            timestamp,
+            &genesis.chain_id,
+            genesis.fingerprint(),
+        )
+        .unwrap(),
+    ];
+    let mut context = ExecutionContext::new(1, timestamp, round3);
+    context.round = 3;
+    let outcome = ledger.execute(&txs, context).unwrap();
+
+    assert_eq!(
+        outcome
+            .validators
+            .get(&round0)
+            .and_then(|v| v.as_ref())
+            .map(|v| v.missed_proposer_slots)
+            .unwrap_or(0),
+        1,
+        "only round 0 was due at this timestamp"
+    );
+    let charged: Vec<_> = outcome
+        .validators
+        .values()
+        .flatten()
+        .filter(|v| v.missed_proposer_slots > 0)
+        .map(|v| v.address)
+        .collect();
+    assert_eq!(charged, vec![round0]);
 }

@@ -382,10 +382,14 @@ mod tests {
         "sikka-test"
     }
 
+    fn fingerprint() -> sikka_common::bytes::Hash {
+        sikka_common::bytes::Hash([0xAA; 32])
+    }
+
     const NOW: u64 = 1_700_000_000;
 
     fn transfer(kp: &Keypair, nonce: u64, amount: u64) -> Transaction {
-        Transaction::transfer(kp, Address([9u8; 32]), amount, nonce, NOW, chain_id()).unwrap()
+        Transaction::transfer(kp, Address([9u8; 32]), amount, nonce, NOW, chain_id(), fingerprint()).unwrap()
     }
 
     #[test]

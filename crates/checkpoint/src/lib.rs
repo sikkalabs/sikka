@@ -261,6 +261,7 @@ mod tests {
             total_supply: 1_000_000,
             total_bonded: 1_000,
             chain_id: "sikka-test".into(),
+            genesis_fingerprint: Hash([0xAA; 32]),
         })
     }
 

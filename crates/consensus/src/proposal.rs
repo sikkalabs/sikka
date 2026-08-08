@@ -23,21 +23,26 @@ use sikka_state::ledger::{ExecutionContext, Staged};
 use sikka_state::Ledger;
 
 use crate::equivocation::Equivocation;
-use crate::{proposer_for_round, PROPOSER_TIMEOUT_SECS};
+use crate::{proposer_for_round, round_at, PROPOSER_TIMEOUT_SECS};
 
 /// Domain tag for the proposer's signature over a proposal.
-pub const PROPOSAL_TAG: &[u8] = b"SIKKA/proposal/v3";
+pub const PROPOSAL_TAG: &[u8] = b"SIKKA/proposal/v4";
 
-/// Bytes the proposer signs: domain tag + chain id + header hash.
+/// Bytes the proposer signs: domain tag + chain id + genesis fingerprint + header hash.
 ///
 /// The header already commits to `tx_root`, evidence-affecting state roots, and
 /// round/proposer, so one signature authenticates the whole body without hashing
-/// every transaction again up front. The chain id binds the proposal to a
-/// single chain.
-pub fn proposal_signing_bytes(chain_id: &str, header_hash: &Hash) -> Vec<u8> {
-    let mut w = Writer::with_capacity(72 + chain_id.len());
+/// every transaction again up front. The chain id and genesis fingerprint bind
+/// the proposal to a single network.
+pub fn proposal_signing_bytes(
+    chain_id: &str,
+    genesis_fingerprint: &Hash,
+    header_hash: &Hash,
+) -> Vec<u8> {
+    let mut w = Writer::with_capacity(104 + chain_id.len());
     w.raw(PROPOSAL_TAG)
         .str(chain_id)
+        .raw(genesis_fingerprint.as_bytes())
         .raw(header_hash.as_bytes());
     w.finish()
 }
@@ -79,6 +84,7 @@ impl CheckpointProposal {
         }
         self.proposer_signature = Signature::new(keypair.sign(&proposal_signing_bytes(
             &self.header.chain_id,
+            &self.header.genesis_fingerprint,
             &self.hash(),
         ))?);
         Ok(())
@@ -89,7 +95,11 @@ impl CheckpointProposal {
         if public_key.address() != self.header.proposer {
             return Err(Error::AddressKeyMismatch);
         }
-        let payload = proposal_signing_bytes(&self.header.chain_id, &self.hash());
+        let payload = proposal_signing_bytes(
+            &self.header.chain_id,
+            &self.header.genesis_fingerprint,
+            &self.hash(),
+        );
         if !sikka_crypto::verify(
             public_key.as_slice(),
             &payload,
@@ -173,8 +183,9 @@ fn slashings(ledger: &Ledger, evidence: &[Equivocation]) -> Result<Vec<Address>>
     }
     let mut out: Vec<Address> = Vec::new();
     let chain_id = ledger.meta().chain_id.as_str();
+    let genesis_fingerprint = ledger.meta().genesis_fingerprint;
     for item in evidence {
-        item.verify(chain_id)?;
+        item.verify(chain_id, &genesis_fingerprint)?;
         // Only bonded validators can be slashed; evidence against anyone else is
         // noise, not an offence.
         match ledger.validator(&item.validator)? {
@@ -323,12 +334,27 @@ pub fn verify_proposal_with(
 
     let active = ledger.active_validators_at(header.height)?;
     if authority == Authority::Proposed {
-        if header.timestamp.abs_diff(wall_clock) > TX_TIME_TOLERANCE_SECS {
+        if header.timestamp + TX_TIME_TOLERANCE_SECS < wall_clock {
             return Err(Error::TimestampOutOfRange {
                 timestamp: header.timestamp,
                 now: wall_clock,
                 tolerance: TX_TIME_TOLERANCE_SECS,
             });
+        }
+        if header.timestamp > wall_clock.saturating_add(PROPOSER_TIMEOUT_SECS) {
+            return Err(Error::TimestampOutOfRange {
+                timestamp: header.timestamp,
+                now: wall_clock,
+                tolerance: PROPOSER_TIMEOUT_SECS,
+            });
+        }
+
+        let due_round = round_at(wall_clock, ledger.meta().last_checkpoint_time);
+        if header.round > due_round {
+            return Err(Error::Other(format!(
+                "round {} is not due yet; at most round {due_round} by this node's clock",
+                header.round
+            )));
         }
 
         // A validator may only take a turn that is actually due. Rounds are
@@ -342,12 +368,6 @@ pub fn verify_proposal_with(
             return Err(Error::Other(format!(
                 "round {} is not due until {earliest}, but the header is dated {}",
                 header.round, header.timestamp
-            )));
-        }
-        if header.round > 0 && wall_clock + PROPOSER_TIMEOUT_SECS < earliest {
-            return Err(Error::Other(format!(
-                "round {} is not due yet by this node's clock",
-                header.round
             )));
         }
 
@@ -413,6 +433,9 @@ pub fn verify_proposal_with(
             actual: header.chain_id.clone(),
         });
     }
+    if header.genesis_fingerprint != ledger.meta().genesis_fingerprint {
+        return Err(Error::GenesisMismatch);
+    }
 
     for (tx, id) in proposal.transactions.iter().zip(&ids) {
         // Always bind address↔key, even when the id is already cached: a
@@ -422,6 +445,7 @@ pub fn verify_proposal_with(
             return Err(Error::AddressKeyMismatch);
         }
         tx.check_chain_id(&ledger.meta().chain_id)?;
+        tx.check_genesis_fingerprint(&ledger.meta().genesis_fingerprint)?;
         if !verified_signatures.contains(id) {
             tx.verify_signature()?;
         }
@@ -486,6 +510,10 @@ mod tests {
         "sikka-test"
     }
 
+    fn fingerprint() -> Hash {
+        Hash([0xAA; 32])
+    }
+
     #[test]
     fn a_proposal_survives_a_codec_roundtrip() {
         let kp = Keypair::generate().unwrap();
@@ -503,15 +531,17 @@ mod tests {
                 total_supply: 1_000_000,
                 total_bonded: 1_000,
                 chain_id: "sikka-test".into(),
+                genesis_fingerprint: fingerprint(),
             },
             transactions: vec![
-                Transaction::transfer(&kp, Address([6u8; 32]), 1, 0, 1_700_000_000, chain_id()).unwrap(),
-                Transaction::transfer(&kp, Address([7u8; 32]), 2, 1, 1_700_000_000, chain_id()).unwrap(),
+                Transaction::transfer(&kp, Address([6u8; 32]), 1, 0, 1_700_000_000, chain_id(), fingerprint()).unwrap(),
+                Transaction::transfer(&kp, Address([7u8; 32]), 2, 1, 1_700_000_000, chain_id(), fingerprint()).unwrap(),
             ],
             evidence: vec![Equivocation::new(
-                Vote::sign(&kp, chain_id(), 9, 0, VoteKind::Precommit, Hash([8u8; 32])).unwrap(),
-                Vote::sign(&kp, chain_id(), 9, 0, VoteKind::Precommit, Hash([9u8; 32])).unwrap(),
+                Vote::sign(&kp, chain_id(), fingerprint(), 9, 0, VoteKind::Precommit, Hash([8u8; 32])).unwrap(),
+                Vote::sign(&kp, chain_id(), fingerprint(), 9, 0, VoteKind::Precommit, Hash([9u8; 32])).unwrap(),
                 chain_id(),
+                &fingerprint(),
             )
             .unwrap()],
             proposer_signature: Signature::default(),
@@ -547,6 +577,7 @@ mod tests {
                 total_supply: 1,
                 total_bonded: 1,
                 chain_id: "sikka-test".into(),
+                genesis_fingerprint: fingerprint(),
             },
             transactions: Vec::new(),
             evidence: Vec::new(),
@@ -561,9 +592,9 @@ mod tests {
     #[test]
     fn canonical_order_sorts_and_deduplicates() {
         let kp = Keypair::generate().unwrap();
-        let a = Transaction::transfer(&kp, Address([1u8; 32]), 1, 0, 1_000, chain_id()).unwrap();
-        let b = Transaction::transfer(&kp, Address([2u8; 32]), 2, 1, 1_000, chain_id()).unwrap();
-        let c = Transaction::transfer(&kp, Address([3u8; 32]), 3, 2, 1_000, chain_id()).unwrap();
+        let a = Transaction::transfer(&kp, Address([1u8; 32]), 1, 0, 1_000, chain_id(), fingerprint()).unwrap();
+        let b = Transaction::transfer(&kp, Address([2u8; 32]), 2, 1, 1_000, chain_id(), fingerprint()).unwrap();
+        let c = Transaction::transfer(&kp, Address([3u8; 32]), 3, 2, 1_000, chain_id(), fingerprint()).unwrap();
 
         let ordered = canonical_order(vec![c.clone(), a.clone(), b.clone(), a.clone()]);
         assert_eq!(ordered.len(), 3, "the duplicate was dropped");
@@ -588,7 +619,7 @@ mod tests {
         let mut transactions = Vec::new();
         for kp in [&first, &second] {
             for nonce in 0..3 {
-                transactions.push(Transaction::transfer(kp, target, 1, nonce, 1_000, chain_id()).unwrap());
+                transactions.push(Transaction::transfer(kp, target, 1, nonce, 1_000, chain_id(), fingerprint()).unwrap());
             }
         }
         transactions.reverse();

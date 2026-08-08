@@ -12,7 +12,7 @@ use crate::constants::TX_TIME_TOLERANCE_SECS;
 use crate::error::{Error, Result};
 
 /// Domain tag covering the signed payload of a transaction.
-pub const TX_SIGNING_TAG: &[u8] = b"SIKKA/tx/v3";
+pub const TX_SIGNING_TAG: &[u8] = b"SIKKA/tx/v4";
 /// Domain tag for transaction ids.
 pub const TX_ID_TAG: &[u8] = b"SIKKA/tx-id/v2";
 
@@ -71,6 +71,9 @@ pub struct Transaction {
     pub timestamp: u64,
     /// Human-readable chain this transaction is valid for.
     pub chain_id: String,
+    /// Genesis fingerprint binding the signature to one network bootstrap.
+    #[serde(default)]
+    pub genesis_fingerprint: Hash,
     pub public_key: PublicKey,
     pub signature: Signature,
 }
@@ -89,6 +92,7 @@ impl Transaction {
         nonce: u64,
         timestamp: u64,
         chain_id: impl Into<String>,
+        genesis_fingerprint: Hash,
     ) -> Result<Self> {
         let public_key = PublicKey::new(*keypair.public_bytes());
         let mut tx = Self {
@@ -99,6 +103,7 @@ impl Transaction {
             nonce,
             timestamp,
             chain_id: chain_id.into(),
+            genesis_fingerprint,
             public_key,
             signature: Signature::default(),
         };
@@ -114,6 +119,7 @@ impl Transaction {
         nonce: u64,
         timestamp: u64,
         chain_id: impl Into<String>,
+        genesis_fingerprint: Hash,
     ) -> Result<Self> {
         Self::sign(
             keypair,
@@ -123,6 +129,7 @@ impl Transaction {
             nonce,
             timestamp,
             chain_id,
+            genesis_fingerprint,
         )
     }
 
@@ -133,6 +140,7 @@ impl Transaction {
         nonce: u64,
         timestamp: u64,
         chain_id: impl Into<String>,
+        genesis_fingerprint: Hash,
     ) -> Result<Self> {
         Self::sign(
             keypair,
@@ -142,6 +150,7 @@ impl Transaction {
             nonce,
             timestamp,
             chain_id,
+            genesis_fingerprint,
         )
     }
 
@@ -151,6 +160,7 @@ impl Transaction {
         nonce: u64,
         timestamp: u64,
         chain_id: impl Into<String>,
+        genesis_fingerprint: Hash,
     ) -> Result<Self> {
         Self::sign(
             keypair,
@@ -160,6 +170,7 @@ impl Transaction {
             nonce,
             timestamp,
             chain_id,
+            genesis_fingerprint,
         )
     }
 
@@ -173,6 +184,7 @@ impl Transaction {
         let mut w = Writer::with_capacity(128 + self.public_key.as_slice().len() + self.chain_id.len());
         w.raw(TX_SIGNING_TAG)
             .str(&self.chain_id)
+            .raw(self.genesis_fingerprint.as_bytes())
             .u8(self.kind.tag())
             .raw(self.from.as_bytes())
             .raw(self.to.as_bytes())
@@ -214,6 +226,14 @@ impl Transaction {
                 expected: expected.to_string(),
                 actual: self.chain_id.clone(),
             });
+        }
+        Ok(())
+    }
+
+    /// Reject a transaction whose genesis binding is not this chain's.
+    pub fn check_genesis_fingerprint(&self, expected: &Hash) -> Result<()> {
+        if self.genesis_fingerprint != *expected {
+            return Err(Error::GenesisMismatch);
         }
         Ok(())
     }
@@ -278,6 +298,7 @@ impl Encode for Transaction {
             .u64(self.nonce)
             .u64(self.timestamp)
             .str(&self.chain_id)
+            .raw(self.genesis_fingerprint.as_bytes())
             .raw(self.public_key.as_slice())
             .raw(self.signature.as_slice());
     }
@@ -293,6 +314,7 @@ impl Decode for Transaction {
             nonce: r.u64()?,
             timestamp: r.u64()?,
             chain_id: r.str()?,
+            genesis_fingerprint: Hash::decode(r)?,
             public_key: PublicKey::decode(r)?,
             signature: Signature::decode(r)?,
         })
@@ -312,10 +334,14 @@ mod tests {
         "sikka-test"
     }
 
+    fn fingerprint() -> Hash {
+        Hash([0xAA; 32])
+    }
+
     #[test]
     fn signed_transfer_validates() {
         let kp = keypair();
-        let tx = Transaction::transfer(&kp, Address([9u8; 32]), 100, 0, 1_000, chain_id()).unwrap();
+        let tx = Transaction::transfer(&kp, Address([9u8; 32]), 100, 0, 1_000, chain_id(), fingerprint()).unwrap();
         assert_eq!(tx.from, PublicKey::new(*kp.public_bytes()).address());
         assert_eq!(tx.chain_id, chain_id());
         tx.verify_signature().unwrap();
@@ -326,7 +352,7 @@ mod tests {
     #[test]
     fn wrong_chain_id_is_rejected() {
         let kp = keypair();
-        let tx = Transaction::transfer(&kp, Address([9u8; 32]), 100, 0, 1_000, chain_id()).unwrap();
+        let tx = Transaction::transfer(&kp, Address([9u8; 32]), 100, 0, 1_000, chain_id(), fingerprint()).unwrap();
         assert_eq!(
             tx.check_chain_id("other").unwrap_err(),
             Error::ChainIdMismatch {
@@ -339,7 +365,7 @@ mod tests {
     #[test]
     fn tampering_invalidates_signature() {
         let kp = keypair();
-        let tx = Transaction::transfer(&kp, Address([9u8; 32]), 100, 0, 1_000, chain_id()).unwrap();
+        let tx = Transaction::transfer(&kp, Address([9u8; 32]), 100, 0, 1_000, chain_id(), fingerprint()).unwrap();
 
         let mut tampered = tx.clone();
         tampered.amount += 1;
@@ -360,7 +386,7 @@ mod tests {
     fn foreign_public_key_is_rejected() {
         let kp = keypair();
         let other = keypair();
-        let mut tx = Transaction::transfer(&kp, Address([9u8; 32]), 100, 0, 1_000, chain_id()).unwrap();
+        let mut tx = Transaction::transfer(&kp, Address([9u8; 32]), 100, 0, 1_000, chain_id(), fingerprint()).unwrap();
         tx.public_key = PublicKey::new(*other.public_bytes());
         assert_eq!(
             tx.verify_signature().unwrap_err(),
@@ -371,7 +397,7 @@ mod tests {
     #[test]
     fn clock_skew_bounds_are_enforced() {
         let kp = keypair();
-        let tx = Transaction::transfer(&kp, Address([9u8; 32]), 100, 0, 10_000, chain_id()).unwrap();
+        let tx = Transaction::transfer(&kp, Address([9u8; 32]), 100, 0, 10_000, chain_id(), fingerprint()).unwrap();
         tx.check_static(10_000 + TX_TIME_TOLERANCE_SECS).unwrap();
         tx.check_static(10_000 - TX_TIME_TOLERANCE_SECS).unwrap();
         assert!(matches!(
@@ -388,24 +414,24 @@ mod tests {
     fn shape_rules_per_kind() {
         let kp = keypair();
         let me = PublicKey::new(*kp.public_bytes()).address();
-        Transaction::transfer(&kp, Address([9u8; 32]), 1, 0, 100, chain_id())
+        Transaction::transfer(&kp, Address([9u8; 32]), 1, 0, 100, chain_id(), fingerprint())
             .unwrap()
             .check_static(100)
             .unwrap();
-        assert!(Transaction::transfer(&kp, me, 1, 0, 100, chain_id())
+        assert!(Transaction::transfer(&kp, me, 1, 0, 100, chain_id(), fingerprint())
             .unwrap()
             .check_static(100)
             .is_err());
-        Transaction::bond(&kp, 10, 0, 100, chain_id())
+        Transaction::bond(&kp, 10, 0, 100, chain_id(), fingerprint())
             .unwrap()
             .check_static(100)
             .unwrap();
-        Transaction::unbond(&kp, 0, 100, chain_id())
+        Transaction::unbond(&kp, 0, 100, chain_id(), fingerprint())
             .unwrap()
             .check_static(100)
             .unwrap();
 
-        let mut bad_bond = Transaction::bond(&kp, 10, 0, 100, chain_id()).unwrap();
+        let mut bad_bond = Transaction::bond(&kp, 10, 0, 100, chain_id(), fingerprint()).unwrap();
         bad_bond.to = Address([1u8; 32]);
         assert!(bad_bond.check_static(100).is_err());
     }
@@ -413,16 +439,16 @@ mod tests {
     #[test]
     fn id_ignores_signature_but_covers_payload() {
         let kp = keypair();
-        let a = Transaction::transfer(&kp, Address([9u8; 32]), 100, 0, 1_000, chain_id()).unwrap();
-        let b = Transaction::transfer(&kp, Address([9u8; 32]), 100, 0, 1_000, chain_id()).unwrap();
+        let a = Transaction::transfer(&kp, Address([9u8; 32]), 100, 0, 1_000, chain_id(), fingerprint()).unwrap();
+        let b = Transaction::transfer(&kp, Address([9u8; 32]), 100, 0, 1_000, chain_id(), fingerprint()).unwrap();
         assert_ne!(a.signature, b.signature);
         assert_eq!(a.id(), b.id());
 
-        let c = Transaction::transfer(&kp, Address([9u8; 32]), 101, 0, 1_000, chain_id()).unwrap();
+        let c = Transaction::transfer(&kp, Address([9u8; 32]), 101, 0, 1_000, chain_id(), fingerprint()).unwrap();
         assert_ne!(a.id(), c.id());
 
         let other_chain =
-            Transaction::transfer(&kp, Address([9u8; 32]), 100, 0, 1_000, "other").unwrap();
+            Transaction::transfer(&kp, Address([9u8; 32]), 100, 0, 1_000, "other", fingerprint()).unwrap();
         assert_ne!(a.id(), other_chain.id());
     }
 
@@ -430,7 +456,7 @@ mod tests {
     fn swapping_the_public_key_changes_the_id() {
         let kp = keypair();
         let other = keypair();
-        let mut tx = Transaction::transfer(&kp, Address([9u8; 32]), 100, 0, 1_000, chain_id()).unwrap();
+        let mut tx = Transaction::transfer(&kp, Address([9u8; 32]), 100, 0, 1_000, chain_id(), fingerprint()).unwrap();
         let original_id = tx.id();
         tx.public_key = PublicKey::new(*other.public_bytes());
         assert_ne!(
@@ -447,7 +473,7 @@ mod tests {
     #[test]
     fn binary_and_json_roundtrip() {
         let kp = keypair();
-        let tx = Transaction::bond(&kp, 42, 7, 1_000, chain_id()).unwrap();
+        let tx = Transaction::bond(&kp, 42, 7, 1_000, chain_id(), fingerprint()).unwrap();
 
         let bytes = tx.to_bytes();
         assert_eq!(Transaction::from_bytes(&bytes).unwrap(), tx);
@@ -459,7 +485,7 @@ mod tests {
     #[test]
     fn json_defaults_kind_to_transfer() {
         let kp = keypair();
-        let tx = Transaction::transfer(&kp, Address([9u8; 32]), 1, 0, 1_000, chain_id()).unwrap();
+        let tx = Transaction::transfer(&kp, Address([9u8; 32]), 1, 0, 1_000, chain_id(), fingerprint()).unwrap();
         let mut value = serde_json::to_value(&tx).unwrap();
         value.as_object_mut().unwrap().remove("kind");
         let decoded: Transaction = serde_json::from_value(value).unwrap();
@@ -468,7 +494,7 @@ mod tests {
 
     /// Layout must stay byte-identical to `public/wallet.html` (`encodeStr` + LE u64s).
     #[test]
-    fn wallet_html_v3_preimage_layout() {
+    fn wallet_html_v4_preimage_layout() {
         let pk = PublicKey::new([0xABu8; 2592]);
         let tx = Transaction {
             kind: TxKind::Transfer,
@@ -478,6 +504,7 @@ mod tests {
             nonce: 7,
             timestamp: 1_720_000_000,
             chain_id: "sikka-test".into(),
+            genesis_fingerprint: fingerprint(),
             public_key: pk,
             signature: Signature::default(),
         };
@@ -487,14 +514,15 @@ mod tests {
         // Writer::str("sikka-test") = u32le(10) ‖ utf8
         assert_eq!(&rest[..4], &10u32.to_le_bytes());
         assert_eq!(&rest[4..14], b"sikka-test");
-        assert_eq!(rest[14], 0); // transfer
-        assert_eq!(&rest[15..47], tx.from.as_bytes());
-        assert_eq!(&rest[47..79], &[0x11u8; 32]);
-        assert_eq!(&rest[79..87], &1_500_000_000u64.to_le_bytes());
-        assert_eq!(&rest[87..95], &7u64.to_le_bytes());
-        assert_eq!(&rest[95..103], &1_720_000_000u64.to_le_bytes());
-        assert_eq!(&rest[103..], tx.public_key.as_slice());
-        // tag(11) + 4+10 + 1 + 32 + 32 + 8 + 8 + 8 + 2592
-        assert_eq!(bytes.len(), 2706);
+        assert_eq!(&rest[14..46], fingerprint().as_bytes());
+        assert_eq!(rest[46], 0); // transfer
+        assert_eq!(&rest[47..79], tx.from.as_bytes());
+        assert_eq!(&rest[79..111], &[0x11u8; 32]);
+        assert_eq!(&rest[111..119], &1_500_000_000u64.to_le_bytes());
+        assert_eq!(&rest[119..127], &7u64.to_le_bytes());
+        assert_eq!(&rest[127..135], &1_720_000_000u64.to_le_bytes());
+        assert_eq!(&rest[135..], tx.public_key.as_slice());
+        // tag(11) + 4+10 + 32 + 1 + 32 + 32 + 8 + 8 + 8 + 2592
+        assert_eq!(bytes.len(), 2738);
     }
 }

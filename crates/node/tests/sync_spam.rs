@@ -90,6 +90,7 @@ fn fake_header(chain_id: &str, local_height: u64) -> CheckpointHeader {
         total_supply: 1,
         total_bonded: 0,
         chain_id: chain_id.into(),
+        genesis_fingerprint: Hash([0xAA; 32]),
     }
 }
 
@@ -148,6 +149,7 @@ async fn signed_far_ahead_checkpoint_may_trigger_sync() {
     let vote = Vote::sign(
         &validator,
         &checkpoint.header.chain_id,
+        checkpoint.header.genesis_fingerprint,
         checkpoint.header.height,
         checkpoint.header.round,
         VoteKind::Precommit,

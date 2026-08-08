@@ -32,13 +32,7 @@ pub use votes::{VoteOutcome, VoteTracker};
 use sikka_common::bytes::Address;
 use sikka_common::validator::Validator;
 
-/// How long the validator whose turn it is has to produce a checkpoint before
-/// the turn passes to the next one.
-///
-/// Short enough that a dead validator costs seconds rather than minutes; long
-/// enough that a slow node (a Raspberry Pi, a busy VPS) is not skipped
-/// merely for being slow.
-pub const PROPOSER_TIMEOUT_SECS: u64 = 10;
+pub use sikka_common::constants::{round_at, PROPOSER_TIMEOUT_SECS};
 
 /// The proposer for `height`, chosen round-robin from the active set.
 ///
@@ -58,16 +52,6 @@ pub fn proposer_for(height: u64, active: &[Validator]) -> Option<Address> {
 /// check the takeover was legitimate.
 pub fn proposer_for_round(height: u64, round: u32, active: &[Validator]) -> Option<Address> {
     Validator::proposer_for_round(height, round, active)
-}
-
-/// Which round is due, given how long the previous checkpoint has stood.
-///
-/// A round is a pure function of two agreed timestamps, so a proposer and its
-/// verifiers reach the same conclusion about whose turn it is without
-/// exchanging anything.
-pub fn round_at(now: u64, last_checkpoint_time: u64) -> u32 {
-    let elapsed = now.saturating_sub(last_checkpoint_time);
-    u32::try_from(elapsed / PROPOSER_TIMEOUT_SECS).unwrap_or(u32::MAX)
 }
 
 /// Whether `candidate` is the proposer for `height` at `round`.

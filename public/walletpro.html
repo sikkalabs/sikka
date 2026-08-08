@@ -292,7 +292,7 @@
       </div>
       <p class="ok" id="sendOk" hidden></p>
       <p class="warn">
-        Signing uses ML-DSA-87 (<code>SIKKA/tx/v3</code>, context
+        Signing uses ML-DSA-87 (<code>SIKKA/tx/v4</code>, context
         <code>SIKKA-v1</code>) bound to the node’s <code>chain_id</code>.
         Nothing is sent until you click Send.
       </p>
@@ -309,7 +309,7 @@
     const PK_LEN = 2592;
     const SIG_LEN = 4627;
     const CHILLAR_PER_SIKKA = 1_000_000_000n;
-    const TX_SIGNING_TAG = new TextEncoder().encode("SIKKA/tx/v3");
+    const TX_SIGNING_TAG = new TextEncoder().encode("SIKKA/tx/v4");
     const SIGNING_CONTEXT = new TextEncoder().encode("SIKKA-v1");
     const DERIVATION_TAG = new TextEncoder().encode("SIKKA/recv/v1");
     const GAP_LIMIT = 10;
@@ -327,6 +327,8 @@
     let rpcId = 1;
     /** @type {string|null} */
     let chainId = null;
+    /** @type {Uint8Array|null} */
+    let genesisFingerprint = null;
 
     /**
      * @typedef {{
@@ -696,6 +698,13 @@
           throw new Error("node did not return chain_id");
         }
         chainId = info.chain_id;
+        if (typeof info.genesis_fingerprint !== "string" || !info.genesis_fingerprint) {
+          throw new Error("node did not return genesis_fingerprint");
+        }
+        genesisFingerprint = parseHex(info.genesis_fingerprint);
+        if (genesisFingerprint.length !== 32) {
+          throw new Error("genesis_fingerprint must be 32 bytes");
+        }
         $("netStats").hidden = false;
         $("nHeight").textContent = String(info.height);
         $("nSupply").textContent = `${formatSikka(info.total_supply)} SIKKA`;
@@ -706,19 +715,33 @@
         fail("");
       } catch (e) {
         chainId = null;
+        genesisFingerprint = null;
         $("netStats").hidden = true;
         setNet(false, e.message || String(e));
       }
     }
 
-    async function ensureChainId() {
-      if (chainId) return chainId;
+    async function ensureChainBinding() {
+      if (chainId && genesisFingerprint) {
+        return { chainId, genesisFingerprint };
+      }
       const info = await rpc("chain.info");
       if (typeof info.chain_id !== "string" || !info.chain_id) {
         throw new Error("node did not return chain_id");
       }
+      if (typeof info.genesis_fingerprint !== "string" || !info.genesis_fingerprint) {
+        throw new Error("node did not return genesis_fingerprint");
+      }
       chainId = info.chain_id;
-      return chainId;
+      genesisFingerprint = parseHex(info.genesis_fingerprint);
+      if (genesisFingerprint.length !== 32) {
+        throw new Error("genesis_fingerprint must be 32 bytes");
+      }
+      return { chainId, genesisFingerprint };
+    }
+
+    async function ensureChainId() {
+      return (await ensureChainBinding()).chainId;
     }
 
     function normalizeAddress(text) {
@@ -731,6 +754,7 @@
 
     function signingBytes({
       chainId: id,
+      genesisFingerprint: fingerprint,
       kind,
       from,
       to,
@@ -742,6 +766,9 @@
       if (typeof id !== "string" || !id) {
         throw new Error("chain_id required for signing");
       }
+      if (!(fingerprint instanceof Uint8Array) || fingerprint.length !== 32) {
+        throw new Error("genesis_fingerprint must be 32 raw bytes");
+      }
       if (from.length !== 32 || to.length !== 32) {
         throw new Error("from/to must be 32 raw address bytes");
       }
@@ -751,6 +778,7 @@
       return concat(
         TX_SIGNING_TAG,
         encodeStr(id),
+        fingerprint,
         Uint8Array.of(kind),
         from,
         to,
@@ -761,7 +789,7 @@
       );
     }
 
-    function signTransfer(acct, toHex, amountChillar, nonce, id) {
+    function signTransfer(acct, toHex, amountChillar, nonce, binding) {
       const from = parseHex(acct.address);
       if (from.length !== 32) throw new Error("wallet address corrupt");
       const toAddr = normalizeAddress(toHex);
@@ -770,7 +798,8 @@
       if (amountChillar <= 0n) throw new Error("amount must be positive");
       const timestamp = BigInt(Math.floor(Date.now() / 1000));
       const msg = signingBytes({
-        chainId: id,
+        chainId: binding.chainId,
+        genesisFingerprint: binding.genesisFingerprint,
         kind: 0,
         from,
         to,
@@ -792,7 +821,8 @@
         amount: amountChillar,
         nonce,
         timestamp,
-        chain_id: id,
+        chain_id: binding.chainId,
+        genesis_fingerprint: hex(binding.genesisFingerprint),
         public_key: hex(acct.publicKey),
         signature: hex(signature),
       };
@@ -965,6 +995,7 @@
     $("refreshNet").onclick = () => refreshNetwork();
     $("node").addEventListener("change", () => {
       chainId = null;
+      genesisFingerprint = null;
       refreshNetwork();
       if (pro) $("scan").click();
     });
@@ -983,8 +1014,8 @@
 
         const account = await rpc("account.get", { address: acct.address });
         const nonce = asBig(account.next_nonce);
-        const id = await ensureChainId();
-        const tx = signTransfer(acct, to, amount, nonce, id);
+        const binding = await ensureChainBinding();
+        const tx = signTransfer(acct, to, amount, nonce, binding);
         const receipt = await rpc("tx.submit", { transaction: tx });
         $("sendOk").hidden = false;
         $("sendOk").textContent =

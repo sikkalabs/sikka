@@ -22,7 +22,7 @@ pub use bloom::BloomFilter;
 pub use client::{ClientConfig, PeerClient};
 pub use mempool::{Admission, Mempool};
 pub use peers::{
-    backoff_secs, Peer, PeerAnnounce, PeerBook, BACKOFF_BASE_SECS, BACKOFF_MAX_SECS,
-    DEFAULT_MAX_PEERS, MAX_FAILURES,
+    backoff_secs, validate_endpoint_url, Peer, PeerAnnounce, PeerBook, BACKOFF_BASE_SECS,
+    BACKOFF_MAX_SECS, DEFAULT_MAX_PEERS, MAX_FAILURES,
 };
 pub use wire::MessageKind;

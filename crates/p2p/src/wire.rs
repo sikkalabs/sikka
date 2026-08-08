@@ -153,10 +153,14 @@ mod tests {
         "sikka-test"
     }
 
+    fn fingerprint() -> sikka_common::bytes::Hash {
+        sikka_common::bytes::Hash([0xAA; 32])
+    }
+
     #[test]
     fn transaction_submission_roundtrips() {
         let kp = Keypair::generate().unwrap();
-        let tx = Transaction::transfer(&kp, Address([1u8; 32]), 10, 0, 1_700_000_000, chain_id()).unwrap();
+        let tx = Transaction::transfer(&kp, Address([1u8; 32]), 10, 0, 1_700_000_000, chain_id(), fingerprint()).unwrap();
         let message = SubmitTransaction {
             transaction: tx.clone(),
         };

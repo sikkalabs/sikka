@@ -8,6 +8,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -24,7 +25,7 @@ use sikka_common::genesis::GenesisConfig;
 use sikka_common::time::now_secs;
 use sikka_common::transaction::Transaction;
 use sikka_common::validator::Validator;
-use sikka_common::vote::{Vote, VoteKind};
+use sikka_common::vote::{vote_from_checkpoint, Vote, VoteKind};
 use sikka_consensus::equivocation::Equivocation;
 use sikka_consensus::proposal::{
     build_proposal, verify_proposal, verify_proposal_with, Authority, CheckpointProposal,
@@ -40,7 +41,10 @@ use sikka_rpc::types::{
     AccountInfo, AccountProof, ChainInfo, MempoolInfo, TxStatus, ValidatorInfo,
 };
 use sikka_state::ledger::GenesisOutcome;
-use sikka_state::{Ledger, SnapshotArchive, SnapshotChunkMeta, SnapshotManifest, StateSnapshot};
+use sikka_state::{
+    build_snapshot_archive, Ledger, SnapshotArchive, SnapshotChunkMeta, SnapshotManifest,
+    StateSnapshot, StateStore,
+};
 use sikka_wallet::Keystore;
 
 use crate::config::NodeConfig;
@@ -138,6 +142,10 @@ pub struct Node {
     /// One expensive verify per scheduled proposal stops a key-holder from
     /// repeatedly forcing hundreds of MiB of ML-DSA work on the same turn.
     proposal_admit: Mutex<HashMap<(Address, u64), Instant>>,
+    /// Cached funded-address list for `/api/address/random`, keyed by ledger height.
+    funded_address_cache: Mutex<Option<(u64, Vec<FundedAddress>)>>,
+    /// True while a background thread is building a snapshot archive.
+    snapshot_building: Arc<AtomicBool>,
     started_at: u64,
 }
 
@@ -186,7 +194,10 @@ impl Node {
         // open, and the checkpoint it was cast over is the only one it may help
         // commit there. Both come back, so a restart mid-round can offer that
         // checkpoint again instead of stranding the height.
-        let mut votes = VoteTracker::new(ledger.meta().chain_id.clone());
+        let mut votes = VoteTracker::new(
+            ledger.meta().chain_id.clone(),
+            ledger.meta().genesis_fingerprint,
+        );
         let mut locked = None;
         let mut known = None;
         for commitment in commitments.load_above(ledger.height())? {
@@ -221,7 +232,7 @@ impl Node {
         }
 
         let mempool = Mempool::new(config.mempool_capacity, DEFAULT_MAX_AGE_SECS);
-        Ok(Arc::new(Self {
+        let node = Arc::new(Self {
             keypair,
             address,
             public_key,
@@ -238,9 +249,22 @@ impl Node {
             commitments,
             peers: Mutex::new(peers),
             proposal_admit: Mutex::new(HashMap::new()),
+            funded_address_cache: Mutex::new(None),
+            snapshot_building: Arc::new(AtomicBool::new(false)),
             started_at: now,
             config,
-        }))
+        });
+        {
+            let chain = node.chain.lock();
+            let height = chain.ledger.height();
+            if let Ok(Some(checkpoint)) = chain.checkpoints.get(height) {
+                let store = chain.ledger.store_handle();
+                let checkpoint = checkpoint.clone();
+                drop(chain);
+                node.schedule_snapshot_archive(checkpoint, store);
+            }
+        }
+        Ok(node)
     }
 
     pub fn config(&self) -> &NodeConfig {
@@ -403,15 +427,45 @@ impl Node {
 
     /// Build or load the current chunked snapshot manifest.
     pub fn snapshot_manifest(&self) -> Result<SnapshotManifest> {
-        let chain = self.chain();
-        let height = chain.ledger.height();
-        let checkpoint = chain
-            .checkpoints
-            .get(height)?
-            .ok_or(Error::CheckpointNotFound(height))?;
-        chain
-            .ledger
-            .snapshot_archive(checkpoint, self.config.snapshot_cache_path())
+        let checkpoint = {
+            let chain = self.chain();
+            let height = chain.ledger.height();
+            chain
+                .checkpoints
+                .get(height)?
+                .ok_or(Error::CheckpointNotFound(height))?
+        };
+        let snapshot_id = checkpoint.hash();
+        if let Some(manifest) =
+            SnapshotArchive::load_if_present(self.config.snapshot_cache_path(), &snapshot_id)?
+        {
+            return Ok(manifest);
+        }
+        let store = {
+            let chain = self.chain();
+            chain.ledger.store_handle()
+        };
+        self.schedule_snapshot_archive(checkpoint, store);
+        Err(Error::Other("snapshot archive not ready".into()))
+    }
+
+    fn schedule_snapshot_archive(&self, checkpoint: Checkpoint, store: Arc<StateStore>) {
+        if self
+            .snapshot_building
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .is_err()
+        {
+            return;
+        }
+        let cache_path = self.config.snapshot_cache_path();
+        let building = Arc::clone(&self.snapshot_building);
+        std::thread::spawn(move || {
+            let result = build_snapshot_archive(&store, checkpoint, &cache_path);
+            building.store(false, Ordering::Release);
+            if let Err(error) = result {
+                warn!(%error, "background snapshot archive build failed");
+            }
+        });
     }
 
     /// Resolve a cached chunk after validating its snapshot id and index.
@@ -487,6 +541,7 @@ impl Node {
         run.push(transaction.clone());
         chain.ledger.would_apply(&run, now)?;
         transaction.check_chain_id(&chain.ledger.meta().chain_id)?;
+        transaction.check_genesis_fingerprint(&chain.ledger.meta().genesis_fingerprint)?;
 
         let admission = mempool.insert(transaction, committed, now)?;
         Ok((id, admission == Admission::Accepted))
@@ -634,6 +689,7 @@ impl Node {
             staged,
         } = verified;
         let chain_id = chain.ledger.meta().chain_id.clone();
+        let genesis_fingerprint = chain.ledger.meta().genesis_fingerprint;
         let guard = sikka_state::StageGuard::arm(&mut chain.ledger, staged);
         proposal.sign(&self.keypair)?;
         if !drop_from_mempool.is_empty() {
@@ -643,6 +699,7 @@ impl Node {
         let vote = Vote::sign(
             &self.keypair,
             &chain_id,
+            genesis_fingerprint,
             height,
             round,
             VoteKind::Prevote,
@@ -731,10 +788,12 @@ impl Node {
             staged,
         } = verified;
         let chain_id = chain.ledger.meta().chain_id.clone();
+        let genesis_fingerprint = chain.ledger.meta().genesis_fingerprint;
         let guard = sikka_state::StageGuard::arm(&mut chain.ledger, staged);
         let vote = Vote::sign(
             &self.keypair,
             &chain_id,
+            genesis_fingerprint,
             height,
             round,
             VoteKind::Prevote,
@@ -997,7 +1056,15 @@ impl Node {
         let verified_ids: HashSet<Hash> = self.mempool.lock().verified_ids();
         let verified = if chain.pending.as_ref().is_some_and(|p| p.hash == hash) {
             // Already staged this body (e.g. we proposed it).
-            let vote = Vote::sign(&self.keypair, &chain.ledger.meta().chain_id, height, round, VoteKind::Prevote, hash)?;
+            let vote = Vote::sign(
+                &self.keypair,
+                &chain.ledger.meta().chain_id,
+                chain.ledger.meta().genesis_fingerprint,
+                height,
+                round,
+                VoteKind::Prevote,
+                hash,
+            )?;
             self.commitments.put(&Commitment {
                 vote: vote.clone(),
                 proposal: proposal.clone(),
@@ -1019,8 +1086,17 @@ impl Node {
             staged,
         } = verified;
         let chain_id = chain.ledger.meta().chain_id.clone();
+        let genesis_fingerprint = chain.ledger.meta().genesis_fingerprint;
         let guard = sikka_state::StageGuard::arm(&mut chain.ledger, staged);
-        let vote = Vote::sign(&self.keypair, &chain_id, height, round, VoteKind::Prevote, hash)?;
+        let vote = Vote::sign(
+            &self.keypair,
+            &chain_id,
+            genesis_fingerprint,
+            height,
+            round,
+            VoteKind::Prevote,
+            hash,
+        )?;
         self.commitments.put(&Commitment {
             vote: vote.clone(),
             proposal: proposal.clone(),
@@ -1070,7 +1146,10 @@ impl Node {
     pub fn handle_vote(&self, vote: Vote) -> Result<(Option<Vote>, Option<Finalized>)> {
         {
             let chain = self.chain();
-            vote.verify(&chain.ledger.meta().chain_id)?;
+            vote.verify(
+                &chain.ledger.meta().chain_id,
+                &chain.ledger.meta().genesis_fingerprint,
+            )?;
             let height = chain.ledger.height();
             if vote.height <= height {
                 return Ok((None, None));
@@ -1158,11 +1237,13 @@ impl Node {
             return Ok(None);
         }
         let chain_id = chain.ledger.meta().chain_id.clone();
+        let genesis_fingerprint = chain.ledger.meta().genesis_fingerprint;
         drop(chain);
 
         let vote = Vote::sign(
             &self.keypair,
             &chain_id,
+            genesis_fingerprint,
             height,
             round,
             VoteKind::Precommit,
@@ -1273,6 +1354,7 @@ impl Node {
         let hash = checkpoint.hash();
         let payload = sikka_common::vote::vote_signing_bytes(
             &checkpoint.header.chain_id,
+            &checkpoint.header.genesis_fingerprint,
             checkpoint.header.height,
             checkpoint.header.round,
             VoteKind::Precommit,
@@ -1307,12 +1389,68 @@ impl Node {
         }
         if height == local {
             if let Some(existing) = chain.checkpoints.get(height)? {
-                if existing.hash() == checkpoint.hash()
-                    && existing.validator_signatures != checkpoint.validator_signatures
-                {
-                    return Err(Error::Other(
-                        "alternate signer set for an already-finalized checkpoint".into(),
-                    ));
+                if existing.hash() == checkpoint.hash() {
+                    if existing.validator_signatures != checkpoint.validator_signatures {
+                        return Err(Error::Other(
+                            "alternate signer set for an already-finalized checkpoint".into(),
+                        ));
+                    }
+                    return Ok(false);
+                }
+
+                let active = chain.ledger.active_validators_at(height)?;
+                let authorized: Vec<(Address, PublicKey, u64)> = active
+                    .iter()
+                    .map(|v| (v.address, v.public_key.clone(), v.bond))
+                    .collect();
+                checkpoint.verify_signatures(authorized.iter().map(|(a, k, b)| (a, k, *b)))?;
+
+                let chain_id = chain.ledger.meta().chain_id.clone();
+                let genesis_fingerprint = chain.ledger.meta().genesis_fingerprint;
+                let existing_signers: HashSet<Address> = existing
+                    .validator_signatures
+                    .iter()
+                    .map(|s| s.validator)
+                    .collect();
+                let incoming_signers: HashSet<Address> = checkpoint
+                    .validator_signatures
+                    .iter()
+                    .map(|s| s.validator)
+                    .collect();
+
+                let mut noted = 0usize;
+                for validator in existing_signers.intersection(&incoming_signers) {
+                    let Some(existing_sig) = existing
+                        .validator_signatures
+                        .iter()
+                        .find(|s| s.validator == *validator)
+                    else {
+                        continue;
+                    };
+                    let Some(incoming_sig) = checkpoint
+                        .validator_signatures
+                        .iter()
+                        .find(|s| s.validator == *validator)
+                    else {
+                        continue;
+                    };
+                    let vote_a = vote_from_checkpoint(&existing, existing_sig);
+                    let vote_b = vote_from_checkpoint(checkpoint, incoming_sig);
+                    if let Ok(evidence) =
+                        Equivocation::new(vote_a, vote_b, &chain_id, &genesis_fingerprint)
+                    {
+                        self.votes.lock().note_equivocation(evidence);
+                        noted += 1;
+                    }
+                }
+                if noted > 0 {
+                    warn!(
+                        height,
+                        noted,
+                        local_hash = %existing.hash().short(),
+                        incoming_hash = %checkpoint.hash().short(),
+                        "recorded partition-healed equivocation evidence"
+                    );
                 }
             }
             return Ok(false);
@@ -1424,6 +1562,9 @@ impl Node {
 
         self.votes.lock().prune_below(checkpoint.header.height + 1);
         self.commitments.prune_below(checkpoint.header.height + 1)?;
+        let store = chain.ledger.store_handle();
+        let checkpoint = checkpoint.clone();
+        self.schedule_snapshot_archive(checkpoint, store);
         Ok(())
     }
 
@@ -1481,8 +1622,14 @@ impl Node {
     // ---- peers -----------------------------------------------------------
 
     pub fn record_announce(&self, announce: &PeerAnnounce) -> Result<bool> {
-        let chain_id = self.chain().ledger.meta().chain_id.clone();
-        self.peers.lock().record(announce, now_secs(), &chain_id)
+        let chain = self.chain();
+        let meta = chain.ledger.meta();
+        self.peers.lock().record(
+            announce,
+            now_secs(),
+            &meta.chain_id,
+            &meta.genesis_fingerprint,
+        )
     }
 
     pub fn add_peer_endpoint(&self, endpoint: &str) -> bool {
@@ -1498,8 +1645,15 @@ impl Node {
     }
 
     pub fn own_announce(&self) -> Result<PeerAnnounce> {
-        let chain_id = self.chain().ledger.meta().chain_id.clone();
-        PeerAnnounce::sign(&self.keypair, &self.config.advertise, now_secs(), &chain_id)
+        let chain = self.chain();
+        let meta = chain.ledger.meta();
+        PeerAnnounce::sign(
+            &self.keypair,
+            &self.config.advertise,
+            now_secs(),
+            &meta.chain_id,
+            meta.genesis_fingerprint,
+        )
     }
 
     // ---- maintenance and sync -------------------------------------------
@@ -1649,10 +1803,13 @@ impl Node {
             warn!(%error, height, "could not prune checkpoint history");
         }
         chain.last_progress = now_secs();
+        let store = chain.ledger.store_handle();
+        let checkpoint = snapshot.checkpoint.clone();
         drop(chain);
 
         self.votes.lock().prune_below(height + 1);
         self.commitments.prune_below(height + 1)?;
+        self.schedule_snapshot_archive(checkpoint, store);
         info!(
             height,
             accounts = snapshot.accounts.len(),
@@ -1672,27 +1829,37 @@ impl Node {
     /// link into a real holder without hard-coding addresses.
     pub fn random_funded_address(&self) -> Result<Option<FundedAddress>> {
         let chain = self.chain();
-        let bonds: HashMap<Address, u64> = chain
-            .ledger
-            .validators()?
-            .into_iter()
-            .filter(|v| !v.slashed && v.bond > 0)
-            .map(|v| (v.address, v.bond))
-            .collect();
+        let height = chain.ledger.height();
+        drop(chain);
 
-        let mut funded = Vec::new();
-        for (address, account) in chain.ledger.all_accounts()? {
-            let bond = bonds.get(&address).copied().unwrap_or(0);
-            let total = account.balance.saturating_add(bond);
-            if total >= CHILLAR_PER_SIKKA {
-                funded.push(FundedAddress {
-                    address,
-                    balance: account.balance,
-                    bond,
-                    total,
-                });
+        let mut cache = self.funded_address_cache.lock();
+        if cache.as_ref().is_none_or(|(cached_height, _)| *cached_height != height) {
+            let chain = self.chain();
+            let bonds: HashMap<Address, u64> = chain
+                .ledger
+                .validators()?
+                .into_iter()
+                .filter(|v| !v.slashed && v.bond > 0)
+                .map(|v| (v.address, v.bond))
+                .collect();
+
+            let mut funded = Vec::new();
+            for (address, account) in chain.ledger.all_accounts()? {
+                let bond = bonds.get(&address).copied().unwrap_or(0);
+                let total = account.balance.saturating_add(bond);
+                if total >= CHILLAR_PER_SIKKA {
+                    funded.push(FundedAddress {
+                        address,
+                        balance: account.balance,
+                        bond,
+                        total,
+                    });
+                }
             }
+            *cache = Some((height, funded));
         }
+
+        let funded = &mut cache.as_mut().unwrap().1;
         if funded.is_empty() {
             return Ok(None);
         }
@@ -1703,7 +1870,7 @@ impl Node {
         let mix = COUNTER
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
             .wrapping_mul(0x9E37_79B9)
-            .wrapping_add(chain.ledger.height().wrapping_mul(0x85EB_CA6B))
+            .wrapping_add(height.wrapping_mul(0x85EB_CA6B))
             .wrapping_add(now_secs());
         let index = (mix as usize) % funded.len();
         Ok(Some(funded.swap_remove(index)))
@@ -1799,6 +1966,10 @@ mod tests {
         fn chain_id(&self) -> String {
             self.node.chain_info().unwrap().chain_id
         }
+
+        fn genesis_fingerprint(&self) -> Hash {
+            self.node.chain_info().unwrap().genesis_fingerprint
+        }
     }
 
     /// A node that is the sole validator, so a single vote is a super-majority.
@@ -1860,6 +2031,10 @@ mod tests {
     impl Pair {
         fn chain_id(&self) -> String {
             self.nodes[0].chain_info().unwrap().chain_id
+        }
+
+        fn genesis_fingerprint(&self) -> Hash {
+            self.nodes[0].chain_info().unwrap().genesis_fingerprint
         }
     }
 
@@ -1937,8 +2112,9 @@ mod tests {
         amount: u64,
         nonce: u64,
         chain_id: &str,
+        genesis_fingerprint: Hash,
     ) -> Transaction {
-        Transaction::transfer(from, to, amount, nonce, now_secs(), chain_id).unwrap()
+        Transaction::transfer(from, to, amount, nonce, now_secs(), chain_id, genesis_fingerprint).unwrap()
     }
 
     /// Drive prevotes → precommits → finalize for a solo validator.
@@ -2033,10 +2209,10 @@ mod tests {
         let config = f.node.config().clone();
         let bob = Address([7u8; 32]);
         f.node
-            .submit_transaction(transfer(&f.alice, bob, 500, 0, &f.chain_id()))
+            .submit_transaction(transfer(&f.alice, bob, 500, 0, &f.chain_id(), f.genesis_fingerprint()))
             .unwrap();
         f.node
-            .submit_transaction(transfer(&f.alice, bob, 500, 1, &f.chain_id()))
+            .submit_transaction(transfer(&f.alice, bob, 500, 1, &f.chain_id(), f.genesis_fingerprint()))
             .unwrap();
         let (_, vote) = f.node.try_propose().unwrap().unwrap();
         seal_solo(&f.node, vote);
@@ -2053,14 +2229,14 @@ mod tests {
         let f = solo_node();
         let bob = Address([7u8; 32]);
         f.node
-            .submit_transaction(transfer(&f.alice, bob, 700, 0, &f.chain_id()))
+            .submit_transaction(transfer(&f.alice, bob, 700, 0, &f.chain_id(), f.genesis_fingerprint()))
             .unwrap();
 
         // One transaction is short of the two-transaction interval.
         assert!(f.node.try_propose().unwrap().is_none());
 
         f.node
-            .submit_transaction(transfer(&f.alice, bob, 300, 1, &f.chain_id()))
+            .submit_transaction(transfer(&f.alice, bob, 300, 1, &f.chain_id(), f.genesis_fingerprint()))
             .unwrap();
         let (proposal, vote) = f.node.try_propose().unwrap().unwrap();
         assert_eq!(proposal.transactions.len(), 2);
@@ -2086,7 +2262,7 @@ mod tests {
     #[test]
     fn duplicate_submissions_are_reported_as_known() {
         let f = solo_node();
-        let tx = transfer(&f.alice, Address([7u8; 32]), 1, 0, &f.chain_id());
+        let tx = transfer(&f.alice, Address([7u8; 32]), 1, 0, &f.chain_id(), f.genesis_fingerprint());
         assert!(f.node.submit_transaction(tx.clone()).unwrap().1);
         assert!(
             !f.node.submit_transaction(tx).unwrap().1,
@@ -2113,10 +2289,10 @@ mod tests {
         let f = solo_node();
         let bob = Address([7u8; 32]);
         f.node
-            .submit_transaction(transfer(&f.alice, bob, 1, 0, &f.chain_id()))
+            .submit_transaction(transfer(&f.alice, bob, 1, 0, &f.chain_id(), f.genesis_fingerprint()))
             .unwrap();
         f.node
-            .submit_transaction(transfer(&f.alice, bob, 1, 1, &f.chain_id()))
+            .submit_transaction(transfer(&f.alice, bob, 1, 1, &f.chain_id(), f.genesis_fingerprint()))
             .unwrap();
         let (proposal, _) = f.node.try_propose().unwrap().unwrap();
 
@@ -2144,10 +2320,10 @@ mod tests {
         let f = solo_node();
         let bob = Address([7u8; 32]);
         f.node
-            .submit_transaction(transfer(&f.alice, bob, 1, 0, &f.chain_id()))
+            .submit_transaction(transfer(&f.alice, bob, 1, 0, &f.chain_id(), f.genesis_fingerprint()))
             .unwrap();
         f.node
-            .submit_transaction(transfer(&f.alice, bob, 1, 1, &f.chain_id()))
+            .submit_transaction(transfer(&f.alice, bob, 1, 1, &f.chain_id(), f.genesis_fingerprint()))
             .unwrap();
         let root_before = f.node.chain_info().unwrap().state_root;
 
@@ -2186,10 +2362,10 @@ mod tests {
         let f = solo_node();
         let bob = Address([7u8; 32]);
         f.node
-            .submit_transaction(transfer(&f.alice, bob, 1, 0, &f.chain_id()))
+            .submit_transaction(transfer(&f.alice, bob, 1, 0, &f.chain_id(), f.genesis_fingerprint()))
             .unwrap();
         f.node
-            .submit_transaction(transfer(&f.alice, bob, 1, 1, &f.chain_id()))
+            .submit_transaction(transfer(&f.alice, bob, 1, 1, &f.chain_id(), f.genesis_fingerprint()))
             .unwrap();
         let (proposal, _) = f.node.try_propose().unwrap().unwrap();
 
@@ -2214,10 +2390,10 @@ mod tests {
         let f = solo_node();
         let bob = Address([7u8; 32]);
         f.node
-            .submit_transaction(transfer(&f.alice, bob, 1, 0, &f.chain_id()))
+            .submit_transaction(transfer(&f.alice, bob, 1, 0, &f.chain_id(), f.genesis_fingerprint()))
             .unwrap();
         f.node
-            .submit_transaction(transfer(&f.alice, bob, 1, 1, &f.chain_id()))
+            .submit_transaction(transfer(&f.alice, bob, 1, 1, &f.chain_id(), f.genesis_fingerprint()))
             .unwrap();
         let (proposal, original_vote) = f.node.try_propose().unwrap().unwrap();
         let height = proposal.height();
@@ -2285,7 +2461,7 @@ mod tests {
         let bob = Address([7u8; 32]);
         for node in &pair.nodes {
             for nonce in 0..2 {
-                node.submit_transaction(transfer(&pair.alice, bob, 1, nonce, &pair.chain_id()))
+                node.submit_transaction(transfer(&pair.alice, bob, 1, nonce, &pair.chain_id(), pair.genesis_fingerprint()))
                     .unwrap();
             }
         }
@@ -2356,7 +2532,7 @@ mod tests {
         let bob = Address([7u8; 32]);
         for node in &pair.nodes {
             for nonce in 0..2 {
-                node.submit_transaction(transfer(&pair.alice, bob, 1, nonce, &pair.chain_id()))
+                node.submit_transaction(transfer(&pair.alice, bob, 1, nonce, &pair.chain_id(), pair.genesis_fingerprint()))
                     .unwrap();
             }
         }
@@ -2387,7 +2563,7 @@ mod tests {
         let bob = Address([7u8; 32]);
         for node in &pair.nodes {
             for nonce in 0..2 {
-                node.submit_transaction(transfer(&pair.alice, bob, 1, nonce, &pair.chain_id()))
+                node.submit_transaction(transfer(&pair.alice, bob, 1, nonce, &pair.chain_id(), pair.genesis_fingerprint()))
                     .unwrap();
             }
         }
@@ -2429,10 +2605,10 @@ mod tests {
         let f = solo_node();
         let bob = Address([7u8; 32]);
         f.node
-            .submit_transaction(transfer(&f.alice, bob, 1, 0, &f.chain_id()))
+            .submit_transaction(transfer(&f.alice, bob, 1, 0, &f.chain_id(), f.genesis_fingerprint()))
             .unwrap();
         f.node
-            .submit_transaction(transfer(&f.alice, bob, 1, 1, &f.chain_id()))
+            .submit_transaction(transfer(&f.alice, bob, 1, 1, &f.chain_id(), f.genesis_fingerprint()))
             .unwrap();
         let (_, vote) = f.node.try_propose().unwrap().unwrap();
         let height = vote.height;
@@ -2459,7 +2635,7 @@ mod tests {
         let pauper = sikka_crypto::Keypair::generate().unwrap();
         let error = f
             .node
-            .submit_transaction(transfer(&pauper, bob, 1, 0, &f.chain_id()))
+            .submit_transaction(transfer(&pauper, bob, 1, 0, &f.chain_id(), f.genesis_fingerprint()))
             .unwrap_err();
         assert!(matches!(error, Error::InsufficientBalance { .. }));
         assert_eq!(f.node.mempool_info().pending, 0);
@@ -2472,11 +2648,11 @@ mod tests {
             .unwrap()
             .balance;
         f.node
-            .submit_transaction(transfer(&f.alice, bob, balance - 1, 0, &f.chain_id()))
+            .submit_transaction(transfer(&f.alice, bob, balance - 1, 0, &f.chain_id(), f.genesis_fingerprint()))
             .unwrap();
         let error = f
             .node
-            .submit_transaction(transfer(&f.alice, bob, balance - 1, 1, &f.chain_id()))
+            .submit_transaction(transfer(&f.alice, bob, balance - 1, 1, &f.chain_id(), f.genesis_fingerprint()))
             .unwrap_err();
         assert!(matches!(error, Error::InsufficientBalance { .. }));
         assert_eq!(f.node.mempool_info().pending, 1);
@@ -2484,7 +2660,7 @@ mod tests {
         // Replacing that queued transaction with an affordable one is fine: it
         // takes the nonce's place instead of queueing behind it.
         f.node
-            .submit_transaction(transfer(&f.alice, bob, 1, 0, &f.chain_id()))
+            .submit_transaction(transfer(&f.alice, bob, 1, 0, &f.chain_id(), f.genesis_fingerprint()))
             .unwrap();
         assert_eq!(f.node.mempool_info().pending, 1);
     }
@@ -2493,7 +2669,7 @@ mod tests {
     fn votes_from_strangers_are_rejected() {
         let f = solo_node();
         let stranger = sikka_crypto::Keypair::generate().unwrap();
-        let vote = Vote::sign(&stranger, &f.chain_id(), 1, 0, VoteKind::Precommit, Hash([1u8; 32])).unwrap();
+        let vote = Vote::sign(&stranger, &f.chain_id(), f.genesis_fingerprint(), 1, 0, VoteKind::Precommit, Hash([1u8; 32])).unwrap();
         assert!(matches!(
             f.node.handle_vote(vote),
             Err(Error::UnknownVoter(_))
@@ -2503,7 +2679,7 @@ mod tests {
     #[test]
     fn stale_votes_are_ignored_rather_than_erroring() {
         let f = solo_node();
-        let vote = Vote::sign(f.node.keypair(), &f.chain_id(), 0, 0, VoteKind::Precommit, Hash([1u8; 32])).unwrap();
+        let vote = Vote::sign(f.node.keypair(), &f.chain_id(), f.genesis_fingerprint(), 0, 0, VoteKind::Precommit, Hash([1u8; 32])).unwrap();
         assert!(f.node.handle_vote(vote).unwrap().1.is_none());
     }
 
@@ -2512,10 +2688,10 @@ mod tests {
         let f = solo_node();
         let bob = Address([7u8; 32]);
         f.node
-            .submit_transaction(transfer(&f.alice, bob, 1_000, 0, &f.chain_id()))
+            .submit_transaction(transfer(&f.alice, bob, 1_000, 0, &f.chain_id(), f.genesis_fingerprint()))
             .unwrap();
         f.node
-            .submit_transaction(transfer(&f.alice, bob, 1_000, 1, &f.chain_id()))
+            .submit_transaction(transfer(&f.alice, bob, 1_000, 1, &f.chain_id(), f.genesis_fingerprint()))
             .unwrap();
         let (_, vote) = f.node.try_propose().unwrap().unwrap();
         seal_solo(&f.node, vote);
@@ -2534,7 +2710,7 @@ mod tests {
         // Nonce 5 with nothing pending leaves a gap.
         let error = f
             .node
-            .submit_transaction(transfer(&f.alice, bob, 1, 5, &f.chain_id()))
+            .submit_transaction(transfer(&f.alice, bob, 1, 5, &f.chain_id(), f.genesis_fingerprint()))
             .unwrap_err();
         assert!(matches!(error, Error::BadNonce { .. }));
     }

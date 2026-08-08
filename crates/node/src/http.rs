@@ -123,6 +123,9 @@ impl IntoResponse for HttpError {
         let status = match &self.0 {
             Error::CheckpointNotFound(_) => StatusCode::NOT_FOUND,
             Error::Other(msg) if msg.contains("no funded addresses") => StatusCode::NOT_FOUND,
+            Error::Other(msg) if msg.contains("snapshot archive not ready") => {
+                StatusCode::SERVICE_UNAVAILABLE
+            }
             e if e.is_client_error() => StatusCode::BAD_REQUEST,
             _ => StatusCode::INTERNAL_SERVER_ERROR,
         };

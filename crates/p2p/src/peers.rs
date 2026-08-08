@@ -7,16 +7,17 @@
 //! application layer, which is why plain HTTP(S) is enough.
 
 use std::collections::HashMap;
+use std::net::IpAddr;
 
 use serde::{Deserialize, Serialize};
 
-use sikka_common::bytes::{Address, PublicKey, Signature};
+use sikka_common::bytes::{Address, Hash, PublicKey, Signature};
 use sikka_common::codec::Writer;
 use sikka_common::constants::TX_TIME_TOLERANCE_SECS;
 use sikka_common::error::{Error, Result};
 
 /// Domain tag for signed peer announcements.
-pub const ANNOUNCE_TAG: &[u8] = b"SIKKA/peer-announce/v3";
+pub const ANNOUNCE_TAG: &[u8] = b"SIKKA/peer-announce/v4";
 
 /// Maximum peers tracked, so discovery cannot exhaust memory.
 pub const DEFAULT_MAX_PEERS: usize = 512;
@@ -31,6 +32,90 @@ pub const BACKOFF_BASE_SECS: u64 = 2;
 
 /// Cap on per-peer dial backoff so a long outage still recovers within minutes.
 pub const BACKOFF_MAX_SECS: u64 = 300;
+
+/// Key bootstrap/referral entries before a peer identifies itself.
+fn placeholder_for_endpoint(endpoint: &str) -> Address {
+    Address(sikka_crypto::sha3_256(endpoint.as_bytes()))
+}
+
+fn is_placeholder_address(address: &Address, endpoint: &str) -> bool {
+    *address == placeholder_for_endpoint(endpoint)
+}
+
+/// Reject peer endpoints that are unusable or unsafe to dial (SSRF / eclipse).
+pub fn validate_endpoint_url(endpoint: &str) -> Result<()> {
+    if endpoint.is_empty() || endpoint.len() > 256 {
+        return Err(Error::Network("implausible peer endpoint".into()));
+    }
+    if endpoint.bytes().any(|b| b < 0x20 || b == 0x7f) {
+        return Err(Error::Network("peer endpoint contains control characters".into()));
+    }
+    let rest = if let Some(rest) = endpoint.strip_prefix("https://") {
+        rest
+    } else if let Some(rest) = endpoint.strip_prefix("http://") {
+        rest
+    } else {
+        return Err(Error::Network(
+            "peer endpoint must be an http(s) URL".into(),
+        ));
+    };
+    if rest.is_empty() {
+        return Err(Error::Network("peer endpoint has no host".into()));
+    }
+
+    let host = if rest.starts_with('[') {
+        let end = rest
+            .find(']')
+            .ok_or_else(|| Error::Network("malformed IPv6 peer endpoint".into()))?;
+        &rest[1..end]
+    } else {
+        let end = rest.find([':', '/']).unwrap_or(rest.len());
+        &rest[..end]
+    };
+
+    if host.is_empty() {
+        return Err(Error::Network("peer endpoint has no host".into()));
+    }
+    if !host_is_routable(host) {
+        return Err(Error::Network("peer endpoint host is not routable".into()));
+    }
+    Ok(())
+}
+
+fn host_is_routable(host: &str) -> bool {
+    if host.eq_ignore_ascii_case("localhost") {
+        return false;
+    }
+    let ip_host = host
+        .strip_prefix('[')
+        .and_then(|inner| inner.strip_suffix(']'))
+        .unwrap_or(host);
+    if let Ok(ip) = ip_host.parse::<IpAddr>() {
+        return ip_is_public(ip);
+    }
+    true
+}
+
+fn ip_is_public(ip: IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(v4) => {
+            !v4.is_loopback() && !v4.is_private() && !v4.is_unspecified() && !v4.is_link_local()
+        }
+        IpAddr::V6(v6) => {
+            !v6.is_loopback()
+                && !v6.is_unspecified()
+                && !v6.is_unique_local()
+                && !v6.is_unicast_link_local()
+        }
+    }
+}
+
+enum UpsertPolicy {
+    /// Signed announcement: may evict stalest peers and replace endpoint owners.
+    Signed,
+    /// Unsigned referral: never evict real-address peers.
+    UnsignedReferral,
+}
 
 /// Seconds to wait before dialing again after `failures` consecutive errors.
 pub fn backoff_secs(failures: u32) -> u64 {
@@ -54,10 +139,16 @@ pub struct PeerAnnounce {
 }
 
 impl PeerAnnounce {
-    pub fn signing_bytes(endpoint: &str, timestamp: u64, chain_id: &str) -> Vec<u8> {
+    pub fn signing_bytes(
+        endpoint: &str,
+        timestamp: u64,
+        chain_id: &str,
+        genesis_fingerprint: &Hash,
+    ) -> Vec<u8> {
         let mut w = Writer::new();
         w.raw(ANNOUNCE_TAG)
             .str(chain_id)
+            .raw(genesis_fingerprint.as_bytes())
             .str(endpoint)
             .u64(timestamp);
         w.finish()
@@ -68,8 +159,9 @@ impl PeerAnnounce {
         endpoint: &str,
         timestamp: u64,
         chain_id: &str,
+        genesis_fingerprint: Hash,
     ) -> Result<Self> {
-        let payload = Self::signing_bytes(endpoint, timestamp, chain_id);
+        let payload = Self::signing_bytes(endpoint, timestamp, chain_id, &genesis_fingerprint);
         Ok(Self {
             public_key: PublicKey::new(*keypair.public_bytes()),
             endpoint: endpoint.to_string(),
@@ -86,15 +178,8 @@ impl PeerAnnounce {
     ///
     /// Stale announcements are rejected so an old endpoint cannot be replayed
     /// after a node has moved.
-    pub fn verify(&self, now: u64, chain_id: &str) -> Result<()> {
-        if self.endpoint.is_empty() || self.endpoint.len() > 256 {
-            return Err(Error::Network("implausible peer endpoint".into()));
-        }
-        if !self.endpoint.starts_with("http://") && !self.endpoint.starts_with("https://") {
-            return Err(Error::Network(
-                "peer endpoint must be an http(s) URL".into(),
-            ));
-        }
+    pub fn verify(&self, now: u64, chain_id: &str, genesis_fingerprint: &Hash) -> Result<()> {
+        validate_endpoint_url(&self.endpoint)?;
         if self.timestamp.abs_diff(now) > TX_TIME_TOLERANCE_SECS {
             return Err(Error::TimestampOutOfRange {
                 timestamp: self.timestamp,
@@ -102,7 +187,7 @@ impl PeerAnnounce {
                 tolerance: TX_TIME_TOLERANCE_SECS,
             });
         }
-        let payload = Self::signing_bytes(&self.endpoint, self.timestamp, chain_id);
+        let payload = Self::signing_bytes(&self.endpoint, self.timestamp, chain_id, genesis_fingerprint);
         if !sikka_crypto::verify(
             self.public_key.as_slice(),
             &payload,
@@ -167,13 +252,19 @@ impl PeerBook {
         announce: &PeerAnnounce,
         now: u64,
         chain_id: &str,
+        genesis_fingerprint: &Hash,
     ) -> Result<bool> {
-        announce.verify(now, chain_id)?;
+        announce.verify(now, chain_id, genesis_fingerprint)?;
         let address = announce.address();
         if address == self.self_address {
             return Ok(false);
         }
-        Ok(self.upsert(address, announce.endpoint.clone(), now))
+        Ok(self.upsert(
+            address,
+            announce.endpoint.clone(),
+            now,
+            UpsertPolicy::Signed,
+        ))
     }
 
     /// Add a peer learned without a signature (a bootstrap entry or a referral
@@ -182,19 +273,33 @@ impl PeerBook {
     /// Referrals only get a node as far as *trying* an endpoint; nothing is
     /// trusted until that endpoint answers with something signed.
     pub fn add_endpoint(&mut self, endpoint: &str, now: u64) -> bool {
+        if validate_endpoint_url(endpoint).is_err() {
+            return false;
+        }
         // Bootstrap entries have no address yet; key them by the hash of the
         // endpoint until the peer identifies itself.
-        let placeholder = Address(sikka_crypto::sha3_256(endpoint.as_bytes()));
+        let placeholder = placeholder_for_endpoint(endpoint);
         if placeholder == self.self_address {
             return false;
         }
         if self.peers.values().any(|p| p.endpoint == endpoint) {
             return false;
         }
-        self.upsert(placeholder, endpoint.to_string(), now)
+        self.upsert(
+            placeholder,
+            endpoint.to_string(),
+            now,
+            UpsertPolicy::UnsignedReferral,
+        )
     }
 
-    fn upsert(&mut self, address: Address, endpoint: String, now: u64) -> bool {
+    fn upsert(
+        &mut self,
+        address: Address,
+        endpoint: String,
+        now: u64,
+        policy: UpsertPolicy,
+    ) -> bool {
         if let Some(existing) = self.peers.get_mut(&address) {
             let changed = existing.endpoint != endpoint;
             existing.endpoint = endpoint;
@@ -204,21 +309,34 @@ impl PeerBook {
             return changed;
         }
         if self.peers.len() >= self.max_peers {
-            // Evict the peer we have heard from least recently.
-            if let Some(stalest) = self
-                .peers
-                .iter()
-                .min_by_key(|(a, p)| (p.last_seen, **a))
-                .map(|(a, _)| *a)
-            {
+            let evict = match policy {
+                UpsertPolicy::Signed => self
+                    .peers
+                    .iter()
+                    .min_by_key(|(a, p)| (p.last_seen, **a))
+                    .map(|(a, _)| *a),
+                UpsertPolicy::UnsignedReferral => self
+                    .peers
+                    .iter()
+                    .filter(|(_, p)| is_placeholder_address(&p.address, &p.endpoint))
+                    .min_by_key(|(a, p)| (p.last_seen, **a))
+                    .map(|(a, _)| *a),
+            };
+            if let Some(stalest) = evict {
                 self.peers.remove(&stalest);
+            } else if matches!(policy, UpsertPolicy::UnsignedReferral) {
+                return false;
             }
         }
         // Two identities claiming one endpoint means one of them moved on.
         let duplicates: Vec<Address> = self
             .peers
             .iter()
-            .filter(|(_, p)| p.endpoint == endpoint)
+            .filter(|(_, p)| {
+                p.endpoint == endpoint
+                    && (matches!(policy, UpsertPolicy::Signed)
+                        || is_placeholder_address(&p.address, &p.endpoint))
+            })
             .map(|(a, _)| *a)
             .collect();
         for duplicate in duplicates {
@@ -321,15 +439,19 @@ mod tests {
         "sikka-test"
     }
 
+    fn fingerprint() -> Hash {
+        Hash([0xAA; 32])
+    }
+
     fn announce(kp: &Keypair, endpoint: &str, timestamp: u64) -> PeerAnnounce {
-        PeerAnnounce::sign(kp, endpoint, timestamp, chain_id()).unwrap()
+        PeerAnnounce::sign(kp, endpoint, timestamp, chain_id(), fingerprint()).unwrap()
     }
 
     #[test]
     fn signed_announcements_verify() {
         let kp = Keypair::generate().unwrap();
         let a = announce(&kp, "http://sikka-1:8080", NOW);
-        a.verify(NOW, chain_id()).unwrap();
+        a.verify(NOW, chain_id(), &fingerprint()).unwrap();
         assert_eq!(a.address(), PublicKey::new(*kp.public_bytes()).address());
     }
 
@@ -338,7 +460,7 @@ mod tests {
         let kp = Keypair::generate().unwrap();
         let mut a = announce(&kp, "http://sikka-1:8080", NOW);
         a.endpoint = "http://attacker:8080".into();
-        assert_eq!(a.verify(NOW, chain_id()).unwrap_err(), Error::InvalidSignature);
+        assert_eq!(a.verify(NOW, chain_id(), &fingerprint()).unwrap_err(), Error::InvalidSignature);
     }
 
     #[test]
@@ -346,12 +468,12 @@ mod tests {
         let kp = Keypair::generate().unwrap();
         let a = announce(&kp, "http://sikka-1:8080", NOW);
         assert!(matches!(
-            a.verify(NOW + 10_000, chain_id()),
+            a.verify(NOW + 10_000, chain_id(), &fingerprint()),
             Err(Error::TimestampOutOfRange { .. })
         ));
 
         let bad = announce(&kp, "sikka-1:8080", NOW);
-        assert!(matches!(bad.verify(NOW, chain_id()), Err(Error::Network(_))));
+        assert!(matches!(bad.verify(NOW, chain_id(), &fingerprint()), Err(Error::Network(_))));
     }
 
     #[test]
@@ -361,17 +483,17 @@ mod tests {
         let mut book = PeerBook::new(PublicKey::new(*me.public_bytes()).address());
 
         assert!(book
-            .record(&announce(&peer, "http://a:8080", NOW), NOW, chain_id())
+            .record(&announce(&peer, "http://a:8080", NOW), NOW, chain_id(), &fingerprint())
             .unwrap());
         assert_eq!(book.len(), 1);
 
         // Same endpoint again is not news.
         assert!(!book
-            .record(&announce(&peer, "http://a:8080", NOW + 1), NOW + 1, chain_id())
+            .record(&announce(&peer, "http://a:8080", NOW + 1), NOW + 1, chain_id(), &fingerprint())
             .unwrap());
         // A move is.
         assert!(book
-            .record(&announce(&peer, "http://b:8080", NOW + 2), NOW + 2, chain_id())
+            .record(&announce(&peer, "http://b:8080", NOW + 2), NOW + 2, chain_id(), &fingerprint())
             .unwrap());
         assert_eq!(book.len(), 1);
         assert_eq!(book.all()[0].endpoint, "http://b:8080");
@@ -383,7 +505,7 @@ mod tests {
         let address = PublicKey::new(*me.public_bytes()).address();
         let mut book = PeerBook::new(address);
         assert!(!book
-            .record(&announce(&me, "http://me:8080", NOW), NOW, chain_id())
+            .record(&announce(&me, "http://me:8080", NOW), NOW, chain_id(), &fingerprint())
             .unwrap());
         assert!(book.is_empty());
     }
@@ -404,7 +526,7 @@ mod tests {
         let mut book = PeerBook::new(PublicKey::new(*me.public_bytes()).address());
 
         book.add_endpoint("http://a:8080", NOW);
-        book.record(&announce(&peer, "http://a:8080", NOW), NOW, chain_id())
+        book.record(&announce(&peer, "http://a:8080", NOW), NOW, chain_id(), &fingerprint())
             .unwrap();
 
         assert_eq!(book.len(), 1, "the placeholder must not linger");
@@ -416,7 +538,7 @@ mod tests {
         let me = Keypair::generate().unwrap();
         let peer = Keypair::generate().unwrap();
         let mut book = PeerBook::new(PublicKey::new(*me.public_bytes()).address());
-        book.record(&announce(&peer, "http://a:8080", NOW), NOW, chain_id())
+        book.record(&announce(&peer, "http://a:8080", NOW), NOW, chain_id(), &fingerprint())
             .unwrap();
 
         for i in 1..=MAX_FAILURES {
@@ -450,6 +572,50 @@ mod tests {
         }
         assert_eq!(book.len(), 1);
         assert_eq!(book.endpoints(), vec!["http://b:8080".to_string()]);
+    }
+
+    #[test]
+    fn private_urls_are_rejected() {
+        for endpoint in [
+            "http://127.0.0.1:8080",
+            "http://localhost:8080",
+            "http://10.0.0.1:8080",
+            "http://172.16.0.1:8080",
+            "http://192.168.1.1:8080",
+            "http://169.254.169.254/",
+            "http://[::1]:8080",
+            "http://[fc00::1]:8080",
+        ] {
+            assert!(
+                validate_endpoint_url(endpoint).is_err(),
+                "expected {endpoint} to be rejected"
+            );
+        }
+        validate_endpoint_url("http://sikka-1:8080").unwrap();
+    }
+
+    #[test]
+    fn unsigned_referral_cannot_evict_signed_peer() {
+        let me = Keypair::generate().unwrap();
+        let signed = Keypair::generate().unwrap();
+        let signed_address = PublicKey::new(*signed.public_bytes()).address();
+        let mut book = PeerBook::with_max(PublicKey::new(*me.public_bytes()).address(), 2);
+
+        book.record(
+            &announce(&signed, "http://signed:8080", NOW),
+            NOW,
+            chain_id(),
+            &fingerprint(),
+        )
+        .unwrap();
+        book.add_endpoint("http://boot:8080", NOW);
+        assert_eq!(book.len(), 2);
+
+        // May evict another placeholder, but never the signed peer.
+        assert!(book.add_endpoint("http://evil:8080", NOW));
+        assert_eq!(book.len(), 2);
+        assert!(book.contains(&signed_address));
+        assert!(!book.endpoints().iter().any(|e| e == "http://boot:8080"));
     }
 
     #[test]

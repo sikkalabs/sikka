@@ -235,6 +235,42 @@ impl StateStore {
         }
     }
 
+    /// Visit meta, accounts, and validators under one read transaction.
+    ///
+    /// Snapshot generation uses this so the archive sees a single consistent
+    /// view without opening three separate read transactions.
+    pub fn visit_snapshot_state(
+        &self,
+        visit_meta: impl FnOnce(&LedgerMeta) -> Result<()>,
+        mut visit_account: impl FnMut(Address, Account) -> Result<()>,
+        mut visit_validator: impl FnMut(Validator) -> Result<()>,
+    ) -> Result<()> {
+        let read = self.db.begin_read().map_err(storage_error)?;
+        let meta_table = read.open_table(META).map_err(storage_error)?;
+        let meta_bytes = meta_table
+            .get(META_KEY)
+            .map_err(storage_error)?
+            .ok_or_else(|| Error::Storage("ledger meta missing".into()))?;
+        let meta = LedgerMeta::from_bytes(meta_bytes.value())?;
+        visit_meta(&meta)?;
+
+        let accounts_table = read.open_table(ACCOUNTS).map_err(storage_error)?;
+        for entry in accounts_table.iter().map_err(storage_error)? {
+            let (key, value) = entry.map_err(storage_error)?;
+            visit_account(
+                Address::from_slice(key.value())?,
+                Account::from_bytes(value.value())?,
+            )?;
+        }
+
+        let validators_table = read.open_table(VALIDATORS).map_err(storage_error)?;
+        for entry in validators_table.iter().map_err(storage_error)? {
+            let (_, value) = entry.map_err(storage_error)?;
+            visit_validator(Validator::from_bytes(value.value())?)?;
+        }
+        Ok(())
+    }
+
     /// Apply a batch atomically. Either everything lands or nothing does.
     pub fn write(&self, batch: &WriteBatch) -> Result<()> {
         if batch.is_empty() {

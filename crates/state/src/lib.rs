@@ -16,10 +16,11 @@ pub use ledger::{
 };
 pub use smt::{Proof, ProofLeaf, Smt, EMPTY_HASH};
 pub use snapshot::{
-    SnapshotArchive, SnapshotArchiveWriter, SnapshotChunkKind, SnapshotChunkMeta, SnapshotDownload,
-    SnapshotHeader, SnapshotManifest, SNAPSHOT_CHUNK_TARGET_BYTES, SNAPSHOT_FORMAT_VERSION,
-    SNAPSHOT_MAX_ACCOUNTS, SNAPSHOT_MAX_CHUNKS, SNAPSHOT_MAX_COMPRESSED_CHUNK_BYTES,
-    SNAPSHOT_MAX_MANIFEST_BYTES, SNAPSHOT_MAX_UNCOMPRESSED_BYTES,
-    SNAPSHOT_MAX_UNCOMPRESSED_CHUNK_BYTES, SNAPSHOT_MAX_VALIDATORS,
+    build_snapshot_archive, SnapshotArchive, SnapshotArchiveWriter, SnapshotChunkKind,
+    SnapshotChunkMeta, SnapshotDownload, SnapshotHeader, SnapshotManifest,
+    SNAPSHOT_CHUNK_TARGET_BYTES, SNAPSHOT_FORMAT_VERSION, SNAPSHOT_MAX_ACCOUNTS,
+    SNAPSHOT_MAX_CHUNKS, SNAPSHOT_MAX_COMPRESSED_CHUNK_BYTES, SNAPSHOT_MAX_MANIFEST_BYTES,
+    SNAPSHOT_MAX_UNCOMPRESSED_BYTES, SNAPSHOT_MAX_UNCOMPRESSED_CHUNK_BYTES,
+    SNAPSHOT_MAX_VALIDATORS,
 };
 pub use store::{LedgerMeta, StateStore, WriteBatch};

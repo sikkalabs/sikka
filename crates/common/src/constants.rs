@@ -34,6 +34,19 @@ pub const BULK_REQUEST_TIMEOUT_SECS: u64 = 300;
 /// more than five minutes are rejected.
 pub const TX_TIME_TOLERANCE_SECS: u64 = 300;
 
+/// How long the scheduled proposer has to produce a checkpoint before the turn
+/// passes to the next validator (round-robin takeover).
+pub const PROPOSER_TIMEOUT_SECS: u64 = 10;
+
+/// Which proposer round is due, given how long the previous checkpoint has stood.
+///
+/// A round is a pure function of two agreed timestamps, so every node reaches
+/// the same conclusion about whose turn it is without exchanging messages.
+pub fn round_at(now: u64, last_checkpoint_time: u64) -> u32 {
+    let elapsed = now.saturating_sub(last_checkpoint_time);
+    u32::try_from(elapsed / PROPOSER_TIMEOUT_SECS).unwrap_or(u32::MAX)
+}
+
 /// Minimum validator bond is 0.001% of current total supply, i.e. supply/100000.
 pub const MIN_BOND_SUPPLY_DIVISOR: u64 = 100_000;
 
@@ -140,6 +153,18 @@ pub const fn min_bond(total_supply: u64) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn round_at_advances_once_per_timeout() {
+        use super::{round_at, PROPOSER_TIMEOUT_SECS};
+
+        let last = 1_700_000_000;
+        assert_eq!(round_at(last, last), 0);
+        assert_eq!(round_at(last + PROPOSER_TIMEOUT_SECS - 1, last), 0);
+        assert_eq!(round_at(last + PROPOSER_TIMEOUT_SECS, last), 1);
+        assert_eq!(round_at(last + 3 * PROPOSER_TIMEOUT_SECS + 5, last), 3);
+        assert_eq!(round_at(last - 500, last), 0);
+    }
 
     #[test]
     fn quorum_is_two_thirds_rounded_up() {

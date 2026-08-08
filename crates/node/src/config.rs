@@ -124,9 +124,10 @@ impl NodeConfig {
             config.trusted_checkpoint = Some(parse_trusted_checkpoint(&value)?);
         }
         if let Some(capacity) = env("SIKKA_MEMPOOL_CAPACITY") {
-            config.mempool_capacity = capacity.parse().map_err(|_| {
+            let capacity: usize = capacity.parse().map_err(|_| {
                 Error::Other(format!("SIKKA_MEMPOOL_CAPACITY '{capacity}' invalid"))
             })?;
+            config.mempool_capacity = capacity.max(1).min(100_000);
         }
         if let Some(secs) = env("SIKKA_MAX_CHECKPOINT_DELAY") {
             let secs: u64 = secs.parse().map_err(|_| {

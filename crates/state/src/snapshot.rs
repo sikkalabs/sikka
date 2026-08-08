@@ -7,6 +7,7 @@
 use std::fs;
 use std::io::{Cursor, Read, Write};
 use std::path::{Path, PathBuf};
+use std::cell::RefCell;
 
 use serde::{Deserialize, Serialize};
 use sikka_common::account::Account;
@@ -17,6 +18,7 @@ use sikka_common::error::{Error, Result};
 use sikka_common::validator::Validator;
 
 use crate::ledger::StateSnapshot;
+use crate::store::StateStore;
 
 pub const SNAPSHOT_FORMAT_VERSION: u32 = 2;
 pub const SNAPSHOT_CHUNK_TARGET_BYTES: usize = 4 * 1024 * 1024;
@@ -366,6 +368,77 @@ impl SnapshotArchiveWriter {
     }
 }
 
+/// Build or load a snapshot archive from store state and a checkpoint.
+///
+/// Returns `Ok(None)` when the checkpoint no longer matches committed meta
+/// (for example, a background build started before a newer commit landed).
+pub fn build_snapshot_archive(
+    store: &StateStore,
+    checkpoint: Checkpoint,
+    root: impl AsRef<Path>,
+) -> Result<Option<SnapshotManifest>> {
+    let root = root.as_ref();
+    let snapshot_id = checkpoint.hash();
+    if let Some(manifest) = SnapshotArchive::load_if_present(root, &snapshot_id)? {
+        return Ok(Some(manifest));
+    }
+
+    let superseded = RefCell::new(false);
+    let writer: RefCell<Option<SnapshotArchiveWriter>> = RefCell::new(None);
+    store.visit_snapshot_state(
+        |meta| {
+            if checkpoint.header.height != meta.height
+                || checkpoint.header.state_root != meta.state_root
+                || checkpoint.header.validator_root != meta.validator_root
+            {
+                *superseded.borrow_mut() = true;
+                return Ok(());
+            }
+            *writer.borrow_mut() = Some(SnapshotArchiveWriter::create(
+                root,
+                SnapshotHeader {
+                    chain_id: meta.chain_id.clone(),
+                    genesis_fingerprint: meta.genesis_fingerprint,
+                    checkpoint_tx_interval: meta.checkpoint_tx_interval,
+                    max_missed_proposer_slots: meta.max_missed_proposer_slots,
+                    checkpoint: checkpoint.clone(),
+                },
+            )?);
+            Ok(())
+        },
+        |address, account| {
+            if *superseded.borrow() {
+                return Ok(());
+            }
+            writer
+                .borrow_mut()
+                .as_mut()
+                .expect("writer set")
+                .push_account(address, account)
+        },
+        |validator| {
+            if *superseded.borrow() {
+                return Ok(());
+            }
+            writer
+                .borrow_mut()
+                .as_mut()
+                .expect("writer set")
+                .push_validator(&validator)
+        },
+    )?;
+
+    if *superseded.borrow() {
+        return Ok(None);
+    }
+    Ok(Some(
+        writer
+            .into_inner()
+            .expect("writer set")
+            .finish()?,
+    ))
+}
+
 pub struct SnapshotArchive;
 
 impl SnapshotArchive {
@@ -680,6 +753,7 @@ mod tests {
             total_supply: 100,
             total_bonded: 10,
             chain_id: "sikka-test".into(),
+            genesis_fingerprint: Hash([9; 32]),
         })
     }
 

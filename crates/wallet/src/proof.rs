@@ -153,11 +153,12 @@ mod tests {
             total_supply: 5_001,
             total_bonded: 0,
             chain_id: "sikka-test".into(),
+            genesis_fingerprint: Hash([0xAA; 32]),
         };
         let mut checkpoint = Checkpoint::new(header);
         let hash = checkpoint.hash();
         for key in keys.iter().take(3) {
-            checkpoint.add_signature(Vote::sign(key, &checkpoint.header.chain_id, 42, 0, VoteKind::Precommit, hash).unwrap().into_signature());
+            checkpoint.add_signature(Vote::sign(key, &checkpoint.header.chain_id, checkpoint.header.genesis_fingerprint, 42, 0, VoteKind::Precommit, hash).unwrap().into_signature());
         }
         checkpoint.canonicalize();
 

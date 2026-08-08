@@ -12,12 +12,13 @@
 
 use std::collections::{BTreeMap, HashMap};
 use std::path::Path;
+use std::sync::Arc;
 
 use sikka_common::account::Account;
 use sikka_common::bytes::{Address, Hash};
 use sikka_common::checkpoint::{Checkpoint, CheckpointHeader};
 use sikka_common::constants::{
-    min_bond, BATTERY_COST_PER_TX, DEFAULT_MAX_MISSED_PROPOSER_SLOTS,
+    min_bond, round_at, BATTERY_COST_PER_TX, DEFAULT_MAX_MISSED_PROPOSER_SLOTS,
 };
 use sikka_common::error::{Error, Result};
 use sikka_common::genesis::GenesisConfig;
@@ -27,7 +28,7 @@ use sikka_common::validator::Validator;
 use sikka_common::DEFAULT_CHECKPOINT_TX_INTERVAL;
 
 use crate::smt::{Proof, Smt, UndoLog};
-use crate::snapshot::{SnapshotArchive, SnapshotArchiveWriter, SnapshotHeader, SnapshotManifest};
+use crate::snapshot::{build_snapshot_archive, SnapshotManifest};
 use crate::store::{LedgerMeta, StateStore, WriteBatch};
 
 /// Addresses that signed `checkpoint`, in the order stored on it.
@@ -39,6 +40,16 @@ fn signers_of(checkpoint: &Checkpoint) -> Vec<Address> {
         .collect()
 }
 
+/// Economic time may advance at most one proposer timeout per round (+1 for the
+/// winning round).
+fn economic_timestamp(last_checkpoint_time: u64, round: u32, header_timestamp: u64) -> u64 {
+    const PROPOSER_TIMEOUT_SECS: u64 = 10; // must match sikka_consensus::PROPOSER_TIMEOUT_SECS
+    let max = last_checkpoint_time.saturating_add(
+        u64::from(round.saturating_add(1)).saturating_mul(PROPOSER_TIMEOUT_SECS),
+    );
+    header_timestamp.min(max)
+}
+
 /// Where a checkpoint is being built, and when.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExecutionContext {
@@ -47,6 +58,12 @@ pub struct ExecutionContext {
     /// Checkpoint timestamp. This — not any node's wall clock — is the clock
     /// transactions are validated against, so replay is deterministic.
     pub timestamp: u64,
+    /// Pinned economic clock for inflation and battery settlement.
+    ///
+    /// A proposer cannot amplify inflation or battery regeneration by picking a
+    /// far-future header timestamp; this caps elapsed time to at most one
+    /// proposer timeout per round.
+    pub economic_timestamp: u64,
     /// Round-robin proposer for this height; receives the rounding remainder of
     /// the inflation payout.
     pub proposer: Address,
@@ -63,6 +80,7 @@ impl ExecutionContext {
         Self {
             height,
             timestamp,
+            economic_timestamp: 0,
             proposer,
             round: 0,
             slashings: Vec::new(),
@@ -251,7 +269,7 @@ impl<'a> Overlay<'a> {
 
 /// Current state, the trees that commit to it, and the rules that change it.
 pub struct Ledger {
-    store: StateStore,
+    store: Arc<StateStore>,
     accounts: Smt,
     validators: Smt,
     meta: LedgerMeta,
@@ -277,7 +295,7 @@ impl Ledger {
     /// start.
     pub fn open(path: impl AsRef<Path>, genesis: &GenesisConfig) -> Result<(Self, GenesisOutcome)> {
         genesis.validate()?;
-        let store = StateStore::open(path)?;
+        let store = Arc::new(StateStore::open(path)?);
 
         if let Some(meta) = store.meta()? {
             if meta.genesis_fingerprint != genesis.fingerprint() {
@@ -412,6 +430,7 @@ impl Ledger {
             total_supply: self.meta.total_supply,
             total_bonded: self.meta.total_bonded,
             chain_id: self.meta.chain_id.clone(),
+            genesis_fingerprint: self.meta.genesis_fingerprint,
         };
         // Genesis needs no signatures: every node derives it from the same file
         // and refuses to run against a database built from a different one.
@@ -451,6 +470,10 @@ impl Ledger {
 
     pub fn checkpoint_tx_interval(&self) -> u32 {
         self.meta.checkpoint_tx_interval
+    }
+
+    pub fn store_handle(&self) -> Arc<StateStore> {
+        Arc::clone(&self.store)
     }
 
     pub fn account_count(&self) -> Result<u64> {
@@ -559,8 +582,13 @@ impl Ledger {
     pub fn execute(
         &self,
         transactions: &[Transaction],
-        context: ExecutionContext,
+        mut context: ExecutionContext,
     ) -> Result<ExecutionOutcome> {
+        context.economic_timestamp = economic_timestamp(
+            self.meta.last_checkpoint_time,
+            context.round,
+            context.timestamp,
+        );
         let mut overlay = Overlay::new(self);
         let mut outcome = ExecutionOutcome {
             context: context.clone(),
@@ -616,6 +644,7 @@ impl Ledger {
             context.height,
             context.round,
             context.timestamp,
+            self.meta.last_checkpoint_time,
             context.proposer,
             full_batch,
             self.meta.max_missed_proposer_slots,
@@ -666,11 +695,11 @@ impl Ledger {
                 outcome.validators.iter().collect();
             for validator in self.store.all_validators()? {
                 if !changed.contains_key(&validator.address) {
-                    bonded += validator.bond;
+                    bonded = bonded.saturating_add(validator.bond);
                 }
             }
             for validator in outcome.validators.values().flatten() {
-                bonded += validator.bond;
+                bonded = bonded.saturating_add(validator.bond);
             }
             bonded
         };
@@ -686,6 +715,7 @@ impl Ledger {
         height: u64,
         round: u32,
         timestamp: u64,
+        last_checkpoint_time: u64,
         proposer: Address,
         full_batch: bool,
         max_missed: u32,
@@ -698,7 +728,8 @@ impl Ledger {
         active.sort_by_key(|v| v.address);
 
         if full_batch && round > 0 {
-            for r in 0..round {
+            let charge_upto = round.min(round_at(timestamp, last_checkpoint_time));
+            for r in 0..charge_upto {
                 let Some(address) = Validator::proposer_for_round(height, r, &active) else {
                     break;
                 };
@@ -763,8 +794,9 @@ impl Ledger {
             });
         }
 
-        // Battery regenerates from the transaction's own signed timestamp.
-        sender.settle_battery(tx.timestamp);
+        // Battery regenerates from the transaction's signed timestamp, capped by
+        // the pinned economic clock so a far-future header cannot mint battery.
+        sender.settle_battery(tx.timestamp.min(context.economic_timestamp));
         if sender.battery < BATTERY_COST_PER_TX {
             return Err(Error::InsufficientBattery {
                 address: tx.from,
@@ -844,8 +876,14 @@ impl Ledger {
             }
         }
 
-        sender.nonce += 1;
-        sender.battery -= BATTERY_COST_PER_TX;
+        sender.nonce = sender
+            .nonce
+            .checked_add(1)
+            .ok_or_else(|| Error::Other("nonce overflow".into()))?;
+        sender.battery = sender
+            .battery
+            .checked_sub(BATTERY_COST_PER_TX)
+            .ok_or_else(|| Error::Other("battery underflow".into()))?;
         overlay.set_account(tx.from, sender);
 
         if tx.kind == TxKind::Transfer {
@@ -970,6 +1008,7 @@ impl Ledger {
             total_supply: staged.outcome.total_supply,
             total_bonded: staged.outcome.total_bonded,
             chain_id: self.meta.chain_id.clone(),
+            genesis_fingerprint: self.meta.genesis_fingerprint,
         }
     }
 
@@ -992,26 +1031,11 @@ impl Ledger {
                 "checkpoint does not describe the ledger being snapshotted".into(),
             ));
         }
-        let root = root.as_ref();
-        let snapshot_id = checkpoint.hash();
-        if let Some(manifest) = SnapshotArchive::load_if_present(root, &snapshot_id)? {
-            return Ok(manifest);
-        }
-        let mut writer = SnapshotArchiveWriter::create(
-            root,
-            SnapshotHeader {
-                chain_id: self.meta.chain_id.clone(),
-                genesis_fingerprint: self.meta.genesis_fingerprint,
-                checkpoint_tx_interval: self.meta.checkpoint_tx_interval,
-                max_missed_proposer_slots: self.meta.max_missed_proposer_slots,
-                checkpoint,
-            },
-        )?;
-        self.store
-            .visit_accounts(|address, account| writer.push_account(address, account))?;
-        self.store
-            .visit_validators(|validator| writer.push_validator(&validator))?;
-        writer.finish()
+        build_snapshot_archive(&self.store, checkpoint, root)?.ok_or_else(|| {
+            Error::Other(
+                "checkpoint does not describe the ledger being snapshotted".into(),
+            )
+        })
     }
 
     /// Full state dump for fast sync.
@@ -1034,7 +1058,7 @@ impl Ledger {
     /// contains actually hashes to the root that checkpoint commits to.
     pub fn restore(path: impl AsRef<Path>, snapshot: &StateSnapshot) -> Result<Self> {
         snapshot.verify()?;
-        let store = StateStore::open(path)?;
+        let store = Arc::new(StateStore::open(path)?);
         if let Some(existing) = store.meta()? {
             if existing.genesis_fingerprint != snapshot.genesis_fingerprint {
                 return Err(Error::GenesisMismatch);

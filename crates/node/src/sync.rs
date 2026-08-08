@@ -15,6 +15,7 @@ use tracing::{debug, info, warn};
 
 use sikka_common::error::{Error, Result};
 use sikka_p2p::client::PeerClient;
+use sikka_p2p::validate_endpoint_url;
 use sikka_state::{SnapshotDownload, SnapshotManifest};
 
 use crate::node::Node;
@@ -156,6 +157,10 @@ pub async fn discover(node: &Arc<Node>, client: &PeerClient) -> usize {
 
     let mut learned = 0;
     for endpoint in node.peer_endpoints() {
+        if validate_endpoint_url(&endpoint).is_err() {
+            debug!(peer = %endpoint, "skipping non-routable peer endpoint");
+            continue;
+        }
         match client.announce(&endpoint, Some(&announce)).await {
             Ok(peers) => {
                 node.record_peer_success(&endpoint);

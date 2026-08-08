@@ -12,7 +12,7 @@ pub mod proof;
 pub use keystore::Keystore;
 pub use proof::{verify_account_proof, VerifiedBalance};
 
-use sikka_common::bytes::Address;
+use sikka_common::bytes::{Address, Hash};
 use sikka_common::error::Result;
 use sikka_common::transaction::{Transaction, TxKind};
 
@@ -55,8 +55,8 @@ impl Wallet {
     /// sending account, so it must be the wallet's honest view of now: a node
     /// rejects anything more than five minutes from its own clock.
     ///
-    /// `chain_id` binds the signature to one chain so the same key cannot reuse
-    /// a payment across forks.
+    /// `chain_id` and `genesis_fingerprint` bind the signature to one network so
+    /// the same key cannot reuse a payment across forks or chains with the same id.
     pub fn transfer(
         &self,
         to: Address,
@@ -64,6 +64,7 @@ impl Wallet {
         nonce: u64,
         timestamp: u64,
         chain_id: &str,
+        genesis_fingerprint: Hash,
     ) -> Result<Transaction> {
         Transaction::sign(
             &self.keypair,
@@ -73,6 +74,7 @@ impl Wallet {
             nonce,
             timestamp,
             chain_id,
+            genesis_fingerprint,
         )
     }
 
@@ -82,8 +84,16 @@ impl Wallet {
         nonce: u64,
         timestamp: u64,
         chain_id: &str,
+        genesis_fingerprint: Hash,
     ) -> Result<Transaction> {
-        Transaction::bond(&self.keypair, amount, nonce, timestamp, chain_id)
+        Transaction::bond(
+            &self.keypair,
+            amount,
+            nonce,
+            timestamp,
+            chain_id,
+            genesis_fingerprint,
+        )
     }
 
     pub fn unbond(
@@ -91,8 +101,15 @@ impl Wallet {
         nonce: u64,
         timestamp: u64,
         chain_id: &str,
+        genesis_fingerprint: Hash,
     ) -> Result<Transaction> {
-        Transaction::unbond(&self.keypair, nonce, timestamp, chain_id)
+        Transaction::unbond(
+            &self.keypair,
+            nonce,
+            timestamp,
+            chain_id,
+            genesis_fingerprint,
+        )
     }
 }
 
@@ -108,21 +125,31 @@ impl std::fmt::Debug for Wallet {
 mod tests {
     use super::*;
 
+    fn fingerprint() -> Hash {
+        Hash([0xAA; 32])
+    }
+
     #[test]
     fn signs_transactions_it_can_verify() {
         let wallet = Wallet::generate().unwrap();
         let to = Address([9u8; 32]);
         let chain_id = "sikka-test";
 
-        let transfer = wallet.transfer(to, 100, 0, 1_700_000_000, chain_id).unwrap();
+        let transfer = wallet
+            .transfer(to, 100, 0, 1_700_000_000, chain_id, fingerprint())
+            .unwrap();
         assert_eq!(transfer.from, wallet.address());
         transfer.verify_signature().unwrap();
 
-        let bond = wallet.bond(1_000, 1, 1_700_000_000, chain_id).unwrap();
+        let bond = wallet
+            .bond(1_000, 1, 1_700_000_000, chain_id, fingerprint())
+            .unwrap();
         assert_eq!(bond.kind, TxKind::Bond);
         bond.verify_signature().unwrap();
 
-        let unbond = wallet.unbond(2, 1_700_000_000, chain_id).unwrap();
+        let unbond = wallet
+            .unbond(2, 1_700_000_000, chain_id, fingerprint())
+            .unwrap();
         assert_eq!(unbond.kind, TxKind::Unbond);
         assert_eq!(unbond.amount, 0);
         unbond.verify_signature().unwrap();

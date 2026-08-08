@@ -13,7 +13,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use sikka_common::amount::format_sikka;
-use sikka_common::bytes::{Address, PublicKey};
+use sikka_common::bytes::{Address, Hash, PublicKey};
 use sikka_common::constants::CHILLAR_PER_SIKKA;
 use sikka_common::genesis::{GenesisAllocation, GenesisConfig, GenesisValidator};
 use sikka_common::time::now_secs;
@@ -72,6 +72,10 @@ struct Testnet {
 impl Testnet {
     fn chain_id(&self) -> String {
         self.nodes[0].node.chain_info().unwrap().chain_id
+    }
+
+    fn genesis_fingerprint(&self) -> Hash {
+        self.nodes[0].node.chain_info().unwrap().genesis_fingerprint
     }
 
     /// Start `count` validators that all know about each other.
@@ -241,7 +245,7 @@ impl Testnet {
                 .await;
             let transaction = self
                 .alice
-                .transfer(to, amount, nonce, now_secs(), &self.chain_id())
+                .transfer(to, amount, nonce, now_secs(), &self.chain_id(), self.genesis_fingerprint())
                 .unwrap();
             node.rpc.submit(&transaction).await.unwrap();
         }
@@ -480,7 +484,7 @@ async fn validator_changing_gaps_require_a_pinned_checkpoint() {
 
     let bond = 1_000 * CHILLAR_PER_SIKKA;
     net.rpc(0)
-        .submit(&net.alice.bond(bond, 0, now_secs(), &net.chain_id()).unwrap())
+        .submit(&net.alice.bond(bond, 0, now_secs(), &net.chain_id(), net.genesis_fingerprint()).unwrap())
         .await
         .unwrap();
     net.alice_pays(Address([0x44; 32]), CHILLAR_PER_SIKKA, 1, 1)
@@ -651,7 +655,7 @@ async fn double_spends_and_bad_transactions_never_reach_a_checkpoint() {
     // A forged transaction is refused before it ever reaches the pool.
     let mut forged = net
         .alice
-        .transfer(bob, CHILLAR_PER_SIKKA, 0, now_secs(), &net.chain_id())
+        .transfer(bob, CHILLAR_PER_SIKKA, 0, now_secs(), &net.chain_id(), net.genesis_fingerprint())
         .unwrap();
     forged.amount = 9_000 * CHILLAR_PER_SIKKA;
     let error = net.rpc(0).submit(&forged).await.unwrap_err();
@@ -666,11 +670,11 @@ async fn double_spends_and_bad_transactions_never_reach_a_checkpoint() {
     // every mempool on the network until a checkpoint drops it.
     let honest = net
         .alice
-        .transfer(bob, 6_000 * CHILLAR_PER_SIKKA, 0, now_secs(), &net.chain_id())
+        .transfer(bob, 6_000 * CHILLAR_PER_SIKKA, 0, now_secs(), &net.chain_id(), net.genesis_fingerprint())
         .unwrap();
     let double_spend = net
         .alice
-        .transfer(carol, 6_000 * CHILLAR_PER_SIKKA, 1, now_secs(), &net.chain_id())
+        .transfer(carol, 6_000 * CHILLAR_PER_SIKKA, 1, now_secs(), &net.chain_id(), net.genesis_fingerprint())
         .unwrap();
     net.rpc(0).submit(&honest).await.unwrap();
     let error = net.rpc(0).submit(&double_spend).await.unwrap_err();
@@ -728,7 +732,7 @@ async fn bonding_makes_a_new_validator_and_it_starts_proposing() {
 
     // Alice bonds enough to qualify (0.001% of ~4.01M SIKKA supply is ~40).
     let bond = 1_000 * CHILLAR_PER_SIKKA;
-    let transaction = net.alice.bond(bond, 0, now_secs(), &net.chain_id()).unwrap();
+    let transaction = net.alice.bond(bond, 0, now_secs(), &net.chain_id(), net.genesis_fingerprint()).unwrap();
     net.rpc(0).submit(&transaction).await.unwrap();
     // A second transaction so the checkpoint interval is met.
     net.alice_pays(Address([0x33; 32]), CHILLAR_PER_SIKKA, 1, 1)
