@@ -4,3 +4,5 @@ target
 testnet
 *.redb
 keys
+.env
+audit.md

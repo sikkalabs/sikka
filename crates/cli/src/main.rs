@@ -62,10 +62,12 @@ enum Command {
         /// Address to look up; defaults to the keystore's own.
         address: Option<Address>,
         /// Verify the balance against a signed checkpoint before printing it.
+        /// Requires `--genesis`: the trusted validator set must be pinned
+        /// out-of-band, never fetched from the node being queried.
         #[arg(long)]
         verify: bool,
         /// Trust anchor for `--verify`: the genesis file's validator set.
-        #[arg(long)]
+        #[arg(long, requires = "verify")]
         genesis: Option<PathBuf>,
     },
     /// Send SIKKA.
@@ -154,19 +156,16 @@ async fn run(cli: Cli) -> Result<()> {
 
             if *verify {
                 let proof = client.account_proof(&address).await?;
-                let validators = match genesis {
-                    Some(path) => genesis::validator_keys_from_genesis(path)?,
-                    // Without a genesis file the node's own validator list is the
-                    // only anchor available. It still cannot lie about the
-                    // balance, only about who the validators are.
-                    None => client
-                        .validators()
-                        .await?
-                        .into_iter()
-                        .filter(|v| v.active && !v.slashed)
-                        .map(|v| (v.address, v.public_key, v.bond))
-                        .collect(),
-                };
+                // The trusted validator set must come from a pinned genesis file.
+                // Fetching it from the node itself would let a malicious node
+                // fabricate keys, bonds and quorum along with the balance.
+                let genesis = genesis.as_ref().ok_or_else(|| {
+                    Error::Other(format!(
+                        "--verify needs the trusted validator set; pass --genesis <file>. \
+                         The node's own validator list is not a trusted anchor."
+                    ))
+                })?;
+                let validators = genesis::validator_keys_from_genesis(genesis)?;
                 let verified = verify_account_proof(&proof, &validators)?;
                 if cli.json {
                     format::print_json(&serde_json::json!({

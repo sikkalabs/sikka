@@ -10,6 +10,11 @@
 //!
 //! A lying node cannot pass all three, so a wallet never has to trust the node
 //! it happens to be talking to.
+//!
+//! Verification fails closed: the caller must supply the trusted validator set
+//! (normally read from the genesis file it pinned out-of-band). An empty set is
+//! an error, never a silent skip — otherwise a handpicked "validator" list or a
+//! forged quorum would pass without any real check.
 
 use sikka_common::account::Account;
 use sikka_common::bytes::{Address, Hash, PublicKey};
@@ -41,10 +46,12 @@ impl VerifiedBalance {
 
 /// Verify an account proof.
 ///
-/// `validators` is the set the wallet trusts — normally read from a recent
-/// checkpoint or the genesis file — as `(address, public_key, bond)`. Pass an
-/// empty set to check only the Merkle path, which is appropriate when talking
-/// to a node you run yourself.
+/// `validators` is the set the wallet trusts — the genesis validator set that
+/// was pinned out-of-band, as `(address, public_key, bond)`. It must be
+/// non-empty: with nobody to trust there is nothing to verify, so the call
+/// fails closed rather than reporting a passed check. Never pass a validator
+/// list obtained from the node answering the query itself — a malicious node
+/// can fabricate keys, bonds and signatures together.
 pub fn verify_account_proof(
     proof: &AccountProof,
     validators: &[(Address, PublicKey, u64)],
@@ -58,13 +65,12 @@ pub fn verify_account_proof(
         });
     }
 
-    let signatures = if validators.is_empty() {
-        checkpoint.validator_signatures.len()
-    } else {
-        let refs: Vec<(&Address, &PublicKey, u64)> =
-            validators.iter().map(|(a, k, b)| (a, k, *b)).collect();
-        checkpoint.verify_signatures(refs)?
-    };
+    if validators.is_empty() {
+        return Err(Error::QuorumNotReached { got: 0, needed: 1 });
+    }
+    let refs: Vec<(&Address, &PublicKey, u64)> =
+        validators.iter().map(|(a, k, b)| (a, k, *b)).collect();
+    let signatures = checkpoint.verify_signatures(refs)?;
 
     let key = proof.address.to_array();
     let verified = match &proof.account {
@@ -282,18 +288,13 @@ mod tests {
     }
 
     #[test]
-    fn an_empty_validator_set_checks_only_the_merkle_path() {
+    fn an_empty_validator_set_fails_closed() {
         let f = fixture();
-        let verified = verify_account_proof(&f.proof, &[]).unwrap();
-        assert_eq!(verified.balance(), 5_000);
-
-        let mut tampered = f.proof.clone();
-        tampered.account = Some(Account {
-            balance: 1,
-            nonce: 0,
-            battery: 0,
-            last_regen_time: 0,
-        });
-        assert!(verify_account_proof(&tampered, &[]).is_err());
+        // Even a valid proof with no trusted anchor must be rejected, not
+        // reported as verified.
+        assert!(matches!(
+            verify_account_proof(&f.proof, &[]),
+            Err(Error::QuorumNotReached { got: 0, needed: 1 })
+        ));
     }
 }
