@@ -62,6 +62,10 @@ impl PeerClient {
             // Federation is request/response with many peers; pooling idle
             // sockets to all of them buys nothing.
             .pool_max_idle_per_host(2)
+            // Never follow redirects. Peers are untrusted endpoints; following a
+            // 3xx would let a malicious peer replay signed bodies (and probe)
+            // internal hosts the node itself could reach.
+            .redirect(reqwest::redirect::Policy::none())
             .user_agent(concat!("sikka/", env!("CARGO_PKG_VERSION")))
             .build()
             .map_err(|e| Error::Network(e.to_string()))?;
@@ -504,5 +508,75 @@ mod tests {
             bulk_timeout: Duration::from_secs(60),
         })
         .unwrap();
+    }
+
+    /// A peer that answers every request with `307` must not be followed to the
+    /// redirect target: otherwise a malicious peer could replay signed bodies
+    /// (or probe) internal hosts the node can reach.
+    #[tokio::test]
+    async fn redirects_are_not_followed() {
+        let client = PeerClient::new(&ClientConfig {
+            timeout: Duration::from_secs(5),
+            bulk_timeout: Duration::from_secs(30),
+        })
+        .unwrap();
+
+        // The would-be redirect target: had the client followed the 307 it
+        // would get a valid health response here and succeed.
+        let target = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let target_addr = target.local_addr().unwrap();
+        let target_hit = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let target_hit2 = target_hit.clone();
+        let target_task = tokio::spawn(async move {
+            let Ok((mut socket, _)) = target.accept().await else {
+                return;
+            };
+            target_hit2.store(true, std::sync::atomic::Ordering::SeqCst);
+            let mut buf = [0u8; 1024];
+            let _ = tokio::io::AsyncReadExt::read(&mut socket, &mut buf).await;
+            let body = br#"{"chain_id":"sikka","height":0,"state_root":"0000000000000000000000000000000000000000000000000000000000000000","mempool":0,"peers":0,"validator":false}"#;
+            let _ = tokio::io::AsyncWriteExt::write_all(
+                &mut socket,
+                b"HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: ",
+            )
+            .await;
+            let _ = tokio::io::AsyncWriteExt::write_all(
+                &mut socket,
+                body.len().to_string().as_bytes(),
+            )
+            .await;
+            let _ = tokio::io::AsyncWriteExt::write_all(&mut socket, b"\r\n\r\n").await;
+            let _ = tokio::io::AsyncWriteExt::write_all(&mut socket, body).await;
+        });
+
+        let redirect = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let redirect_addr = redirect.local_addr().unwrap();
+        let redirect_task = tokio::spawn(async move {
+            let Ok((mut socket, _)) = redirect.accept().await else {
+                return;
+            };
+            let mut buf = [0u8; 1024];
+            let _ = tokio::io::AsyncReadExt::read(&mut socket, &mut buf).await;
+            let _ = tokio::io::AsyncWriteExt::write_all(
+                &mut socket,
+                format!(
+                    "HTTP/1.1 307 Temporary Redirect\r\nlocation: http://{target_addr}/api/health\r\ncontent-length: 0\r\n\r\n"
+                )
+                .as_bytes(),
+            )
+            .await;
+        });
+
+        let endpoint = format!("http://{redirect_addr}");
+        assert!(client.health(&endpoint).await.is_err());
+        assert!(
+            !target_hit.load(std::sync::atomic::Ordering::SeqCst),
+            "the redirect target must never be reached"
+        );
+        // Neither server should still be waiting; give them a moment. The
+        // target is *expected* to still be blocked accept()ing — that is the
+        // point — so bound the wait instead of awaiting it forever.
+        let _ = tokio::time::timeout(Duration::from_secs(2), redirect_task).await;
+        target_task.abort();
     }
 }
