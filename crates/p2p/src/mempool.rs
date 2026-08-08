@@ -204,14 +204,7 @@ impl Mempool {
 
     /// Up to `limit` transactions in canonical checkpoint order.
     pub fn batch(&self, limit: usize) -> Vec<Transaction> {
-        let mut transactions: Vec<Transaction> = self
-            .entries
-            .values()
-            .map(|e| e.transaction.clone())
-            .collect();
-        transactions.sort_by_key(sikka_consensus::proposal::order_key);
-        transactions.truncate(limit);
-        transactions
+        self.limit_to(limit, |_| true)
     }
 
     pub fn remove(&mut self, id: &Hash) -> Option<Transaction> {
@@ -352,15 +345,31 @@ impl Mempool {
 
     /// Transactions a peer's filter does not cover, capped at `limit`.
     pub fn missing_from(&self, filter: &BloomFilter, limit: usize) -> Vec<Transaction> {
-        let mut missing: Vec<Transaction> = self
+        self.limit_to(limit, |id| !filter.contains(id))
+    }
+
+    /// Clones at most `limit` transactions, in canonical order, never the whole
+    /// pool. The old implementation cloned every remaining transaction to sort
+    /// it and then threw most of the clones away: at ~5 KiB of ML-DSA material
+    /// per transaction that made a single sync request allocate tens of MB for
+    /// a pool of a few thousand entries, and a 100k-entry pool would have
+    /// cost ~0.5-1.5 GB a throw.
+    fn limit_to<F>(&self, limit: usize, keep: F) -> Vec<Transaction>
+    where
+        F: Fn(&Hash) -> bool,
+    {
+        let mut picked: Vec<((Address, u64, Hash), Hash)> = self
             .entries
             .iter()
-            .filter(|(id, _)| !filter.contains(id))
-            .map(|(_, e)| e.transaction.clone())
+            .filter(|(id, _)| keep(id))
+            .map(|(id, e)| (sikka_consensus::proposal::order_key(&e.transaction), *id))
             .collect();
-        missing.sort_by_key(sikka_consensus::proposal::order_key);
-        missing.truncate(limit);
-        missing
+        picked.sort_by_key(|(order, _)| *order);
+        picked.truncate(limit.min(picked.len()));
+        picked
+            .into_iter()
+            .map(|(_, id)| self.entries[&id].transaction.clone())
+            .collect()
     }
 }
 
