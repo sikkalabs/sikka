@@ -4,18 +4,24 @@
 //! task does the fanning out. Nothing here blocks a request on a peer being
 //! reachable, so a slow or briefly unreachable peer cannot stall HTTP handlers.
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 
 use tokio::sync::mpsc;
 use tracing::{debug, info, warn};
 
+use sikka_common::time::now_secs;
 use sikka_common::transaction::Transaction;
 use sikka_common::vote::Vote;
 use sikka_consensus::proposal::CheckpointProposal;
 use sikka_p2p::client::{ClientConfig, PeerClient};
 
 use crate::node::{Finalized, Node};
+
+/// Minimum wall-clock gap between sync *requests*. The in-flight guard only
+/// stops concurrent downloads; this stops an attacker from queueing a fresh
+/// snapshot download the moment the previous one finishes.
+const SYNC_COOLDOWN_SECS: u64 = 30;
 
 /// A unit of outbound work.
 #[derive(Debug)]
@@ -34,6 +40,8 @@ pub struct Gossip {
     /// Guards against queueing a dozen snapshot downloads because a dozen
     /// checkpoints arrived while we were behind.
     syncing: Arc<AtomicBool>,
+    /// Unix seconds of the last accepted sync request, for the cooldown.
+    last_sync_request: AtomicU64,
 }
 
 impl Gossip {
@@ -49,6 +57,7 @@ impl Gossip {
         let gossip = Arc::new(Self {
             jobs,
             syncing: syncing.clone(),
+            last_sync_request: AtomicU64::new(0),
         });
 
         tokio::spawn(worker(
@@ -68,6 +77,7 @@ impl Gossip {
         Arc::new(Self {
             jobs,
             syncing: Arc::new(AtomicBool::new(false)),
+            last_sync_request: AtomicU64::new(0),
         })
     }
 
@@ -87,11 +97,29 @@ impl Gossip {
         self.send(Job::Finalized(Box::new(finalized)));
     }
 
-    pub fn request_sync(&self) {
+    /// Ask the sync loop to fetch a snapshot, subject to a cooldown.
+    ///
+    /// Returns whether the request was actually queued. The in-flight guard
+    /// only blocks *concurrent* syncs; the timestamp gate keeps one sender from
+    /// repeatedly re-triggering a download the moment the other finishes.
+    pub fn request_sync(&self) -> bool {
         if self.syncing.load(Ordering::Relaxed) {
-            return;
+            return false;
+        }
+        let now = now_secs();
+        let last = self.last_sync_request.load(Ordering::Relaxed);
+        if last > 0 && now < last + SYNC_COOLDOWN_SECS {
+            return false;
+        }
+        if self
+            .last_sync_request
+            .compare_exchange(last, now, Ordering::SeqCst, Ordering::SeqCst)
+            .is_err()
+        {
+            return false;
         }
         self.send(Job::Sync);
+        true
     }
 
     fn send(&self, job: Job) {

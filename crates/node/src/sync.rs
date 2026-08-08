@@ -15,7 +15,7 @@ use tracing::{debug, info, warn};
 
 use sikka_common::error::{Error, Result};
 use sikka_p2p::client::PeerClient;
-use sikka_state::SnapshotDownload;
+use sikka_state::{SnapshotDownload, SnapshotManifest};
 
 use crate::node::Node;
 
@@ -98,7 +98,7 @@ pub async fn fast_sync(node: &Arc<Node>, client: &PeerClient) -> Result<Option<u
             .snapshot_from_manifest(
                 &status.endpoint,
                 node.config().snapshot_download_path(),
-                manifest,
+                manifest.clone(),
             )
             .await
         {
@@ -115,17 +115,29 @@ pub async fn fast_sync(node: &Arc<Node>, client: &PeerClient) -> Result<Option<u
                 Err(e) => {
                     warn!(peer = %status.endpoint, error = %e, "rejected a peer's snapshot");
                     node.record_peer_failure(&status.endpoint);
+                    cleanup_snapshot(node, &manifest);
                     last_error = Some(e);
                 }
             },
             Err(e) => {
                 debug!(peer = %status.endpoint, error = %e, "snapshot download failed");
                 node.record_peer_failure(&status.endpoint);
+                cleanup_snapshot(node, &manifest);
                 last_error = Some(e);
             }
         }
     }
     Err(last_error.unwrap_or_else(|| Error::Network("no peer could serve a snapshot".into())))
+}
+
+/// Discard a peer's failed snapshot download so failed syncs cannot stack up
+/// on disk (the original reason the sync endpoint was a cheap DoS).
+fn cleanup_snapshot(node: &Node, manifest: &SnapshotManifest) {
+    if let Err(error) =
+        SnapshotDownload::remove_for(node.config().snapshot_download_path(), &manifest.snapshot_id)
+    {
+        debug!(%error, snapshot = %manifest.snapshot_id, "could not clean up failed snapshot download");
+    }
 }
 
 /// Announce ourselves to peers and adopt the peers they know.

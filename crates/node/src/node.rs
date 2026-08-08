@@ -1252,6 +1252,40 @@ impl Node {
         }))
     }
 
+    /// Whether a far-ahead checkpoint is worth triggering a snapshot download.
+    ///
+    /// A node that is more than one checkpoint behind cannot verify the quorum
+    /// of a future checkpoint (the validator set may have changed), but it can
+    /// still demand that the checkpoint carry at least one signature that
+    /// verifies against a validator it already trusts. Without a real validator
+    /// key, no amount of crafted JSON passes this — which is the whole point:
+    /// an anonymous sender must not be able to force a snapshot download.
+    pub fn checkpoint_credible(&self, checkpoint: &Checkpoint) -> bool {
+        let chain = self.chain();
+        let Ok(active) = chain
+            .ledger
+            .active_validators_at(chain.ledger.height() + 1)
+        else {
+            return false;
+        };
+        let keys: HashMap<Address, PublicKey> =
+            active.into_iter().map(|v| (v.address, v.public_key)).collect();
+        let hash = checkpoint.hash();
+        let payload = sikka_common::vote::vote_signing_bytes(
+            &checkpoint.header.chain_id,
+            checkpoint.header.height,
+            checkpoint.header.round,
+            VoteKind::Precommit,
+            &hash,
+        );
+        checkpoint.validator_signatures.iter().any(|sig| {
+            keys.get(&sig.validator).is_some_and(|key| {
+                key.as_slice() == sig.public_key.as_slice()
+                    && sikka_crypto::verify(key.as_slice(), &payload, sig.signature.as_slice())
+            })
+        })
+    }
+
     /// Apply a checkpoint another node finalized.
     ///
     /// Returns whether it moved us forward. A checkpoint we cannot apply from

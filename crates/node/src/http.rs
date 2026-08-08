@@ -287,11 +287,15 @@ async fn submit_checkpoint(
         // Too far behind to replay: ask the sync loop to fetch a snapshot, and
         // tell the sender we are not there yet rather than pretending success.
         Err(Error::BadCheckpointHeight { expected, actual }) => {
-            state.gossip.request_sync();
+            // Never let unsigned JSON spend our bandwidth and disk: only a
+            // checkpoint carrying at least one signature from a validator we
+            // already know is worth trusting enough to download state for.
+            let syncing =
+                state.node.checkpoint_credible(&body.checkpoint) && state.gossip.request_sync();
             Ok(Json(json!({
                 "applied": false,
                 "height": state.node.height(),
-                "syncing": true,
+                "syncing": syncing,
                 "expected": expected,
                 "received": actual,
             })))
