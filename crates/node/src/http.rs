@@ -70,6 +70,8 @@ pub fn router(state: AppState) -> Router {
         .route("/", get(site_index))
         .route("/wallet.html", get(wallet_page))
         .route("/wallet", get(wallet_page))
+        .route("/walletpro.html", get(walletpro_page))
+        .route("/walletpro", get(walletpro_page))
         .route("/address.html", get(address_page))
         .route("/address", get(address_page))
         .layer(middleware::from_fn(cors))
@@ -139,6 +141,10 @@ async fn wallet_page() -> Html<&'static str> {
     Html(include_str!("../../../public/wallet.html"))
 }
 
+async fn walletpro_page() -> Html<&'static str> {
+    Html(include_str!("../../../public/walletpro.html"))
+}
+
 async fn address_page() -> Html<&'static str> {
     Html(include_str!("../../../public/address.html"))
 }
@@ -156,6 +162,7 @@ async fn api_index(State(state): State<AppState>) -> HttpResult<Json<Value>> {
         "node": state.node.address(),
         "site": "/",
         "wallet": "/wallet.html",
+        "walletpro": "/walletpro.html",
         "address": "/address.html",
         "endpoints": [
             "/api/health", "/api/address/random", "/api/rpc", "/api/tx", "/api/tx/sync", "/api/vote",

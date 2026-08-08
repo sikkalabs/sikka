@@ -9,6 +9,7 @@ Nodes listen on port **64552**. Locally: `http://localhost:64552`. Public:
 | --- | --- |
 | Landing | `GET /` → `public/index.html` |
 | Wallet | `GET /wallet.html` (also `/wallet`) |
+| Wallet pro | `GET /walletpro.html` (also `/walletpro`) |
 | Address | `GET /address.html?a=0x…` (also `/address`) |
 | API | `GET/POST /api/…` |
 
@@ -40,6 +41,7 @@ JSON-RPC errors use `{ "jsonrpc":"2.0", "error":{ "code", "message" }, "id" }`.
 | --- | --- | --- |
 | `GET` | `/` | site |
 | `GET` | `/wallet.html` | humans |
+| `GET` | `/walletpro.html` | humans |
 | `GET` | `/address.html` | humans |
 | `GET` | `/api/` | discovery JSON |
 | `GET` | `/api/health` | ops / probes |
@@ -68,6 +70,11 @@ Network status page (`public/index.html`).
 ### `GET /wallet.html`
 
 Browser wallet (`public/wallet.html`).
+
+### `GET /walletpro.html`
+
+HD receive wallet (`public/walletpro.html`): one master seed, many receive
+addresses (`SIKKA/recv/v1`), gap limit 10, no change chain.
 
 ### `GET /address.html?a=0x…`
 
