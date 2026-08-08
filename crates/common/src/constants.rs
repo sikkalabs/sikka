@@ -67,6 +67,16 @@ pub const WEAK_SUBJECTIVITY_GAP: u64 = 1;
 /// heights (memory + ML-DSA verification spam).
 pub const MAX_VOTE_HEIGHT_AHEAD: u64 = 1;
 
+/// Reject votes whose round is fair more than this many rounds ahead of the
+/// turn now due.
+///
+/// A round represents a 10-second proposer turn derived from the last
+/// checkpoint's agreed timestamp, so a vote for any round beyond the local
+/// `round_at(wall, last)` plus this generous margin can only be an attempt to
+/// fill the vote tracker (or this node's ML-DSA budget) with fabricated
+/// rounds. 100 rounds ≈ 17 minutes of headroom for clock skew and catch-up.
+pub const MAX_VOTE_ROUND_AHEAD: u32 = 100;
+
 /// Maximum equivocation proofs accepted in one checkpoint proposal.
 pub const MAX_EVIDENCE_PER_CHECKPOINT: usize = 64;
 

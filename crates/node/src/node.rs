@@ -1083,6 +1083,21 @@ impl Node {
                     sikka_common::constants::MAX_VOTE_HEIGHT_AHEAD
                 )));
             }
+            // A vote also needs to be for a round that is plausibly due. Rounds
+            // advance one per PROPOSER_TIMEOUT_SECS from the last checkpoint's
+            // agreed timestamp, so without this a bonded key could plant votes
+            // across ~2³² artificial rounds and grow both this tracker and this
+            // node's ML-DSA verification work without bound.
+            let due_round = round_at(now_secs(), chain.ledger.meta().last_checkpoint_time);
+            if vote.round
+                > due_round.saturating_add(sikka_common::constants::MAX_VOTE_ROUND_AHEAD)
+            {
+                return Err(Error::Other(format!(
+                    "vote round {} is more than {} ahead of the round now due ({due_round})",
+                    vote.round,
+                    sikka_common::constants::MAX_VOTE_ROUND_AHEAD
+                )));
+            }
             let active = chain.ledger.active_validators_at(vote.height)?;
             if !active.iter().any(|v| v.address == vote.validator) {
                 return Err(Error::UnknownVoter(vote.validator));

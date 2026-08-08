@@ -10,7 +10,7 @@ use std::collections::HashMap;
 
 use sikka_common::bytes::{Address, Hash};
 use sikka_common::checkpoint::ValidatorSignature;
-use sikka_common::constants::quorum_bond;
+use sikka_common::constants::{quorum_bond, MAX_VOTE_ROUND_AHEAD};
 use sikka_common::error::{Error, Result};
 use sikka_common::vote::{Vote, VoteKind};
 
@@ -32,18 +32,20 @@ struct StepVotes {
     by_validator: HashMap<Address, Vote>,
 }
 
-#[derive(Debug, Default)]
-struct HeightVotes {
-    /// Keyed by `(round, kind)`.
-    steps: HashMap<(u32, VoteKind), StepVotes>,
-}
-
 /// Votes for checkpoints that are not yet final.
 #[derive(Debug)]
 pub struct VoteTracker {
     chain_id: String,
     heights: HashMap<u64, HeightVotes>,
     equivocations: Vec<Equivocation>,
+}
+
+#[derive(Debug, Default)]
+struct HeightVotes {
+    /// Keyed by `(round, kind)`.
+    steps: HashMap<(u32, VoteKind), StepVotes>,
+    /// Highest round seen at this height, for the future-round bound.
+    max_round: Option<u32>,
 }
 
 impl VoteTracker {
@@ -59,10 +61,29 @@ impl VoteTracker {
     pub fn record(&mut self, vote: Vote) -> Result<VoteOutcome> {
         vote.verify(&self.chain_id)?;
         let height = self.heights.entry(vote.height).or_default();
+        // Bound future rounds: tentative votes at an arbitrary round are the
+        // one knob a bonded key can turn to fill this tracker (and this node's
+        // ML-DSA budget) without bound. A round is a 10s proposer turn derived
+        // from the last checkpoint, so anything well past the highest round
+        // already seen here is never legitimate.
+        if let Some(max_round) = height.max_round {
+            if vote.round > max_round.saturating_add(MAX_VOTE_ROUND_AHEAD) {
+                return Err(Error::Other(format!(
+                    "vote round {} is more than {MAX_VOTE_ROUND_AHEAD} ahead of the highest \
+                     tracked round {max_round}",
+                    vote.round
+                )));
+            }
+        }
         let step = height
             .steps
             .entry((vote.round, vote.kind))
             .or_default();
+        height.max_round = Some(
+            height
+                .max_round
+                .map_or(vote.round, |max| max.max(vote.round)),
+        );
 
         if let Some(existing) = step.by_validator.get(&vote.validator) {
             if existing.checkpoint_hash == vote.checkpoint_hash {
@@ -401,5 +422,27 @@ mod tests {
     fn empty_validator_set_never_reaches_quorum() {
         let tracker = VoteTracker::new(chain_id());
         assert!(!tracker.has_quorum(1, 0, VoteKind::Precommit, &Hash([1u8; 32]), &[]));
+    }
+
+    #[test]
+    fn rounds_more_than_the_allowed_gap_ahead_are_rejected() {
+        let committee = Committee::new(3);
+        let mut tracker = VoteTracker::new(chain_id());
+        let round = MAX_VOTE_ROUND_AHEAD + 2;
+        assert!(matches!(
+            tracker.record(committee.prevote(0, 1, round, Hash([1u8; 32]))),
+            Ok(VoteOutcome::Accepted { .. })
+        ));
+        // Far beyond the highest round already recorded at this height.
+        match tracker.record(committee.prevote(0, 1, round + MAX_VOTE_ROUND_AHEAD + 1, Hash([2u8; 32])))
+        {
+            Err(Error::Other(_)) => {}
+            other => panic!("expected the round gap to be rejected, got {other:?}"),
+        }
+        // A legitimate early-round vote for the same height is still accepted.
+        assert!(matches!(
+            tracker.record(committee.prevote(0, 1, 0, Hash([3u8; 32]))),
+            Ok(VoteOutcome::Accepted { .. })
+        ));
     }
 }
