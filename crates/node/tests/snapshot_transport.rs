@@ -75,9 +75,31 @@ async fn spawn_solo() -> (String, Arc<Node>, tempfile::TempDir) {
     (endpoint, node, dir)
 }
 
+/// Archives are built off the chain lock in a background thread (H4). Poll
+/// until the genesis archive is ready rather than racing the builder.
+async fn wait_for_snapshot_manifest(endpoint: &str) -> sikka_state::SnapshotManifest {
+    let client = reqwest::Client::new();
+    let url = format!("{endpoint}/api/state/snapshot/manifest");
+    for _ in 0..100 {
+        let response = client.get(&url).send().await.unwrap();
+        if response.status().is_success() {
+            return response.json().await.unwrap();
+        }
+        assert_eq!(
+            response.status(),
+            reqwest::StatusCode::SERVICE_UNAVAILABLE,
+            "manifest should only 503 while the archive is building"
+        );
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    panic!("snapshot archive did not become ready");
+}
+
 #[tokio::test]
 async fn snapshot_download_uses_manifest_and_chunks() {
     let (endpoint, node, _dir) = spawn_solo().await;
+    wait_for_snapshot_manifest(&endpoint).await;
+
     let downloads = tempfile::tempdir().unwrap();
     let client = PeerClient::new(&ClientConfig {
         timeout: Duration::from_secs(5),
@@ -108,16 +130,6 @@ async fn giant_json_snapshot_endpoint_is_removed() {
         .unwrap();
     assert_eq!(response.status(), reqwest::StatusCode::NOT_FOUND);
 
-    let manifest = reqwest::get(format!("{endpoint}/api/state/snapshot/manifest"))
-        .await
-        .unwrap();
-    assert!(manifest.status().is_success());
-    assert_eq!(
-        manifest
-            .json::<sikka_state::SnapshotManifest>()
-            .await
-            .unwrap()
-            .version,
-        sikka_state::SNAPSHOT_FORMAT_VERSION
-    );
+    let manifest = wait_for_snapshot_manifest(&endpoint).await;
+    assert_eq!(manifest.version, sikka_state::SNAPSHOT_FORMAT_VERSION);
 }

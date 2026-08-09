@@ -495,7 +495,22 @@ async fn validator_changing_gaps_require_a_pinned_checkpoint() {
     net.await_height(2, Duration::from_secs(90)).await;
 
     let snapshot = net.nodes[0].node.snapshot().unwrap();
-    let manifest = net.nodes[0].node.snapshot_manifest().unwrap();
+    let manifest = {
+        let node = &net.nodes[0].node;
+        let deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            match node.snapshot_manifest() {
+                Ok(manifest) => break manifest,
+                Err(error) if error.to_string().contains("snapshot archive not ready") => {
+                    if Instant::now() > deadline {
+                        panic!("snapshot archive did not become ready: {error}");
+                    }
+                    tokio::time::sleep(Duration::from_millis(50)).await;
+                }
+                Err(error) => panic!("snapshot_manifest failed: {error}"),
+            }
+        }
+    };
     let checkpoint_hash = snapshot.checkpoint.hash();
     let open_observer = |trusted_checkpoint| {
         let dir = tempfile::tempdir().unwrap();

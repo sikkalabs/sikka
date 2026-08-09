@@ -43,6 +43,10 @@ fn is_placeholder_address(address: &Address, endpoint: &str) -> bool {
 }
 
 /// Reject peer endpoints that are unusable or unsafe to dial (SSRF / eclipse).
+///
+/// Loopback is allowed (local testnets). RFC1918, link-local, and ULA hosts
+/// are rejected so an unsigned referral cannot steer dials at cloud metadata
+/// or internal networks.
 pub fn validate_endpoint_url(endpoint: &str) -> Result<()> {
     if endpoint.is_empty() || endpoint.len() > 256 {
         return Err(Error::Network("implausible peer endpoint".into()));
@@ -83,29 +87,33 @@ pub fn validate_endpoint_url(endpoint: &str) -> Result<()> {
 }
 
 fn host_is_routable(host: &str) -> bool {
+    // Loopback is allowed so local testnets and docker-compose meshes can
+    // announce `127.0.0.1` / `localhost`. RFC1918, link-local, and ULA stay
+    // blocked — those are the SSRF targets (notably `169.254.169.254`).
     if host.eq_ignore_ascii_case("localhost") {
-        return false;
+        return true;
     }
     let ip_host = host
         .strip_prefix('[')
         .and_then(|inner| inner.strip_suffix(']'))
         .unwrap_or(host);
     if let Ok(ip) = ip_host.parse::<IpAddr>() {
-        return ip_is_public(ip);
+        return ip_is_safe_peer(ip);
     }
     true
 }
 
-fn ip_is_public(ip: IpAddr) -> bool {
+fn ip_is_safe_peer(ip: IpAddr) -> bool {
     match ip {
         IpAddr::V4(v4) => {
-            !v4.is_loopback() && !v4.is_private() && !v4.is_unspecified() && !v4.is_link_local()
+            v4.is_loopback()
+                || (!v4.is_private() && !v4.is_unspecified() && !v4.is_link_local())
         }
         IpAddr::V6(v6) => {
-            !v6.is_loopback()
-                && !v6.is_unspecified()
-                && !v6.is_unique_local()
-                && !v6.is_unicast_link_local()
+            v6.is_loopback()
+                || (!v6.is_unspecified()
+                    && !v6.is_unique_local()
+                    && !v6.is_unicast_link_local())
         }
     }
 }
@@ -575,23 +583,30 @@ mod tests {
     }
 
     #[test]
-    fn private_urls_are_rejected() {
+    fn private_and_link_local_urls_are_rejected() {
         for endpoint in [
-            "http://127.0.0.1:8080",
-            "http://localhost:8080",
             "http://10.0.0.1:8080",
             "http://172.16.0.1:8080",
             "http://192.168.1.1:8080",
             "http://169.254.169.254/",
-            "http://[::1]:8080",
             "http://[fc00::1]:8080",
+            "http://[fe80::1]:8080",
         ] {
             assert!(
                 validate_endpoint_url(endpoint).is_err(),
                 "expected {endpoint} to be rejected"
             );
         }
-        validate_endpoint_url("http://sikka-1:8080").unwrap();
+        // Loopback is fine for local testnets; hostnames and public IPs too.
+        for endpoint in [
+            "http://127.0.0.1:8080",
+            "http://localhost:8080",
+            "http://[::1]:8080",
+            "http://sikka-1:8080",
+            "https://1.sikkalabs.com",
+        ] {
+            validate_endpoint_url(endpoint).unwrap();
+        }
     }
 
     #[test]
