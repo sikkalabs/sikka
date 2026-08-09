@@ -1209,7 +1209,7 @@ dependencies = [
 
 [[package]]
 name = "sikka-checkpoint"
-version = "0.2.4"
+version = "0.3.0"
 dependencies = [
  "redb",
  "sikka-common",
@@ -1221,7 +1221,7 @@ dependencies = [
 
 [[package]]
 name = "sikka-cli"
-version = "0.2.4"
+version = "0.3.0"
 dependencies = [
  "clap",
  "serde",
@@ -1236,7 +1236,7 @@ dependencies = [
 
 [[package]]
 name = "sikka-common"
-version = "0.2.4"
+version = "0.3.0"
 dependencies = [
  "hex",
  "serde",
@@ -1247,7 +1247,7 @@ dependencies = [
 
 [[package]]
 name = "sikka-consensus"
-version = "0.2.4"
+version = "0.3.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -1260,7 +1260,7 @@ dependencies = [
 
 [[package]]
 name = "sikka-crypto"
-version = "0.2.4"
+version = "0.3.0"
 dependencies = [
  "fips204",
  "hex",
@@ -1270,7 +1270,7 @@ dependencies = [
 
 [[package]]
 name = "sikka-node"
-version = "0.2.4"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "axum",
@@ -1295,7 +1295,7 @@ dependencies = [
 
 [[package]]
 name = "sikka-p2p"
-version = "0.2.4"
+version = "0.3.0"
 dependencies = [
  "hex",
  "reqwest",
@@ -1312,7 +1312,7 @@ dependencies = [
 
 [[package]]
 name = "sikka-rpc"
-version = "0.2.4"
+version = "0.3.0"
 dependencies = [
  "reqwest",
  "serde",
@@ -1324,7 +1324,7 @@ dependencies = [
 
 [[package]]
 name = "sikka-state"
-version = "0.2.4"
+version = "0.3.0"
 dependencies = [
  "hex",
  "redb",
@@ -1339,7 +1339,7 @@ dependencies = [
 
 [[package]]
 name = "sikka-wallet"
-version = "0.2.4"
+version = "0.3.0"
 dependencies = [
  "hex",
  "serde",
