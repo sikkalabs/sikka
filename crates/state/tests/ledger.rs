@@ -1090,3 +1090,206 @@ fn proposer_misses_only_charge_rounds_due_by_checkpoint_time() {
         .collect();
     assert_eq!(charged, vec![round0]);
 }
+
+#[test]
+fn high_round_full_batch_charges_at_most_one_miss_per_validator() {
+    use sikka_common::constants::round_at;
+    use sikka_common::validator::Validator;
+
+    let alice_kp = Keypair::generate().unwrap();
+    let bob_kp = Keypair::generate().unwrap();
+    let alice_pk = PublicKey::new(*alice_kp.public_bytes());
+    let bob_pk = PublicKey::new(*bob_kp.public_bytes());
+
+    let genesis = GenesisConfig {
+        chain_id: "sikka-miss-stack".into(),
+        timestamp: GENESIS_TIME,
+        allocations: vec![
+            GenesisAllocation {
+                to: alice_pk.address(),
+                amount: ALLOCATION,
+            },
+            GenesisAllocation {
+                to: bob_pk.address(),
+                amount: ALLOCATION,
+            },
+        ],
+        validators: vec![
+            GenesisValidator {
+                public_key: alice_pk.clone(),
+                bond: BOND,
+                endpoint: None,
+            },
+            GenesisValidator {
+                public_key: bob_pk.clone(),
+                bond: BOND,
+                endpoint: None,
+            },
+        ],
+        checkpoint_tx_interval: Some(2),
+        max_missed_proposer_slots: Some(100),
+    };
+
+    let dir = tempfile::tempdir().unwrap();
+    let (ledger, _) = Ledger::open(dir.path().join("state.redb"), &genesis).unwrap();
+    let mut active = ledger.active_validators_at(1).unwrap();
+    active.sort_by_key(|v| v.address);
+    let winner = Validator::proposer_for_round(1, 50, &active).unwrap();
+    let absentee = active
+        .iter()
+        .map(|v| v.address)
+        .find(|a| *a != winner)
+        .unwrap();
+
+    // ~1000s of idle tip → round 100 is due. Pre-fix this would stack ~50
+    // misses on the absentee in one seal and trip force-unbond.
+    let timestamp = GENESIS_TIME + 1_000;
+    assert_eq!(round_at(timestamp, GENESIS_TIME), 100);
+
+    let payer = if winner == alice_pk.address() {
+        &alice_kp
+    } else {
+        &bob_kp
+    };
+    let txs = vec![
+        Transaction::transfer(payer, Address([0x81; 32]), 1_000, 0, timestamp, &genesis.chain_id, genesis.fingerprint())
+            .unwrap(),
+        Transaction::transfer(payer, Address([0x82; 32]), 1_000, 1, timestamp, &genesis.chain_id, genesis.fingerprint())
+            .unwrap(),
+    ];
+    let mut context = ExecutionContext::new(1, timestamp, winner);
+    context.round = 100;
+    let outcome = ledger.execute(&txs, context).unwrap();
+
+    assert!(outcome.forced_unbonds.is_empty());
+    assert_eq!(
+        outcome
+            .validators
+            .get(&absentee)
+            .and_then(|v| v.as_ref())
+            .map(|v| v.missed_proposer_slots)
+            .unwrap_or(0),
+        1,
+        "idle rounds must not stack misses inside one seal"
+    );
+    assert_eq!(
+        outcome
+            .validators
+            .get(&winner)
+            .and_then(|v| v.as_ref())
+            .map(|v| v.missed_proposer_slots)
+            .unwrap_or(0),
+        0,
+        "successful proposer is reset"
+    );
+}
+
+#[test]
+fn checkpoint_cannot_leave_the_active_set_empty() {
+    let validator = Keypair::generate().unwrap();
+    let pk = PublicKey::new(*validator.public_bytes());
+    let genesis = GenesisConfig {
+        chain_id: "sikka-last-val".into(),
+        timestamp: GENESIS_TIME,
+        allocations: vec![GenesisAllocation {
+            to: pk.address(),
+            amount: ALLOCATION,
+        }],
+        validators: vec![GenesisValidator {
+            public_key: pk.clone(),
+            bond: BOND,
+            endpoint: None,
+        }],
+        checkpoint_tx_interval: Some(1),
+        max_missed_proposer_slots: None,
+    };
+
+    let dir = tempfile::tempdir().unwrap();
+    let (ledger, _) = Ledger::open(dir.path().join("state.redb"), &genesis).unwrap();
+    let now = GENESIS_TIME + 60;
+    let tx = Transaction::unbond(&validator, 0, now, &genesis.chain_id, genesis.fingerprint()).unwrap();
+    let context = ExecutionContext::new(1, now, pk.address());
+    let err = ledger.execute(&[tx], context).unwrap_err();
+    assert!(
+        matches!(err, Error::NoActiveValidators),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
+fn same_batch_self_unbond_cannot_halt_via_force_unbond() {
+    use sikka_common::constants::round_at;
+    use sikka_common::validator::Validator;
+
+    let alice_kp = Keypair::generate().unwrap();
+    let bob_kp = Keypair::generate().unwrap();
+    let alice_pk = PublicKey::new(*alice_kp.public_bytes());
+    let bob_pk = PublicKey::new(*bob_kp.public_bytes());
+
+    let genesis = GenesisConfig {
+        chain_id: "sikka-halt-unbond".into(),
+        timestamp: GENESIS_TIME,
+        allocations: vec![
+            GenesisAllocation {
+                to: alice_pk.address(),
+                amount: ALLOCATION,
+            },
+            GenesisAllocation {
+                to: bob_pk.address(),
+                amount: ALLOCATION,
+            },
+        ],
+        validators: vec![
+            GenesisValidator {
+                public_key: alice_pk.clone(),
+                bond: BOND,
+                endpoint: None,
+            },
+            GenesisValidator {
+                public_key: bob_pk.clone(),
+                bond: BOND,
+                endpoint: None,
+            },
+        ],
+        checkpoint_tx_interval: Some(2),
+        // One miss is enough to force-unbond; combined with self-unbond this
+        // used to empty the active set in a single high-round seal.
+        max_missed_proposer_slots: Some(1),
+    };
+
+    let dir = tempfile::tempdir().unwrap();
+    let (ledger, _) = Ledger::open(dir.path().join("state.redb"), &genesis).unwrap();
+    let mut active = ledger.active_validators_at(1).unwrap();
+    active.sort_by_key(|v| v.address);
+    let winner = Validator::proposer_for_round(1, 10, &active).unwrap();
+    let winner_kp = if winner == alice_pk.address() {
+        &alice_kp
+    } else {
+        &bob_kp
+    };
+
+    let timestamp = GENESIS_TIME + 200;
+    assert!(round_at(timestamp, GENESIS_TIME) >= 10);
+
+    let txs = vec![
+        Transaction::transfer(
+            winner_kp,
+            Address([0x91; 32]),
+            1_000,
+            0,
+            timestamp,
+            &genesis.chain_id,
+            genesis.fingerprint(),
+        )
+        .unwrap(),
+        Transaction::unbond(winner_kp, 1, timestamp, &genesis.chain_id, genesis.fingerprint())
+            .unwrap(),
+    ];
+    let mut context = ExecutionContext::new(1, timestamp, winner);
+    context.round = 10;
+    let err = ledger.execute(&txs, context).unwrap_err();
+    assert!(
+        matches!(err, Error::NoActiveValidators),
+        "self-unbond + force-unbond must not finalize an empty set: {err}"
+    );
+}

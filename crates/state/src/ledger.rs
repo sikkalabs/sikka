@@ -10,7 +10,7 @@
 //! 3. [`Ledger::commit`] persists them, or [`Ledger::rollback`] discards them if
 //!    the root does not match the proposal.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::Path;
 use std::sync::Arc;
 
@@ -638,7 +638,13 @@ impl Ledger {
         // 4. Attribute full-batch proposer timeouts and force-unbond absentees.
         // Only a full transaction batch counts: idle-delay seals with a short
         // batch would otherwise charge every quiet-chain timeout as a miss.
+        //
+        // Miss rotation uses the validators active at this height *before*
+        // same-batch unbonds, so a proposer cannot dump every timed-out round
+        // onto the remaining set by exiting in the same seal.
         let full_batch = outcome.applied.len() as u32 >= self.meta.checkpoint_tx_interval;
+        let mut rotation = self.active_validators_at(context.height)?;
+        rotation.sort_by_key(|v| v.address);
         outcome.forced_unbonds = Self::apply_proposer_misses(
             &mut overlay,
             context.height,
@@ -648,6 +654,7 @@ impl Ledger {
             context.proposer,
             full_batch,
             self.meta.max_missed_proposer_slots,
+            &rotation,
         )?;
 
         // 5. Mint inflation for the elapsed period and pay every validator
@@ -680,6 +687,19 @@ impl Ledger {
             .checked_add(paid)
             .ok_or(Error::BalanceOverflow)?;
 
+        // A checkpoint that leaves nobody active at H+1 can never be extended:
+        // there is no proposer and no quorum. Refuse it rather than finalize a
+        // permanent halt (including a same-batch self-unbond after mass eviction).
+        let next_height = context.height.saturating_add(1);
+        let active_next = overlay
+            .all_validators()?
+            .into_iter()
+            .filter(|v| v.is_active_at(next_height))
+            .count();
+        if active_next == 0 {
+            return Err(Error::NoActiveValidators);
+        }
+
         // 6. Collect final values.
         for (address, account) in overlay.accounts {
             if let Some(account) = account {
@@ -707,9 +727,15 @@ impl Ledger {
         Ok(outcome)
     }
 
-    /// Charge consecutive full-batch proposer timeouts and force-unbond at the
-    /// configured threshold. The successful proposer is always reset to zero
-    /// misses, even when they also appear in the timed-out prefix.
+    /// Charge full-batch proposer timeouts and force-unbond at the configured
+    /// threshold.
+    ///
+    /// Each validator is charged **at most once per sealed height**, even when
+    /// many rounds elapsed while the tip was quiet. Charging `0..round` once per
+    /// occurrence let a single high-round seal push every absentee over the
+    /// threshold and halt the chain. `rotation` is the active set at height
+    /// start so a same-batch `Unbond` cannot reshape who absorbs those misses.
+    /// The successful proposer is always reset to zero misses.
     fn apply_proposer_misses(
         overlay: &mut Overlay<'_>,
         height: u64,
@@ -719,20 +745,18 @@ impl Ledger {
         proposer: Address,
         full_batch: bool,
         max_missed: u32,
+        rotation: &[Validator],
     ) -> Result<Vec<Address>> {
-        let mut active: Vec<Validator> = overlay
-            .all_validators()?
-            .into_iter()
-            .filter(|v| v.is_active_at(height))
-            .collect();
-        active.sort_by_key(|v| v.address);
-
         if full_batch && round > 0 {
             let charge_upto = round.min(round_at(timestamp, last_checkpoint_time));
+            let mut missed = BTreeSet::new();
             for r in 0..charge_upto {
-                let Some(address) = Validator::proposer_for_round(height, r, &active) else {
+                let Some(address) = Validator::proposer_for_round(height, r, rotation) else {
                     break;
                 };
+                missed.insert(address);
+            }
+            for address in missed {
                 let Some(mut validator) = overlay.validator(&address)? else {
                     continue;
                 };
