@@ -64,6 +64,8 @@ fn write_torrc(
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|e| Error::Other(format!("torrc parent: {e}")))?;
     }
+    // Virtport 80 matches `OnionIdentity::advertise_url()` (`http://….onion`
+    // with no explicit port). Peers and the self-check dial the default HTTP port.
     let contents = format!(
         "\
 DataDirectory {data}
@@ -71,7 +73,7 @@ SocksPort {socks_host}:{socks_port}
 SocksPolicy accept 127.0.0.1/32
 SocksPolicy reject *
 HiddenServiceDir {hs}
-HiddenServicePort {target_port} 127.0.0.1:{target_port}
+HiddenServicePort 80 127.0.0.1:{target_port}
 Log notice stderr
 ",
         data = data_dir.display(),
@@ -107,7 +109,7 @@ nickname = "sikka"
 
 [onion_services.sikka]
 proxy_ports = [
-    ["{target_port}", "127.0.0.1:{target_port}"],
+    ["80", "127.0.0.1:{target_port}"],
 ]
 "#,
         cache = config.arti_cache_path().display(),

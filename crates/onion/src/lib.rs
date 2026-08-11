@@ -23,11 +23,15 @@ pub const ONION_IKM_TAG: &[u8] = b"SIKKA/tor-onion-v3/ikm/v1";
 /// HKDF info string for the ed25519 seed.
 pub const ONION_HKDF_INFO: &[u8] = b"SIKKA/tor-onion-v3/v1";
 
-/// C Tor / Arti ctor secret-key file header (NUL-terminated).
-pub const HS_SECRET_HEADER: &[u8] = b"== ed25519v1-secret: type0 ==\0";
+/// C Tor / Arti ctor secret-key file header (32-byte tagged blob).
+///
+/// Tor's `crypto_write_tagged_contents_to_file` pads the ASCII tag with NULs to
+/// exactly 32 bytes (`== ed25519v1-secret: type0 ==\0\0\0`). A single trailing
+/// NUL is rejected — Tor logs "No key found" and regenerates a random identity.
+pub const HS_SECRET_HEADER: &[u8] = b"== ed25519v1-secret: type0 ==\0\0\0";
 
-/// C Tor / Arti ctor public-key file header (NUL-terminated).
-pub const HS_PUBLIC_HEADER: &[u8] = b"== ed25519v1-public: type0 ==\0";
+/// C Tor / Arti ctor public-key file header (32-byte tagged blob).
+pub const HS_PUBLIC_HEADER: &[u8] = b"== ed25519v1-public: type0 ==\0\0\0";
 
 #[derive(Debug, thiserror::Error)]
 pub enum OnionError {
@@ -248,12 +252,16 @@ mod tests {
         let onion = OnionIdentity::from_keypair(&kp).unwrap();
         onion.write_ctor_dir(dir.path()).unwrap();
 
+        assert_eq!(HS_SECRET_HEADER.len(), 32);
+        assert_eq!(HS_PUBLIC_HEADER.len(), 32);
+
         let secret = fs::read(dir.path().join("hs_ed25519_secret_key")).unwrap();
         assert!(secret.starts_with(HS_SECRET_HEADER));
-        assert_eq!(secret.len(), HS_SECRET_HEADER.len() + 64);
+        assert_eq!(secret.len(), 96);
 
         let public = fs::read(dir.path().join("hs_ed25519_public_key")).unwrap();
         assert!(public.starts_with(HS_PUBLIC_HEADER));
+        assert_eq!(public.len(), 64);
         assert_eq!(&public[HS_PUBLIC_HEADER.len()..], &onion.public_key);
 
         let hostname = fs::read_to_string(dir.path().join("hostname")).unwrap();
