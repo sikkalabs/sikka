@@ -357,6 +357,7 @@ impl Node {
             mempool: self.mempool.lock().len(),
             peers: self.peers.lock().len(),
             node_address: self.address,
+            advertise: self.config.advertise.clone(),
             validator: chain.ledger.validator(&self.address)?.is_some(),
         })
     }

@@ -148,7 +148,8 @@ remains. Confirm a payment by reading the recipient's balance.
 **Result:** `chain_id`, `genesis_fingerprint`, `height`, `state_root`,
 `validator_root`, `last_checkpoint_hash`, `last_checkpoint_time`,
 `total_supply`, `total_bonded`, `accounts`, `active_validators`,
-`checkpoint_tx_interval`, `mempool`, `peers`, `node_address`, `validator`.
+`checkpoint_tx_interval`, `mempool`, `peers`, `node_address`, `advertise`,
+`validator`. `advertise` is this node's peer URL (Tor onion in production).
 
 ### `account.get`
 

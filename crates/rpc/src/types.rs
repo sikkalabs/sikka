@@ -29,6 +29,8 @@ pub struct ChainInfo {
     pub peers: usize,
     /// This node's own address.
     pub node_address: Address,
+    /// Peer advertise URL (Tor onion in production).
+    pub advertise: String,
     /// Whether this node holds a bonded validator key.
     pub validator: bool,
 }

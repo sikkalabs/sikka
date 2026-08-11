@@ -174,6 +174,9 @@
       grid-template-columns: 1fr 1fr;
       gap: 1rem 1.5rem;
     }
+    .grid .span {
+      grid-column: 1 / -1;
+    }
     @media (max-width: 520px) { .grid { grid-template-columns: 1fr; } }
     .label {
       font-size: 0.72rem;
@@ -185,6 +188,10 @@
       margin-top: 0.2rem;
       font: 600 1.05rem/1.3 var(--mono);
       word-break: break-all;
+    }
+    .value.onion {
+      font-size: 0.82rem;
+      color: var(--accent);
     }
     .live {
       display: inline-flex;
@@ -247,6 +254,10 @@
         <div><div class="label">Bonded</div><div class="value" id="bonded">—</div></div>
         <div><div class="label">Validators</div><div class="value" id="validators">—</div></div>
         <div><div class="label">Peers / mempool</div><div class="value" id="peers">—</div></div>
+        <div class="span">
+          <div class="label">Tor identity</div>
+          <div class="value onion" id="onion" title="">—</div>
+        </div>
       </div>
       <p class="err" id="error" hidden></p>
     </section>
@@ -326,6 +337,11 @@
         $("bonded").textContent = formatSikka(info.total_bonded);
         $("validators").textContent = String(info.active_validators);
         $("peers").textContent = `${info.peers} / ${info.mempool}`;
+        const advertise = String(info.advertise || "");
+        const onionHost = advertise.replace(/^https?:\/\//, "").replace(/\/$/, "");
+        const onionEl = $("onion");
+        onionEl.textContent = onionHost || "—";
+        onionEl.title = advertise || "";
         $("error").hidden = true;
       } catch (e) {
         $("dot").className = "dot off";

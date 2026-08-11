@@ -61,6 +61,7 @@ pub fn print_chain_info(info: &ChainInfo) {
         info.node_address,
         if info.validator { " (validator)" } else { "" }
     );
+    println!("advertise      {}", info.advertise);
 }
 
 pub fn print_validators(validators: &[ValidatorInfo]) {
