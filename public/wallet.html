@@ -4,6 +4,9 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>SIKKA wallet</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,600&family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;600&display=swap" rel="stylesheet" />
   <style>
     :root {
       --ink: #1a1714;
@@ -12,8 +15,10 @@
       --line: #d4cdc0;
       --accent: #0f6b4c;
       --warn: #8a3b12;
-      --mono: "IBM Plex Mono", "SF Mono", ui-monospace, monospace;
-      --sans: "IBM Plex Sans", "Source Sans 3", system-ui, sans-serif;
+      --err: #a11;
+      --mono: "IBM Plex Mono", ui-monospace, monospace;
+      --sans: "IBM Plex Sans", system-ui, sans-serif;
+      --display: "Fraunces", Georgia, serif;
     }
     * { box-sizing: border-box; }
     body {
@@ -21,138 +26,168 @@
       min-height: 100vh;
       color: var(--ink);
       background:
-        radial-gradient(1200px 600px at 10% -10%, #fff8e8 0%, transparent 55%),
-        radial-gradient(900px 500px at 100% 0%, #e8f2ec 0%, transparent 50%),
-        var(--paper);
+        radial-gradient(1100px 520px at 8% -8%, #fff6e4 0%, transparent 55%),
+        radial-gradient(900px 480px at 100% 0%, #e4f0ea 0%, transparent 52%),
+        linear-gradient(180deg, #f7f2e8 0%, var(--paper) 45%, #ebe6db 100%);
       font: 16px/1.5 var(--sans);
     }
     main {
-      max-width: 42rem;
+      max-width: 40rem;
       margin: 0 auto;
-      padding: 2.5rem 1.25rem 4rem;
+      padding: 2.75rem 1.25rem 4rem;
     }
-    h1 {
-      font-size: clamp(2.4rem, 6vw, 3.4rem);
-      letter-spacing: -0.04em;
-      line-height: 1;
-      margin: 0 0 0.35rem;
+    .brand {
+      font-family: var(--display);
+      font-size: clamp(2.8rem, 10vw, 4.2rem);
+      font-weight: 600;
+      letter-spacing: -0.045em;
+      line-height: 0.95;
+      margin: 0;
     }
-    .lead { color: var(--muted); margin: 0 0 1.75rem; max-width: 34rem; }
-    .panel {
+    .lead {
+      margin: 0.85rem 0 0;
+      color: var(--muted);
+      max-width: 34rem;
+    }
+    .lead a { color: var(--accent); }
+    .nav {
+      margin: 1.25rem 0 0;
+      font-size: 0.9rem;
+    }
+    .nav a { color: var(--muted); margin-right: 1rem; }
+    section {
+      margin-top: 2rem;
+      padding-top: 1.35rem;
       border-top: 1px solid var(--line);
-      padding: 1.25rem 0 0.25rem;
-      margin-top: 1.25rem;
     }
-    .panel h2 {
-      font-size: 0.78rem;
-      letter-spacing: 0.08em;
+    section h2 {
+      margin: 0 0 0.9rem;
+      font-size: 0.75rem;
+      letter-spacing: 0.1em;
       text-transform: uppercase;
       color: var(--muted);
       font-weight: 600;
-      margin: 0 0 0.85rem;
     }
-    .row { display: flex; flex-wrap: wrap; gap: 0.6rem; margin-bottom: 1rem; }
+    .row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.55rem;
+      align-items: center;
+    }
     button {
       appearance: none;
       border: 1px solid var(--ink);
       background: var(--ink);
       color: var(--paper);
-      padding: 0.7rem 1rem;
+      padding: 0.7rem 1.05rem;
       font: 600 0.95rem/1 var(--sans);
       cursor: pointer;
     }
     button.secondary { background: transparent; color: var(--ink); }
     button:disabled { opacity: 0.4; cursor: not-allowed; }
+    button:hover:not(:disabled) { background: var(--accent); border-color: var(--accent); color: var(--paper); }
+    button.secondary:hover:not(:disabled) { background: transparent; color: var(--accent); border-color: var(--accent); }
     label {
       display: block;
-      font-size: 0.8rem;
-      letter-spacing: 0.04em;
+      margin: 0.95rem 0 0.35rem;
+      font-size: 0.75rem;
+      letter-spacing: 0.06em;
       text-transform: uppercase;
       color: var(--muted);
-      margin: 0.9rem 0 0.35rem;
     }
-    textarea, input[type="text"], input[type="url"] {
+    input, textarea {
       width: 100%;
       border: 1px solid var(--line);
       background: #fffdf8;
       color: var(--ink);
       padding: 0.75rem;
       font: 0.85rem/1.4 var(--mono);
-      resize: vertical;
     }
+    textarea { resize: vertical; }
     .grid {
       display: grid;
       grid-template-columns: 1fr 1fr;
-      gap: 0.75rem 1.25rem;
+      gap: 0.85rem 1.25rem;
+      margin-top: 1rem;
     }
     @media (max-width: 560px) { .grid { grid-template-columns: 1fr; } }
     .stat-label {
-      font-size: 0.72rem;
+      font-size: 0.7rem;
       letter-spacing: 0.06em;
       text-transform: uppercase;
       color: var(--muted);
     }
     .stat-value {
-      font: 600 1.05rem/1.3 var(--mono);
+      margin-top: 0.2rem;
+      font: 600 1.05rem/1.35 var(--mono);
       word-break: break-all;
-      margin-top: 0.15rem;
     }
-    .stat-value.accent { color: var(--accent); font-size: 1.35rem; }
-    .addr {
-      font: 700 0.95rem/1.35 var(--mono);
-      word-break: break-all;
+    .stat-value.lg {
       color: var(--accent);
+      font-size: 1.4rem;
     }
-    .note { color: var(--muted); font-size: 0.85rem; margin: 0.35rem 0 0; }
-    .warn { margin-top: 0.85rem; color: var(--warn); font-size: 0.88rem; }
-    .err { color: #a11; margin: 0.75rem 0; font-size: 0.9rem; }
-    .ok { color: var(--accent); font-size: 0.9rem; margin: 0.5rem 0; }
-    .status { color: var(--muted); font-size: 0.85rem; min-height: 1.2em; }
-    details { margin-top: 0.75rem; }
-    details summary {
-      cursor: pointer;
+    .addr {
+      font: 700 0.95rem/1.4 var(--mono);
+      color: var(--accent);
+      word-break: break-all;
+    }
+    .live {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
       color: var(--muted);
       font-size: 0.85rem;
     }
-    .live { display: inline-flex; align-items: center; gap: 0.4rem; }
     .dot {
-      width: 0.55rem; height: 0.55rem; border-radius: 50%;
+      width: 0.55rem;
+      height: 0.55rem;
+      border-radius: 50%;
       background: var(--line);
     }
     .dot.on { background: var(--accent); }
-    .dot.off { background: #a11; }
+    .dot.off { background: var(--err); }
+    .status { color: var(--muted); font-size: 0.9rem; min-height: 1.3em; margin: 0.65rem 0 0; }
+    .err { color: var(--err); font-size: 0.9rem; margin: 0.65rem 0 0; }
+    .ok { color: var(--accent); font-size: 0.9rem; margin: 0.65rem 0 0; }
+    .note { color: var(--muted); font-size: 0.85rem; margin: 0.4rem 0 0; }
+    .warn { color: var(--warn); font-size: 0.88rem; margin: 0.85rem 0 0; }
+    details { margin-top: 1rem; }
+    details summary { cursor: pointer; color: var(--muted); font-size: 0.85rem; }
     [hidden] { display: none !important; }
   </style>
 </head>
 <body>
   <main>
-    <h1>SIKKA</h1>
+    <h1 class="brand">SIKKA</h1>
     <p class="lead">
-      Browser wallet. Keys stay in this page; the node only sees signed
-      transactions. Amounts are SIKKA (1 SIKKA = 10⁹ CHILLAR).
-      Need multiple receive addresses from one seed?
-      <a href="/walletpro.html">Wallet pro</a>.
+      Simple browser wallet. Keys stay on this page; the node only sees signed
+      transactions. Amounts are in SIKKA (1 = 10⁹ CHILLAR).
+    </p>
+    <p class="nav">
+      <a href="/">Home</a>
+      <a href="/walletpro.html">Wallet pro</a>
+      <a href="/address.html">Verify address</a>
     </p>
 
-    <div class="panel" style="border-top:0;padding-top:0;margin-top:0">
+    <section>
       <h2>Node</h2>
       <label for="node">JSON-RPC endpoint</label>
-      <input id="node" type="url" spellcheck="false" value="" />
-      <div class="row" style="margin-top:0.75rem;margin-bottom:0">
-        <button id="refreshNet" class="secondary" type="button" disabled>Refresh network</button>
-        <span class="status live" id="netDot"><span class="dot" id="dot"></span><span id="netStatus">…</span></span>
+      <input id="node" type="url" spellcheck="false" />
+      <div class="row" style="margin-top:0.75rem">
+        <button id="refreshNet" class="secondary" type="button" disabled>Refresh</button>
+        <span class="live"><span class="dot" id="dot"></span><span id="netStatus">…</span></span>
       </div>
-      <div class="grid" id="netStats" style="margin-top:1rem" hidden>
+      <div class="grid" id="netStats" hidden>
         <div><div class="stat-label">Height</div><div class="stat-value" id="nHeight">—</div></div>
         <div><div class="stat-label">Supply</div><div class="stat-value" id="nSupply">—</div></div>
         <div><div class="stat-label">Bonded</div><div class="stat-value" id="nBonded">—</div></div>
         <div><div class="stat-label">Validators</div><div class="stat-value" id="nVals">—</div></div>
         <div><div class="stat-label">Peers / mempool</div><div class="stat-value" id="nPeers">—</div></div>
       </div>
-    </div>
+    </section>
 
-    <div class="panel">
-      <h2>Wallet</h2>
+    <section>
+      <h2>Keys</h2>
       <div class="row">
         <button id="generate" type="button" disabled>Generate</button>
         <button id="restore" class="secondary" type="button" disabled>Restore</button>
@@ -160,51 +195,36 @@
       </div>
       <p class="status" id="status">Loading crypto…</p>
       <p class="err" id="error" hidden></p>
-
       <label for="seed">Seed (32-byte hex) or keystore JSON</label>
-      <input id="seed" type="text" spellcheck="false"
-        placeholder="64 hex characters, or paste sikka_key.json" />
+      <input id="seed" type="text" spellcheck="false" placeholder="64 hex chars, or paste sikka_key.json" />
       <p class="note">Also accepts a full 4896-byte ML-DSA-87 private key.</p>
-    </div>
+    </section>
 
-    <div class="panel" id="accountPanel" hidden>
+    <section id="accountPanel" hidden>
       <h2>Account</h2>
       <label>Address</label>
-      <div class="addr" id="address"></div>
-      <div class="grid" style="margin-top:1rem">
-        <div>
-          <div class="stat-label">Balance</div>
-          <div class="stat-value accent" id="balance">—</div>
-        </div>
-        <div>
-          <div class="stat-label">Battery</div>
-          <div class="stat-value" id="battery">—</div>
-        </div>
-        <div>
-          <div class="stat-label">Nonce / next</div>
-          <div class="stat-value" id="nonce">—</div>
-        </div>
-        <div>
-          <div class="stat-label">Bond</div>
-          <div class="stat-value" id="bond">—</div>
-        </div>
+      <div class="addr" id="address">—</div>
+      <div class="grid">
+        <div><div class="stat-label">Balance</div><div class="stat-value lg" id="balance">—</div></div>
+        <div><div class="stat-label">Battery</div><div class="stat-value" id="battery">—</div></div>
+        <div><div class="stat-label">Nonce / next</div><div class="stat-value" id="nonce">—</div></div>
+        <div><div class="stat-label">Bond</div><div class="stat-value" id="bond">—</div></div>
       </div>
-      <div class="row" style="margin-top:1rem;margin-bottom:0">
+      <div class="row" style="margin-top:1rem">
         <button id="refreshBal" class="secondary" type="button">Refresh balance</button>
       </div>
-
       <details>
-        <summary>Keys</summary>
+        <summary>Show keys</summary>
         <label for="public">Public key</label>
         <textarea id="public" rows="3" readonly spellcheck="false"></textarea>
-        <label for="private">Full private key</label>
+        <label for="private">Private key</label>
         <textarea id="private" rows="3" readonly spellcheck="false"></textarea>
       </details>
-    </div>
+    </section>
 
-    <div class="panel" id="sendPanel" hidden>
+    <section id="sendPanel" hidden>
       <h2>Send</h2>
-      <label for="to">Recipient address</label>
+      <label for="to">Recipient</label>
       <input id="to" type="text" spellcheck="false" placeholder="0x…" />
       <label for="amount">Amount (SIKKA)</label>
       <input id="amount" type="text" spellcheck="false" placeholder="1.5" />
@@ -213,12 +233,10 @@
       </div>
       <p class="ok" id="sendOk" hidden></p>
       <p class="warn">
-        Signing uses ML-DSA-87 (<code>SIKKA/tx/v1</code>, context
-        <code>SIKKA-v1</code>) bound to the node’s <code>chain_id</code>.
-        Nothing is sent until you click Send. Prefer <code>sikka new</code> for
-        long-term keys.
+        Signs with ML-DSA-87 (<code>SIKKA/tx/v1</code>, context <code>SIKKA-v1</code>).
+        Nothing is broadcast until you click Send.
       </p>
-    </div>
+    </section>
   </main>
 
   <script type="module">
@@ -237,17 +255,27 @@
     const SIGNING_CONTEXT = new TextEncoder().encode("SIKKA-v1");
     const DEFAULT_NODE = location.protocol.startsWith("http")
       ? location.origin
-      : "https://1.sikkalabs.com";
+      : "http://127.0.0.1:64552";
     const jsonBig = JSONBig({ useNativeBigInt: true, alwaysParseAsBig: false });
 
     const $ = (id) => document.getElementById(id);
-    $("node").value = DEFAULT_NODE;
+
+    /** @type {null | {
+     *   address: string,
+     *   publicKey: Uint8Array,
+     *   secretKey: Uint8Array,
+     *   private_key: string,
+     *   seed?: string,
+     *   next_nonce?: bigint,
+     * }} */
     let wallet = null;
     let rpcId = 1;
-    /** @type {string|null} chain id from chain.info */
+    /** @type {string|null} */
     let chainId = null;
-    /** @type {Uint8Array|null} genesis fingerprint from chain.info */
+    /** @type {Uint8Array|null} */
     let genesisFingerprint = null;
+
+    $("node").value = DEFAULT_NODE;
 
     function hex(bytes) {
       return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
@@ -296,7 +324,6 @@
       return Uint8Array.of(v & 0xff, (v >>> 8) & 0xff, (v >>> 16) & 0xff, (v >>> 24) & 0xff);
     }
 
-    /** Writer::str: u32 little-endian length + utf8 bytes. */
     function encodeStr(text) {
       const bytes = new TextEncoder().encode(text);
       return concat(u32le(bytes.length), bytes);
@@ -326,16 +353,13 @@
         throw new Error("not a decimal amount");
       }
       if (!wholeRaw && !fracRaw) throw new Error("empty amount");
-      const whole = BigInt(wholeRaw || "0");
-      const frac = BigInt(fracRaw.padEnd(9, "0") || "0");
-      return whole * CHILLAR_PER_SIKKA + frac;
+      return BigInt(wholeRaw || "0") * CHILLAR_PER_SIKKA + BigInt(fracRaw.padEnd(9, "0") || "0");
     }
 
     function nodeUrl() {
       return ($("node").value || DEFAULT_NODE).trim().replace(/\/+$/, "");
     }
 
-    /** JSON with BigInt amounts written as raw integers (not quoted). */
     function stringify(value) {
       if (typeof value === "bigint") return value.toString();
       if (value === null || typeof value !== "object") return JSON.stringify(value);
@@ -347,12 +371,7 @@
     }
 
     async function rpc(method, params = null) {
-      const body = stringify({
-        jsonrpc: "2.0",
-        id: rpcId++,
-        method,
-        params,
-      });
+      const body = stringify({ jsonrpc: "2.0", id: rpcId++, method, params });
       const res = await fetch(`${nodeUrl()}/api/rpc`, {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -381,20 +400,29 @@
       $("netStatus").textContent = label;
     }
 
+    async function ensureChainBinding() {
+      if (chainId && genesisFingerprint) {
+        return { chainId, genesisFingerprint };
+      }
+      const info = await rpc("chain.info");
+      if (typeof info.chain_id !== "string" || !info.chain_id) {
+        throw new Error("node did not return chain_id");
+      }
+      if (typeof info.genesis_fingerprint !== "string" || !info.genesis_fingerprint) {
+        throw new Error("node did not return genesis_fingerprint");
+      }
+      chainId = info.chain_id;
+      genesisFingerprint = unhex(info.genesis_fingerprint);
+      if (genesisFingerprint.length !== 32) {
+        throw new Error("genesis_fingerprint must be 32 bytes");
+      }
+      return { chainId, genesisFingerprint };
+    }
+
     async function refreshNetwork() {
       try {
         const info = await rpc("chain.info");
-        if (typeof info.chain_id !== "string" || !info.chain_id) {
-          throw new Error("node did not return chain_id");
-        }
-        chainId = info.chain_id;
-        if (typeof info.genesis_fingerprint !== "string" || !info.genesis_fingerprint) {
-          throw new Error("node did not return genesis_fingerprint");
-        }
-        genesisFingerprint = unhex(info.genesis_fingerprint);
-        if (genesisFingerprint.length !== 32) {
-          throw new Error("genesis_fingerprint must be 32 bytes");
-        }
+        await ensureChainBinding();
         $("netStats").hidden = false;
         $("nHeight").textContent = String(info.height);
         $("nSupply").textContent = `${formatSikka(info.total_supply)} SIKKA`;
@@ -402,7 +430,6 @@
         $("nVals").textContent = String(info.active_validators);
         $("nPeers").textContent = `${info.peers} / ${info.mempool}`;
         setNet(true, `online · height ${info.height}`);
-        fail("");
       } catch (e) {
         chainId = null;
         genesisFingerprint = null;
@@ -437,30 +464,6 @@
       }
     }
 
-    async function ensureChainBinding() {
-      if (chainId && genesisFingerprint) {
-        return { chainId, genesisFingerprint };
-      }
-      const info = await rpc("chain.info");
-      if (typeof info.chain_id !== "string" || !info.chain_id) {
-        throw new Error("node did not return chain_id");
-      }
-      if (typeof info.genesis_fingerprint !== "string" || !info.genesis_fingerprint) {
-        throw new Error("node did not return genesis_fingerprint");
-      }
-      chainId = info.chain_id;
-      genesisFingerprint = unhex(info.genesis_fingerprint);
-      if (genesisFingerprint.length !== 32) {
-        throw new Error("genesis_fingerprint must be 32 bytes");
-      }
-      return { chainId, genesisFingerprint };
-    }
-
-    async function ensureChainId() {
-      return (await ensureChainBinding()).chainId;
-    }
-
-    /** Normalize hex address to `0x` + lowercase; must be 32 bytes. */
     function normalizeAddress(text) {
       const bytes = unhex(text);
       if (bytes.length !== 32) {
@@ -469,8 +472,6 @@
       return "0x" + hex(bytes);
     }
 
-    // Matches Transaction::signing_bytes (v1):
-    // tag || str(chain_id) || genesis_fingerprint || kind || from || to || amount || nonce || timestamp || public_key
     function signingBytes({
       chainId: id,
       genesisFingerprint: fingerprint,
@@ -482,9 +483,7 @@
       timestamp,
       publicKey,
     }) {
-      if (typeof id !== "string" || !id) {
-        throw new Error("chain_id required for signing");
-      }
+      if (typeof id !== "string" || !id) throw new Error("chain_id required for signing");
       if (!(fingerprint instanceof Uint8Array) || fingerprint.length !== 32) {
         throw new Error("genesis_fingerprint must be 32 raw bytes");
       }
@@ -510,7 +509,6 @@
 
     function signTransfer(toHex, amountChillar, nonce, binding) {
       const from = unhex(wallet.address);
-      if (from.length !== 32) throw new Error("wallet address corrupt");
       const toAddr = normalizeAddress(toHex);
       const to = unhex(toAddr);
       if (hex(from) === hex(to)) throw new Error("cannot send to yourself");
@@ -527,9 +525,7 @@
         timestamp,
         publicKey: wallet.publicKey,
       });
-      const signature = ml_dsa87.sign(msg, wallet.secretKey, {
-        context: SIGNING_CONTEXT,
-      });
+      const signature = ml_dsa87.sign(msg, wallet.secretKey, { context: SIGNING_CONTEXT });
       if (signature.length !== SIG_LEN) {
         throw new Error(`signature length ${signature.length}, expected ${SIG_LEN}`);
       }
@@ -542,33 +538,26 @@
         timestamp,
         chain_id: binding.chainId,
         genesis_fingerprint: hex(binding.genesisFingerprint),
-        // PublicKey / Signature JSON: hex without 0x (matches CLI keystore).
         public_key: hex(wallet.publicKey),
         signature: hex(signature),
       };
     }
 
-    function show({ secretKey, publicKey, seed }) {
-      if (secretKey.length !== SK_LEN) {
-        throw new Error(`private key must be ${SK_LEN} bytes`);
-      }
-      if (publicKey.length !== PK_LEN) {
-        throw new Error(`public key must be ${PK_LEN} bytes`);
-      }
+    function openWallet({ secretKey, publicKey, seed }) {
+      if (secretKey.length !== SK_LEN) throw new Error(`private key must be ${SK_LEN} bytes`);
+      if (publicKey.length !== PK_LEN) throw new Error(`public key must be ${PK_LEN} bytes`);
       wallet = {
         address: "0x" + hex(sha3_256(publicKey)),
         publicKey,
         secretKey,
-        public_key: "0x" + hex(publicKey),
         private_key: hex(secretKey),
-        scheme: "ML-DSA-87",
       };
       if (seed && seed.length === SEED_LEN) {
         wallet.seed = hex(seed);
         $("seed").value = wallet.seed;
       }
       $("private").value = wallet.private_key;
-      $("public").value = wallet.public_key;
+      $("public").value = "0x" + hex(publicKey);
       $("address").textContent = wallet.address;
       $("accountPanel").hidden = false;
       $("sendPanel").hidden = false;
@@ -581,7 +570,7 @@
       if (seed.length !== SEED_LEN) {
         throw new Error(`seed must be ${SEED_LEN} bytes (64 hex chars)`);
       }
-      show({ ...ml_dsa87.keygen(seed), seed });
+      openWallet({ ...ml_dsa87.keygen(seed), seed });
     }
 
     $("generate").onclick = () => {
@@ -605,9 +594,7 @@
             $("status").textContent = "Restored from keystore seed.";
             return;
           }
-          if (!json.private_key) {
-            throw new Error("keystore missing private_key");
-          }
+          if (!json.private_key) throw new Error("keystore missing private_key");
           const secretKey = unhex(json.private_key);
           const publicKey = ml_dsa87.getPublicKey(secretKey);
           if (json.public_key) {
@@ -616,7 +603,7 @@
               throw new Error("keystore public_key does not match private_key");
             }
           }
-          show({ secretKey, publicKey });
+          openWallet({ secretKey, publicKey });
           $("status").textContent = "Restored from keystore JSON.";
           return;
         }
@@ -628,7 +615,7 @@
           return;
         }
         if (bytes.length === SK_LEN) {
-          show({
+          openWallet({
             secretKey: bytes,
             publicKey: ml_dsa87.getPublicKey(bytes),
           });
@@ -647,10 +634,9 @@
       if (!wallet) return;
       const payload = {
         address: wallet.address,
-        // Match CLI keystore: public_key hex without 0x.
         public_key: hex(wallet.publicKey),
         private_key: wallet.private_key,
-        scheme: wallet.scheme,
+        scheme: "ML-DSA-87",
       };
       if (wallet.seed) payload.seed = wallet.seed;
       const blob = new Blob([JSON.stringify(payload, null, 2) + "\n"], {
@@ -681,7 +667,6 @@
         if (!to) throw new Error("recipient required");
         const amount = parseSikka($("amount").value);
         if (amount <= 0n) throw new Error("amount must be positive");
-
         const account = await rpc("account.get", { address: wallet.address });
         const nonce = asBig(account.next_nonce);
         const binding = await ensureChainBinding();

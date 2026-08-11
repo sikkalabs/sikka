@@ -85,6 +85,11 @@ export function normalizeAddress(text) {
 }
 
 function normalizeHash(text) {
+  // Accept raw 32-byte digests (wallets often pin genesis as Uint8Array) or hex.
+  if (text instanceof Uint8Array) {
+    if (text.length !== 32) throw new Error("hash must be 32 bytes");
+    return text;
+  }
   const bytes = unhex(text);
   if (bytes.length !== 32) throw new Error("hash must be 32 bytes");
   return bytes;
@@ -343,7 +348,7 @@ export function verifyCheckpointSignatures(checkpoint, validators) {
  * @param {object} options
  * @param {Array<{address, publicKey, bond}>} [options.pinnedValidators] — genesis set pinned OOB
  * @param {Array<{address, publicKey, bond}>} [options.validators] — active set (e.g. from validator.list)
- * @param {string} [options.genesisFingerprint] — if set, must match chainInfo.genesis_fingerprint
+ * @param {string|Uint8Array} [options.genesisFingerprint] — pin; must match checkpoint header
  * @param {object} [options.chainInfo] — chain.info result for genesis cross-check
  * @returns {{ address, account, balance, nonce, height, stateRoot, signatures }}
  */
