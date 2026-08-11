@@ -258,6 +258,36 @@ fn spending_more_than_the_battery_quota_is_rejected() {
 }
 
 #[test]
+fn admission_credits_regenerated_battery() {
+    let mut f = Fixture::new();
+    let bob = Fixture::address(&f.bob);
+    let now = GENESIS_TIME + 600;
+
+    // Fund Bob: stored battery stays 0, last_regen_time = now.
+    f.apply(
+        &[Transaction::transfer(&f.alice, bob, 1_000, 0, now, f.chain_id(), f.genesis_fingerprint()).unwrap()],
+        now,
+    );
+    assert_eq!(f.ledger.account(&bob).unwrap().battery, 0);
+    assert_eq!(f.ledger.account(&bob).unwrap().battery_at(now + 600), MAX_BATTERY);
+
+    // Ten minutes later Bob has regenerated battery on RPC, and mempool
+    // admission must see the same credit (would_apply pins economic_timestamp).
+    let later = now + 600;
+    let tx = Transaction::transfer(
+        &f.bob,
+        Address([7u8; 32]),
+        10,
+        0,
+        later,
+        f.chain_id(),
+        f.genesis_fingerprint(),
+    )
+    .unwrap();
+    f.ledger.would_apply(&[tx], later).unwrap();
+}
+
+#[test]
 fn invalid_transactions_are_rejected_without_touching_state() {
     let f = Fixture::new();
     let alice = Fixture::address(&f.alice);

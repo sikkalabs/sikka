@@ -563,10 +563,15 @@ impl Ledger {
     /// node's mempool — battery is only charged when a transaction executes.
     ///
     /// The rules come from `apply_transaction`, the same code a checkpoint runs,
-    /// so admission cannot drift away from execution.
+    /// so admission cannot drift away from execution. `economic_timestamp` is
+    /// pinned to the admission clock (`timestamp`) so regenerated battery is
+    /// visible here the same way `battery_now` is on RPC — without that pin,
+    /// settlement uses 0 and accounts stuck at stored battery 0 can never enter
+    /// the mempool.
     pub fn would_apply(&self, transactions: &[Transaction], timestamp: u64) -> Result<()> {
         let mut overlay = Overlay::new(self);
-        let context = ExecutionContext::new(self.meta.height + 1, timestamp, Address::default());
+        let mut context = ExecutionContext::new(self.meta.height + 1, timestamp, Address::default());
+        context.economic_timestamp = timestamp;
         for tx in transactions {
             Self::apply_transaction(&mut overlay, tx, &context, self.meta.total_supply)?;
         }

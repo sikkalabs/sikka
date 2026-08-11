@@ -24,7 +24,7 @@ every transfer ever made.
 - **Private by default** — without a permanent tx log, past payments are not
   publicly reconstructable. Peer mesh is Tor-only (signed JSON over onion
   HTTP); wallets may use an optional clearnet reverse proxy to the same node.
-- **Built for micropayments** — feeless transfers and a regenerating spam battery (+1/min, cap 100) make high-frequency, low-value payments practical. Fresh accounts start at 0 battery to prevent funding-sybil attacks.
+- **Built for micropayments** — feeless transfers and a regenerating spam battery (+1/min, cap 10) make high-frequency, low-value payments practical. Fresh accounts start at 0 battery to prevent funding-sybil attacks.
 - **Agent-ready** — plain HTTP + JSON-RPC. One endpoint to check balances,
   send, and bond — no heavy SDKs required.
 - **Post-quantum** — every signature is **ML-DSA-87** (FIPS 204); hashes are
@@ -46,7 +46,7 @@ every transfer ever made.
 | --- | --- |
 | Genesis supply | **19,960,907** SIKKA (1 SIKKA = 10⁹ CHILLAR) |
 | Consensus | Checkpoint voting · ≥2/3 bonded stake · round-robin proposer |
-| Spam control | Battery (+1/min, cap 100, 1 per tx) |
+| Spam control | Battery (+1/min, cap 10, 1 per tx) |
 | Transport | Signed JSON over HTTP · Tor-only peer mesh (optional clearnet for wallets) |
 | Repo | [github.com/sikkalabs/sikka](https://github.com/sikkalabs/sikka) |
 

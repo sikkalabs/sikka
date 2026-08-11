@@ -633,12 +633,12 @@ account a **battery** — a rate limiter, not a price.
 
 | Constant | Value |
 | --- | ---: |
-| `MAX_BATTERY` | 100 |
+| `MAX_BATTERY` | 10 |
 | `BATTERY_REGEN_SECS` | 60 s |
 | `BATTERY_COST_PER_TX` | 1 |
 
 ```
-battery_at(now) = min(100, battery + ⌊(now − last_regen_time)/60⌋)
+battery_at(now) = min(10, battery + ⌊(now − last_regen_time)/60⌋)
 ```
 
 Key properties:
@@ -648,18 +648,18 @@ Key properties:
 - Every confirmed transaction costs exactly 1 battery.
 - **Newly funded accounts start at 0 battery**, anchored at funding time, so
   an attacker who mints/funds fresh addresses cannot immediately spam.
-- A full battery allows 100 transactions; one battery per minute sustains
+- A full battery allows 10 transactions; one battery per minute sustains
   1 tx/min forever — comfortable for real use, painful for spam.
 
 ```
   battery
-    100 ┤●───────────────────────────────   cap
+     10 ┤●───────────────────────────────   cap
        │ ·
        │   ·
        │     ·          +1 per 60s
-    50 ┤        · ·
+      5 ┤        · ·
        │            · · ·
-     0 ┤──────────────────────────────► time
+      0 ┤──────────────────────────────► time
 ```
 
 ---
@@ -1094,7 +1094,7 @@ multi-receive is left to wallets you write yourself (see `docs/wallets.md`).
 | Threat | Defence |
 | --- | --- |
 | Quantum computer forges signatures | ML-DSA-87 (Cat-5) everywhere; no ECDSA/Ed25519 |
-| Transaction spam | per-account battery (+1/min, cap 100, 1/tx); fresh accounts start empty |
+| Transaction spam | per-account battery (+1/min, cap 10, 1/tx); fresh accounts start empty |
 | Sybil funding → spam | faucet/target accounts start at 0 battery; genesis accounts start full (cannot be minted) |
 | Equivocation / double-signing | the only slashable offence; bond burned on proof |
 | Long-range fork | weak-subjectivity gap = 1; `SIKKA_TRUSTED_CHECKPOINT` pin |
@@ -1155,7 +1155,7 @@ loop every PROPOSE_INTERVAL:
 ```
 function battery_at(account, now):
     elapsed_minutes ← (now − account.last_regen_time) / 60
-    return min(100, account.battery + elapsed_minutes)
+    return min(10, account.battery + elapsed_minutes)
 ```
 
 ### 21.3 Checkpoint inflation (exact integer)
@@ -1220,7 +1220,7 @@ loop (relayer, watching Burned):                         // native side
 | --- | --- |
 | **SIKKA** | the human unit; `1 SIKKA = 10⁹ CHILLAR` |
 | **CHILLAR** | the base integer unit of account; the only unit that exists in storage |
-| **Battery** | per-account anti-spam allowance, +1/min, cap 100, 1/tx |
+| **Battery** | per-account anti-spam allowance, +1/min, cap 10, 1/tx |
 | **Checkpoint** | signed commitment to the full state; the unit of finality |
 | **Prevote / Precommit** | the two consensus vote kinds |
 | **Quorum** | `ceil(⅔ × total_active_bond)` bonded stake |

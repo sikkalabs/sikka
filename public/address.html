@@ -435,7 +435,7 @@
         $("balance").textContent = formatSikka(total);
         $("liquid").textContent = formatSikka(liquid);
         $("bond").textContent = bond > 0n ? formatSikka(bond) : "—";
-        $("battery").textContent = `${info.battery_now} / 100`;
+        $("battery").textContent = `${info.battery_now} / 10`;
         $("nonce").textContent = `${info.nonce} / ${info.next_nonce}`;
 
         const existsPill = $("existsPill");

@@ -125,13 +125,13 @@ mod tests {
         let a = Account {
             balance: 0,
             nonce: 0,
-            battery: 10,
+            battery: 3,
             last_regen_time: 1_000,
         };
-        assert_eq!(a.battery_at(1_000), 10);
-        assert_eq!(a.battery_at(1_059), 10);
-        assert_eq!(a.battery_at(1_060), 11);
-        assert_eq!(a.battery_at(1_000 + 60 * 5), 15);
+        assert_eq!(a.battery_at(1_000), 3);
+        assert_eq!(a.battery_at(1_059), 3);
+        assert_eq!(a.battery_at(1_060), 4);
+        assert_eq!(a.battery_at(1_000 + 60 * 5), 8);
     }
 
     #[test]
@@ -139,7 +139,7 @@ mod tests {
         let a = Account {
             balance: 0,
             nonce: 0,
-            battery: 99,
+            battery: MAX_BATTERY.saturating_sub(1),
             last_regen_time: 0,
         };
         assert_eq!(a.battery_at(60 * 1_000_000), MAX_BATTERY);

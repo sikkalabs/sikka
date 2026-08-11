@@ -4,7 +4,7 @@
 pub const CHILLAR_PER_SIKKA: u64 = 1_000_000_000;
 
 /// Anti-spam battery ceiling per account.
-pub const MAX_BATTERY: u32 = 100;
+pub const MAX_BATTERY: u32 = 10;
 
 /// One battery unit regenerates every 60 seconds of signed transaction time.
 pub const BATTERY_REGEN_SECS: u64 = 60;
