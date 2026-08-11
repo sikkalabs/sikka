@@ -587,9 +587,10 @@ randomised by default) yields the same id and cannot enter the mempool twice.
 
 ```
 function validate(tx, now):
-    check_static(tx, now)       // shape rules + |timestamp−now| ≤ 300 s
-    verify_signature(tx)        // ML-DSA-87, context "SIKKA-v1"
-    check_chain_id(tx)          // tx.chain_id == ledger.chain_id
+    check_static(tx, now)                 // shape rules + |timestamp−now| ≤ 300 s
+    verify_signature(tx)                  // ML-DSA-87, context "SIKKA-v1"
+    check_chain_id(tx)                    // tx.chain_id == ledger.chain_id
+    check_genesis_fingerprint(tx)         // tx.genesis_fingerprint == ledger fingerprint
 ```
 
 ### 9.5 Canonical ordering — nobody can front-run
@@ -1101,7 +1102,7 @@ multi-receive is left to wallets you write yourself (see `docs/wallets.md`).
 | Proposer front-running / reordering | canonical order `(from, nonce, id)`; replay produces identical roots |
 | Unsigned-CPU DoS on proposals | proposer signature verified *before* per-tx ML-DSA work |
 | Vote flood DoS | votes only tracked ≤ 1 height ahead; ML-DSA verified on arrival |
-| Replay across chains | `chain_id` bound into tx/vote/proposal/checkpoint domains |
+| Replay across chains | `chain_id` + `genesis_fingerprint` bound into tx/vote/proposal/checkpoint domains |
 | Overflow / non-determinism | integer-only arithmetic; `expm1_fixed`; checked adds |
 | Mempool memory DoS | capacity caps, eviction of oldest safe runs, nonce-gap purging, 600 s TTL |
 | Snapshot smuggling | re-derive supply & roots from the dump; chunk hashes verified |

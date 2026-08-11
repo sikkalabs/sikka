@@ -146,6 +146,11 @@ remains. Confirm a payment by reading the recipient's balance.
 production). `tor` is `{ status, detail }` where `status` is `disabled`,
 `checking`, `ok`, or `down` (onion self-check via SOCKS).
 
+Wallets must copy `chain_id` and `genesis_fingerprint` into every signed
+transaction (exact values from this call; do not invent them). The fingerprint
+is a 32-byte hash of the genesis config and distinguishes networks that share
+the same human-readable `chain_id`.
+
 ### `account.get`
 
 **Params:** `{ "address": "0x…" }`
@@ -206,8 +211,8 @@ Only the last 100 heights are retained.
 | `amount` | u64 | CHILLAR; `0` for unbond |
 | `nonce` | u64 | must match `next_nonce` |
 | `timestamp` | u64 | unix seconds; ±5 minutes of node clock |
-| `chain_id` | string | must match `chain.info.chain_id` |
-| `genesis_fingerprint` | hex (32 bytes) | must match `chain.info.genesis_fingerprint` |
+| `chain_id` | string | must match `chain.info.chain_id`; bound into the signature |
+| `genesis_fingerprint` | hex (32 bytes) | must match `chain.info.genesis_fingerprint`; bound into the signature |
 | `public_key` | hex (2592 bytes) | ML-DSA-87 |
 | `signature` | hex (4627 bytes) | context `SIKKA-v1` |
 
@@ -215,6 +220,11 @@ Signing payload:
 `SIKKA/tx/v1` ‖ `str(chain_id)` ‖ genesis_fingerprint ‖ kind_tag ‖ from ‖ to ‖ amount ‖ nonce ‖ timestamp ‖ public_key  
 (`str` = u32 LE length + UTF-8; integers are little-endian u64;  
 `transfer=0`, `bond=1`, `unbond=2`).
+
+`chain_id` and `genesis_fingerprint` prevent cross-network replay. Two chains
+can share a name (testnet reset, local fork) but not a genesis fingerprint; a
+payment signed for one will not verify on the other even if the same keys
+exist on both.
 
 ---
 

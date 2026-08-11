@@ -72,12 +72,20 @@ SIKKA/tx/v1 ‖ str(chain_id) ‖ genesis_fingerprint ‖ kind ‖ from ‖ to �
 
 `str(s)` is `u32` little-endian UTF-8 length + UTF-8 bytes (same as the Rust
 codec `Writer::str`).  
-`genesis_fingerprint`: 32 raw bytes from `chain.info`.  
+`genesis_fingerprint`: 32 raw bytes from `chain.info` — a hash of this
+network's genesis (allocations, validators, timestamp, etc.).  
 `kind`: transfer `0`, bond `1`, unbond `2`.  
 `from` / `to`: 32 raw address bytes.  
 `amount` / `nonce` / `timestamp`: little-endian `u64`.  
 `public_key`: raw 2592-byte ML-DSA-87 key (bound into the id and signature).  
 `amount` is CHILLAR. Bond/unbond use the zero address as `to`; unbond amount is `0`.
+
+Both `chain_id` and `genesis_fingerprint` are part of the signed payload and the
+transaction id. The node rejects any payment whose values do not match its
+ledger. `chain_id` alone is not enough: two networks can share the same human
+name (testnet reset, local fork, malicious twin) with different balances. The
+fingerprint binds the signature to one bootstrap, so a payment cannot be
+replayed on another chain that only shares keys or the same `chain_id`.
 
 4. Sign with ML-DSA-87 and context **`SIKKA-v1`**:
 
