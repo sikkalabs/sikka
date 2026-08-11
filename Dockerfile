@@ -1,8 +1,9 @@
 # SIKKA node image.
 #
-# Clearnet peer mesh: the container runs sikka-node and dials the hardcoded
-# bootstrap hosts (1/2/3.sikkalabs.com) over plain HTTP(S). Set SIKKA_NODE_URL
-# to the public URL peers should use to reach this node.
+# Tor-native peer mesh: entrypoint prepares deterministic HS keys, starts `tor`
+# (SOCKS + hidden service), then `sikka-node`. Peer advertise is the onion
+# derived from SIKKA_PRIVATE_KEY. Optional clearnet reverse proxies may front
+# :64552 for wallets; peers never dial clearnet.
 
 FROM rust:1.90-slim-trixie AS builder
 
@@ -16,7 +17,7 @@ RUN cargo build --release --locked --bin sikka-node --bin sikka \
 FROM debian:trixie-slim AS runtime
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates curl \
+    && apt-get install -y --no-install-recommends ca-certificates curl tor bash \
     && rm -rf /var/lib/apt/lists/* \
     && useradd --system --create-home --uid 10001 sikka \
     && mkdir -p /data \
@@ -24,6 +25,8 @@ RUN apt-get update \
 
 COPY --from=builder /build/target/release/sikka-node /usr/local/bin/sikka-node
 COPY --from=builder /build/target/release/sikka /usr/local/bin/sikka
+COPY docker/entrypoint.sh /usr/local/bin/sikka-entrypoint
+RUN chmod 755 /usr/local/bin/sikka-entrypoint
 
 USER sikka
 WORKDIR /data
@@ -33,9 +36,10 @@ EXPOSE 64552
 ENV SIKKA_LOG=info \
     SIKKA_KEYSTORE=/data/node_key.json \
     SIKKA_NODE=http://127.0.0.1:64552 \
-    SIKKA_DATA_DIR=/data
+    SIKKA_DATA_DIR=/data \
+    SIKKA_TOR_SOCKS=127.0.0.1:9050
 
-HEALTHCHECK --interval=15s --timeout=5s --start-period=30s --retries=8 \
+HEALTHCHECK --interval=15s --timeout=5s --start-period=90s --retries=8 \
     CMD curl -fsS http://127.0.0.1:64552/api/health > /dev/null || exit 1
 
-ENTRYPOINT ["/usr/local/bin/sikka-node"]
+ENTRYPOINT ["/usr/local/bin/sikka-entrypoint"]

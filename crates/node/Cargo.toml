@@ -24,6 +24,7 @@ sikka-checkpoint = { workspace = true }
 sikka-p2p = { workspace = true }
 sikka-rpc = { workspace = true }
 sikka-wallet = { workspace = true }
+sikka-onion = { workspace = true }
 axum = { workspace = true }
 tokio = { workspace = true }
 serde = { workspace = true }

@@ -1,16 +1,18 @@
 //! Node configuration.
 //!
-//! A few knobs stay as environment variables (`SIKKA_PRIVATE_KEY`,
-//! `SIKKA_NODE_URL`, …). Paths, listen port, and “act as a validator” are
-//! fixed so a normal `docker run` does not ask the operator to invent
-//! filesystem layout.
+//! Environment knobs: `SIKKA_PRIVATE_KEY`, `SIKKA_BOOTSTRAP`, `SIKKA_TOR_SOCKS`, …
+//! Advertise URL is always the deterministic Tor onion derived from the node
+//! key — there is no clearnet peer advertise env.
 
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::path::PathBuf;
 use std::time::Duration;
 
 use sikka_common::bytes::Hash;
-use sikka_common::constants::{BOOTSTRAP_NODES, BULK_REQUEST_TIMEOUT_SECS, DEFAULT_PORT};
+use sikka_common::constants::{
+    BOOTSTRAP_NODES, BULK_REQUEST_TIMEOUT_SECS, DEFAULT_PORT, DEFAULT_TOR_SOCKS,
+    PEER_REQUEST_TIMEOUT_SECS,
+};
 use sikka_common::error::{Error, Result};
 
 /// Operator-pinned trust anchor for a validator-changing snapshot gap.
@@ -35,10 +37,12 @@ pub struct NodeConfig {
     pub private_key: Option<String>,
     /// Address to bind the HTTP server to.
     pub listen: SocketAddr,
-    /// The URL other nodes should use to reach this one.
+    /// The URL other nodes should use to reach this one (Tor onion in production).
     pub advertise: String,
     /// Peers to try when the peer book is empty.
     pub bootstrap: Vec<String>,
+    /// SOCKS5h proxy for dialing `.onion` peers. `None` skips Tor (loopback tests).
+    pub tor_socks: Option<String>,
     /// Take part in consensus when bonded. Always `true` in production.
     pub validator: bool,
     /// Upper bound on transactions held in memory.
@@ -70,14 +74,16 @@ impl Default for NodeConfig {
             private_key: None,
             data_dir,
             listen: SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), DEFAULT_PORT),
-            advertise: format!("http://localhost:{DEFAULT_PORT}"),
+            // Placeholder until the key is loaded and the onion is derived.
+            advertise: format!("http://127.0.0.1:{DEFAULT_PORT}"),
             bootstrap: BOOTSTRAP_NODES.iter().map(|s| s.to_string()).collect(),
+            tor_socks: Some(DEFAULT_TOR_SOCKS.to_string()),
             validator: true,
             mempool_capacity: 50_000,
             propose_interval: Duration::from_millis(500),
             gossip_interval: Duration::from_secs(2),
             discovery_interval: Duration::from_secs(30),
-            request_timeout: Duration::from_secs(10),
+            request_timeout: Duration::from_secs(PEER_REQUEST_TIMEOUT_SECS),
             bulk_request_timeout: Duration::from_secs(BULK_REQUEST_TIMEOUT_SECS),
             trusted_checkpoint: None,
             max_checkpoint_delay: Duration::from_secs(30),
@@ -94,23 +100,23 @@ impl NodeConfig {
     pub fn from_env() -> Result<Self> {
         let mut config = Self::default();
 
+        if let Some(dir) = env("SIKKA_DATA_DIR") {
+            let data_dir = PathBuf::from(dir);
+            config.data_dir = data_dir.clone();
+            config.genesis_path = data_dir.join("genesis.json");
+            config.key_path = data_dir.join("node_key.json");
+        }
         if let Some(path) = env("SIKKA_GENESIS") {
             config.genesis_path = PathBuf::from(path);
         }
         if let Some(key) = env("SIKKA_PRIVATE_KEY") {
             config.private_key = Some(key);
         }
+        if let Some(path) = env("SIKKA_KEYSTORE") {
+            config.key_path = PathBuf::from(path);
+        }
 
         config.listen = SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), DEFAULT_PORT);
-
-        // Prefer SIKKA_NODE_URL; SIKKA_ADVERTISE remains as a compatibility alias.
-        config.advertise = match env("SIKKA_NODE_URL").or_else(|| env("SIKKA_ADVERTISE")) {
-            Some(url) => normalize_endpoint(&url),
-            None => {
-                let host = env("HOSTNAME").unwrap_or_else(|| "localhost".to_string());
-                format!("http://{host}:{DEFAULT_PORT}")
-            }
-        };
 
         if let Some(list) = env("SIKKA_BOOTSTRAP") {
             config.bootstrap = list
@@ -119,6 +125,13 @@ impl NodeConfig {
                 .filter(|s| !s.is_empty())
                 .map(normalize_endpoint)
                 .collect();
+        }
+        if let Some(socks) = env("SIKKA_TOR_SOCKS") {
+            if socks.eq_ignore_ascii_case("none") || socks.eq_ignore_ascii_case("off") {
+                config.tor_socks = None;
+            } else {
+                config.tor_socks = Some(socks);
+            }
         }
         if let Some(value) = env("SIKKA_TRUSTED_CHECKPOINT") {
             config.trusted_checkpoint = Some(parse_trusted_checkpoint(&value)?);
@@ -164,6 +177,23 @@ impl NodeConfig {
     pub fn snapshot_download_path(&self) -> PathBuf {
         self.data_dir.join("snapshots").join("download")
     }
+
+    /// Directory for Arti/C-Tor hidden-service key material.
+    pub fn arti_ctor_path(&self) -> PathBuf {
+        self.data_dir.join("arti").join("ctor")
+    }
+
+    pub fn arti_state_path(&self) -> PathBuf {
+        self.data_dir.join("arti").join("state")
+    }
+
+    pub fn arti_cache_path(&self) -> PathBuf {
+        self.data_dir.join("arti").join("cache")
+    }
+
+    pub fn arti_config_path(&self) -> PathBuf {
+        self.data_dir.join("arti").join("arti.toml")
+    }
 }
 
 fn env(key: &str) -> Option<String> {
@@ -208,7 +238,6 @@ mod tests {
             normalize_endpoint("http://node1:8080/"),
             "http://node1:8080"
         );
-        assert_eq!(normalize_endpoint("https://a.example"), "https://a.example");
         assert_eq!(normalize_endpoint("  node1:8080  "), "http://node1:8080");
     }
 
@@ -239,13 +268,13 @@ mod tests {
         assert!(config.validator);
         assert!(config.private_key.is_none());
         assert!(config.trusted_checkpoint.is_none());
+        assert_eq!(config.tor_socks.as_deref(), Some(DEFAULT_TOR_SOCKS));
         assert_eq!(
             config.bootstrap,
-            vec![
-                "https://1.sikkalabs.com".to_string(),
-                "https://2.sikkalabs.com".to_string(),
-                "https://3.sikkalabs.com".to_string(),
-            ]
+            BOOTSTRAP_NODES
+                .iter()
+                .map(|s| (*s).to_string())
+                .collect::<Vec<_>>()
         );
     }
 

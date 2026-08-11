@@ -64,6 +64,7 @@ impl Gossip {
         let client = PeerClient::new(&ClientConfig {
             timeout: node.config().request_timeout,
             bulk_timeout: node.config().bulk_request_timeout,
+            socks_proxy: node.config().tor_socks.clone(),
         })?;
         let (jobs, receiver) = mpsc::channel(QUEUE_CAP);
         let syncing = Arc::new(AtomicBool::new(false));

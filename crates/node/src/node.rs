@@ -167,6 +167,19 @@ impl Node {
 
         let genesis = load_genesis(&config)?;
         let keypair = load_keypair(&config)?;
+        let mut config = config;
+        let onion = sikka_onion::OnionIdentity::from_keypair(&keypair)
+            .map_err(|e| Error::Other(format!("onion derivation failed: {e}")))?;
+        if config.tor_socks.is_some() {
+            config.advertise = onion.advertise_url();
+            onion
+                .write_ctor_dir(config.arti_ctor_path())
+                .map_err(|e| Error::Other(format!("cannot write tor HS keys: {e}")))?;
+            info!(
+                onion = %onion.hostname,
+                "advertising Tor v3 onion for peer mesh"
+            );
+        }
         let address = Address(keypair.address_bytes());
         let public_key = PublicKey::new(*keypair.public_bytes());
 
@@ -2009,7 +2022,8 @@ mod tests {
             genesis_path: dir.path().join("genesis.json"),
             key_path: dir.path().join("node_key.json"),
             bootstrap: Vec::new(),
-            advertise: "http://solo:8080".into(),
+            advertise: "http://127.0.0.1:8080".into(),
+            tor_socks: None,
             ..NodeConfig::default()
         };
 
@@ -2088,7 +2102,8 @@ mod tests {
                 genesis_path: dir.path().join("genesis.json"),
                 key_path: dir.path().join("node_key.json"),
                 bootstrap: Vec::new(),
-                advertise: format!("http://pair-{index}:8080"),
+                advertise: format!("http://127.0.0.1:{}", 18080 + index),
+                tor_socks: None,
                 ..NodeConfig::default()
             });
             dirs.push(dir);

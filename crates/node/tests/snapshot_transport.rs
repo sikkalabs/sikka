@@ -51,6 +51,7 @@ async fn spawn_solo() -> (String, Arc<Node>, tempfile::TempDir) {
         request_timeout: Duration::from_secs(5),
         bulk_request_timeout: Duration::from_secs(30),
         max_checkpoint_delay: Duration::from_secs(0),
+        tor_socks: None,
         ..NodeConfig::default()
     };
 
@@ -104,6 +105,7 @@ async fn snapshot_download_uses_manifest_and_chunks() {
     let client = PeerClient::new(&ClientConfig {
         timeout: Duration::from_secs(5),
         bulk_timeout: Duration::from_secs(30),
+        socks_proxy: None,
     })
     .unwrap();
 

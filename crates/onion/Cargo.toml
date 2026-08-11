@@ -1,0 +1,19 @@
+[package]
+name = "sikka-onion"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Deterministic Tor v3 onion companion keys for SIKKA peer mesh"
+
+[dependencies]
+sikka-crypto.workspace = true
+ed25519-dalek = { version = "2", default-features = false, features = ["std"] }
+sha2 = "0.10"
+sha3.workspace = true
+hmac = "0.12"
+hex.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

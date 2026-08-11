@@ -991,12 +991,14 @@ entitled to vote is itself committed to in the header.
 
 ## 17. Networking
 
-### 14.1 Plain HTTP(S), signed JSON
+### 17.1 Tor-only peer mesh, signed JSON
 
 There is no bespoke wire protocol. Nodes are clients and servers over ordinary
-HTTP, so they sit behind any reverse proxy, need no long-lived connections, and
-transport encryption is optional — every message carries its own ML-DSA-87
-signature over its contents.
+HTTP. **Peer-to-peer federation is Tor-only:** each node derives a deterministic
+v3 onion from its ML-DSA seed, advertises `http://….onion`, and dials peers
+through SOCKS5h. Application-layer ML-DSA-87 signatures make transport TLS
+unnecessary. Optional clearnet reverse proxies may expose the same HTTP port
+for wallets and SDKs; honest nodes never use clearnet URLs as peer endpoints.
 
 | Endpoint | Role |
 | --- | --- |
@@ -1008,7 +1010,7 @@ signature over its contents.
 | `GET /api/state/snapshot/…` | chunked fast-sync |
 | `POST /api/rpc` | JSON-RPC for wallets/CLI/agents |
 
-### 14.2 Mempool sync with Bloom filters
+### 17.2 Mempool sync with Bloom filters
 
 Peer-to-peer mempool reconciliation uses a **Bloom filter** summarising what a
 node already holds; the peer replies only with the txs the filter does not

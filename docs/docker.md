@@ -2,17 +2,21 @@
 
 Image: [`ghcr.io/sikkalabs/sikka:latest`](https://github.com/orgs/sikkalabs/packages) (amd64 + arm64).
 
-**Peer mesh is clearnet HTTP(S).** The image runs `sikka-node` only. Bootstrap
-defaults to `https://1.sikkalabs.com`, `https://2.sikkalabs.com`, and
-`https://3.sikkalabs.com`. Set `SIKKA_NODE_URL` to the public URL other nodes
-should dial for this instance. Users hit plain HTTP on port **64552** (wallet /
-RPC / landing page) locally, or your reverse-proxied HTTPS hostname.
+**Peer mesh is Tor-only.** The image runs the Tor daemon (`tor`: SOCKS +
+hidden service) alongside `sikka-node`. Each node derives a deterministic v3
+onion from `SIKKA_PRIVATE_KEY` and advertises only that onion to peers.
+Bootstrap defaults to the two genesis validators' onions. HS key material is
+written under `/data/arti/ctor/` in C-Tor format (Arti ctor-compatible); an
+`arti.toml` is also generated for a future Arti sidecar swap.
 
-Data in `/data`, key at `/data/node_key.json`, and resumable state snapshot
-chunks under `/data/snapshots/`. Snapshot sync is chunked and zstd-compressed so
-interrupted downloads continue from the last verified chunk. Genesis is baked in
-(supply **19,960,907 SIKKA**: cold admin mint at `0x9949…447`, two validators
-with **10,000** and **4,000** bonded plus **20,000 liquid** each).
+Optional clearnet (e.g. `https://1.sikkalabs.com`) is an operator reverse proxy
+in front of port **64552** for wallets/RPC — peers never dial clearnet.
+
+Data in `/data`, key at `/data/node_key.json`, Tor HS keys under
+`/data/arti/ctor/`, and resumable state snapshot chunks under `/data/snapshots/`.
+Genesis is baked in (supply **19,960,907 SIKKA**: cold admin mint at
+`0x9949…447`, two validators with **10,000** and **4,000** bonded plus
+**20,000 liquid** each).
 
 ---
 
@@ -32,14 +36,13 @@ docker build -t ghcr.io/sikkalabs/sikka:latest .
 
 ## Run a node (Pi / validator)
 
-Map `64552` and advertise the clearnet URL peers should use:
+Only the seed is required — no domain, no advertise URL:
 
 ```bash
 docker run -d --name sikka \
   -p 64552:64552 \
   -v sikka-data:/data \
-  -e SIKKA_PRIVATE_KEY=<seed> \
-  -e SIKKA_NODE_URL=https://1.sikkalabs.com \
+  -e SIKKA_PRIVATE_KEY=<32-byte-seed-hex> \
   ghcr.io/sikkalabs/sikka:latest
 ```
 
@@ -50,12 +53,28 @@ curl -s http://127.0.0.1:64552/          # landing page
 open http://127.0.0.1:64552/wallet.html  # browser wallet on this node
 ```
 
-Joiners: different `--name`, volume, seed, and `SIKKA_NODE_URL`.
+Joiners: different `--name`, volume, and seed. Peers find each other over Tor
+via the hardcoded onion bootstrap (or `SIKKA_BOOTSTRAP`).
+
+### Local Tor mesh test (two validators)
+
+With `.env` containing `validator1=` / `validator2=` seeds:
+
+```bash
+./docker/test-tor-mesh.sh
+# or
+docker compose -f docker-compose.tor.yml --env-file .env up --build
+```
+
+Maps `64553` / `64554` for local RPC health checks while the peer mesh stays
+on onions. Docker needs outbound access to the Tor network for full onion
+discovery; the script still verifies boot, HS key derivation, SOCKS, and health
+when Tor relays are unreachable.
 
 ### Fund and bond (joiners)
 
-Genesis already stakes three operators. A new node needs coins, then a bond (at
-least ~0.001% of supply ≈ **200 SIKKA** on the default mint):
+Genesis already stakes the bootstrap operators. A new node needs coins, then a
+bond (at least ~0.001% of supply ≈ **200 SIKKA** on the default mint):
 
 ```bash
 docker exec sikka-2 sikka address
@@ -104,8 +123,9 @@ docker exec sikka sikka help
 | Variable | Default in image | Meaning |
 | --- | --- | --- |
 | `SIKKA_PRIVATE_KEY` | unset | 32-byte seed or full secret (hex); else a key is created under `/data` |
-| `SIKKA_NODE_URL` | `http://$HOSTNAME:64552` | public URL peers should dial for this node (`SIKKA_ADVERTISE` still works as an alias) |
-| `SIKKA_BOOTSTRAP` | `https://1.sikkalabs.com,https://2.sikkalabs.com,https://3.sikkalabs.com` | first peers |
+| `SIKKA_BOOTSTRAP` | genesis validators' `.onion` URLs | first Tor peers |
+| `SIKKA_TOR_SOCKS` | `127.0.0.1:9050` | SOCKS5h for onion dials (`none` disables Tor — tests only) |
+| `SIKKA_DATA_DIR` | `/data` | state, keystore, Tor HS keys |
 | `SIKKA_GENESIS` | baked-in if missing | optional custom genesis path |
 | `SIKKA_TRUSTED_CHECKPOINT` | unset | `<height>:<hash>` trust anchor required when fast-sync crosses more than one height |
 | `SIKKA_LOG` | `info` | tracing filter |

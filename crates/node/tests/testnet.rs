@@ -299,6 +299,7 @@ async fn spawn_node(
         discovery_interval: Duration::from_millis(500),
         request_timeout: Duration::from_secs(5),
         max_checkpoint_delay: Duration::from_secs(0),
+        tor_socks: None,
         ..NodeConfig::default()
     };
 
@@ -521,7 +522,8 @@ async fn validator_changing_gaps_require_a_pinned_checkpoint() {
             bootstrap: Vec::new(),
             validator: false,
             trusted_checkpoint,
-            ..NodeConfig::default()
+            tor_socks: None,
+        ..NodeConfig::default()
         };
         (Node::open(config).unwrap(), dir)
     };

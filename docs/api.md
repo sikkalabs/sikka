@@ -2,8 +2,9 @@
 
 Public pages live at the site root. Every machine API is under **`/api/`**.
 
-Nodes listen on port **64552**. Locally: `http://localhost:64552`. Public:
-`https://1.sikkalabs.com`.
+Nodes listen on port **64552**. Locally: `http://localhost:64552`. Optional
+public clearnet fronts (wallets/SDK): `https://1.sikkalabs.com`. Peer federation
+uses Tor onions only — not these clearnet hostnames.
 
 | Surface | Path |
 | --- | --- |

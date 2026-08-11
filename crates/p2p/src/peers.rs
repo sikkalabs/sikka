@@ -2,9 +2,11 @@
 //!
 //! A peer *is* an ML-DSA-87 key: its network identity and its account identity
 //! are the same 32-byte address. Announcements are signed, so a node can never
-//! be told that some other node lives at an attacker's endpoint, and there is
-//! nothing to encrypt in transit — every message is authenticated at the
-//! application layer, which is why plain HTTP(S) is enough.
+//! be told that some other node lives at an attacker's endpoint.
+//!
+//! Production peers advertise Tor v3 onions (`http://….onion`). Loopback HTTP
+//! is allowed only so in-process unit tests can mesh without Tor. Clearnet
+//! hosts are rejected — the peer mesh is Tor-only.
 
 use std::collections::HashMap;
 use std::net::IpAddr;
@@ -42,11 +44,7 @@ fn is_placeholder_address(address: &Address, endpoint: &str) -> bool {
     *address == placeholder_for_endpoint(endpoint)
 }
 
-/// Reject peer endpoints that are unusable or unsafe to dial (SSRF / eclipse).
-///
-/// Loopback is allowed (local testnets). RFC1918, link-local, and ULA hosts
-/// are rejected so an unsigned referral cannot steer dials at cloud metadata
-/// or internal networks.
+/// Reject peer endpoints that are not Tor onions (or loopback for local tests).
 pub fn validate_endpoint_url(endpoint: &str) -> Result<()> {
     if endpoint.is_empty() || endpoint.len() > 256 {
         return Err(Error::Network("implausible peer endpoint".into()));
@@ -54,13 +52,9 @@ pub fn validate_endpoint_url(endpoint: &str) -> Result<()> {
     if endpoint.bytes().any(|b| b < 0x20 || b == 0x7f) {
         return Err(Error::Network("peer endpoint contains control characters".into()));
     }
-    let rest = if let Some(rest) = endpoint.strip_prefix("https://") {
-        rest
-    } else if let Some(rest) = endpoint.strip_prefix("http://") {
-        rest
-    } else {
+    let Some(rest) = endpoint.strip_prefix("http://") else {
         return Err(Error::Network(
-            "peer endpoint must be an http(s) URL".into(),
+            "peer endpoint must be an http:// onion or loopback URL".into(),
         ));
     };
     if rest.is_empty() {
@@ -80,16 +74,47 @@ pub fn validate_endpoint_url(endpoint: &str) -> Result<()> {
     if host.is_empty() {
         return Err(Error::Network("peer endpoint has no host".into()));
     }
-    if !host_is_routable(host) {
-        return Err(Error::Network("peer endpoint host is not routable".into()));
+    if is_onion_host(host) || is_loopback_host(host) {
+        return Ok(());
     }
-    Ok(())
+    Err(Error::Network(
+        "peer endpoint must be a .onion or loopback host".into(),
+    ))
 }
 
-fn host_is_routable(host: &str) -> bool {
-    // Loopback is allowed so local testnets and docker-compose meshes can
-    // announce `127.0.0.1` / `localhost`. RFC1918, link-local, and ULA stay
-    // blocked — those are the SSRF targets (notably `169.254.169.254`).
+/// True when the URL host is a Tor v3 onion address.
+pub fn is_onion_endpoint(endpoint: &str) -> bool {
+    endpoint_host(endpoint).is_some_and(is_onion_host)
+}
+
+/// True when the URL host is loopback (unit-test meshes).
+pub fn is_loopback_endpoint(endpoint: &str) -> bool {
+    endpoint_host(endpoint).is_some_and(is_loopback_host)
+}
+
+fn endpoint_host(endpoint: &str) -> Option<&str> {
+    let rest = endpoint.strip_prefix("http://")?;
+    if rest.starts_with('[') {
+        let end = rest.find(']')?;
+        Some(&rest[1..end])
+    } else {
+        let end = rest.find([':', '/']).unwrap_or(rest.len());
+        Some(&rest[..end])
+    }
+}
+
+fn is_onion_host(host: &str) -> bool {
+    let Some(label) = host.strip_suffix(".onion") else {
+        return false;
+    };
+    // Tor v3: 56 chars of base32 (a-z2-7).
+    label.len() == 56
+        && label
+            .bytes()
+            .all(|b| matches!(b, b'a'..=b'z' | b'2'..=b'7'))
+}
+
+fn is_loopback_host(host: &str) -> bool {
     if host.eq_ignore_ascii_case("localhost") {
         return true;
     }
@@ -97,25 +122,12 @@ fn host_is_routable(host: &str) -> bool {
         .strip_prefix('[')
         .and_then(|inner| inner.strip_suffix(']'))
         .unwrap_or(host);
-    if let Ok(ip) = ip_host.parse::<IpAddr>() {
-        return ip_is_safe_peer(ip);
-    }
-    true
-}
-
-fn ip_is_safe_peer(ip: IpAddr) -> bool {
-    match ip {
-        IpAddr::V4(v4) => {
-            v4.is_loopback()
-                || (!v4.is_private() && !v4.is_unspecified() && !v4.is_link_local())
-        }
-        IpAddr::V6(v6) => {
-            v6.is_loopback()
-                || (!v6.is_unspecified()
-                    && !v6.is_unique_local()
-                    && !v6.is_unicast_link_local())
-        }
-    }
+    ip_host
+        .parse::<IpAddr>()
+        .is_ok_and(|ip| match ip {
+            IpAddr::V4(v4) => v4.is_loopback(),
+            IpAddr::V6(v6) => v6.is_loopback(),
+        })
 }
 
 enum UpsertPolicy {
@@ -140,7 +152,7 @@ pub fn backoff_secs(failures: u32) -> u64 {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PeerAnnounce {
     pub public_key: PublicKey,
-    /// Base URL, e.g. `https://1.sikkalabs.com` or `http://node:64552`.
+    /// Base URL, e.g. `http://….onion` or `http://127.0.0.1:64552` in tests.
     pub endpoint: String,
     pub timestamp: u64,
     pub signature: Signature,
@@ -458,7 +470,7 @@ mod tests {
     #[test]
     fn signed_announcements_verify() {
         let kp = Keypair::generate().unwrap();
-        let a = announce(&kp, "http://sikka-1:8080", NOW);
+        let a = announce(&kp, "http://127.0.0.1:8080", NOW);
         a.verify(NOW, chain_id(), &fingerprint()).unwrap();
         assert_eq!(a.address(), PublicKey::new(*kp.public_bytes()).address());
     }
@@ -466,21 +478,21 @@ mod tests {
     #[test]
     fn tampering_with_the_endpoint_breaks_the_signature() {
         let kp = Keypair::generate().unwrap();
-        let mut a = announce(&kp, "http://sikka-1:8080", NOW);
-        a.endpoint = "http://attacker:8080".into();
+        let mut a = announce(&kp, "http://127.0.0.1:8080", NOW);
+        a.endpoint = "http://127.0.0.1:9999".into();
         assert_eq!(a.verify(NOW, chain_id(), &fingerprint()).unwrap_err(), Error::InvalidSignature);
     }
 
     #[test]
     fn stale_and_malformed_announcements_are_rejected() {
         let kp = Keypair::generate().unwrap();
-        let a = announce(&kp, "http://sikka-1:8080", NOW);
+        let a = announce(&kp, "http://127.0.0.1:8080", NOW);
         assert!(matches!(
             a.verify(NOW + 10_000, chain_id(), &fingerprint()),
             Err(Error::TimestampOutOfRange { .. })
         ));
 
-        let bad = announce(&kp, "sikka-1:8080", NOW);
+        let bad = announce(&kp, "not-a-url", NOW);
         assert!(matches!(bad.verify(NOW, chain_id(), &fingerprint()), Err(Error::Network(_))));
     }
 
@@ -491,20 +503,20 @@ mod tests {
         let mut book = PeerBook::new(PublicKey::new(*me.public_bytes()).address());
 
         assert!(book
-            .record(&announce(&peer, "http://a:8080", NOW), NOW, chain_id(), &fingerprint())
+            .record(&announce(&peer, "http://127.0.0.1:8081", NOW), NOW, chain_id(), &fingerprint())
             .unwrap());
         assert_eq!(book.len(), 1);
 
         // Same endpoint again is not news.
         assert!(!book
-            .record(&announce(&peer, "http://a:8080", NOW + 1), NOW + 1, chain_id(), &fingerprint())
+            .record(&announce(&peer, "http://127.0.0.1:8081", NOW + 1), NOW + 1, chain_id(), &fingerprint())
             .unwrap());
         // A move is.
         assert!(book
-            .record(&announce(&peer, "http://b:8080", NOW + 2), NOW + 2, chain_id(), &fingerprint())
+            .record(&announce(&peer, "http://127.0.0.1:8082", NOW + 2), NOW + 2, chain_id(), &fingerprint())
             .unwrap());
         assert_eq!(book.len(), 1);
-        assert_eq!(book.all()[0].endpoint, "http://b:8080");
+        assert_eq!(book.all()[0].endpoint, "http://127.0.0.1:8082");
     }
 
     #[test]
@@ -513,7 +525,7 @@ mod tests {
         let address = PublicKey::new(*me.public_bytes()).address();
         let mut book = PeerBook::new(address);
         assert!(!book
-            .record(&announce(&me, "http://me:8080", NOW), NOW, chain_id(), &fingerprint())
+            .record(&announce(&me, "http://127.0.0.1:8083", NOW), NOW, chain_id(), &fingerprint())
             .unwrap());
         assert!(book.is_empty());
     }
@@ -522,8 +534,8 @@ mod tests {
     fn bootstrap_endpoints_are_deduplicated() {
         let me = Keypair::generate().unwrap();
         let mut book = PeerBook::new(PublicKey::new(*me.public_bytes()).address());
-        assert!(book.add_endpoint("http://boot:8080", NOW));
-        assert!(!book.add_endpoint("http://boot:8080", NOW));
+        assert!(book.add_endpoint("http://127.0.0.1:8084", NOW));
+        assert!(!book.add_endpoint("http://127.0.0.1:8084", NOW));
         assert_eq!(book.len(), 1);
     }
 
@@ -533,8 +545,8 @@ mod tests {
         let peer = Keypair::generate().unwrap();
         let mut book = PeerBook::new(PublicKey::new(*me.public_bytes()).address());
 
-        book.add_endpoint("http://a:8080", NOW);
-        book.record(&announce(&peer, "http://a:8080", NOW), NOW, chain_id(), &fingerprint())
+        book.add_endpoint("http://127.0.0.1:8081", NOW);
+        book.record(&announce(&peer, "http://127.0.0.1:8081", NOW), NOW, chain_id(), &fingerprint())
             .unwrap();
 
         assert_eq!(book.len(), 1, "the placeholder must not linger");
@@ -546,11 +558,11 @@ mod tests {
         let me = Keypair::generate().unwrap();
         let peer = Keypair::generate().unwrap();
         let mut book = PeerBook::new(PublicKey::new(*me.public_bytes()).address());
-        book.record(&announce(&peer, "http://a:8080", NOW), NOW, chain_id(), &fingerprint())
+        book.record(&announce(&peer, "http://127.0.0.1:8081", NOW), NOW, chain_id(), &fingerprint())
             .unwrap();
 
         for i in 1..=MAX_FAILURES {
-            book.record_failure("http://a:8080", NOW + i as u64);
+            book.record_failure("http://127.0.0.1:8081", NOW + i as u64);
         }
         assert_eq!(book.len(), 1, "small books must keep failed endpoints");
         let kept = &book.all()[0];
@@ -559,10 +571,10 @@ mod tests {
         assert!(book.endpoints_due(NOW + MAX_FAILURES as u64).is_empty());
         assert_eq!(
             book.endpoints_due(kept.backoff_until),
-            vec!["http://a:8080".to_string()]
+            vec!["http://127.0.0.1:8081".to_string()]
         );
 
-        book.record_success("http://a:8080", NOW + 100);
+        book.record_success("http://127.0.0.1:8081", NOW + 100);
         assert_eq!(book.all()[0].failures, 0);
         assert_eq!(book.all()[0].backoff_until, 0);
     }
@@ -571,43 +583,42 @@ mod tests {
     fn full_books_may_drop_peers_after_max_failures() {
         let me = Keypair::generate().unwrap();
         let mut book = PeerBook::with_max(PublicKey::new(*me.public_bytes()).address(), 2);
-        book.add_endpoint("http://a:8080", NOW);
-        book.add_endpoint("http://b:8080", NOW);
+        book.add_endpoint("http://127.0.0.1:8081", NOW);
+        book.add_endpoint("http://127.0.0.1:8082", NOW);
         assert_eq!(book.len(), 2);
 
         for i in 1..=MAX_FAILURES {
-            book.record_failure("http://a:8080", NOW + i as u64);
+            book.record_failure("http://127.0.0.1:8081", NOW + i as u64);
         }
         assert_eq!(book.len(), 1);
-        assert_eq!(book.endpoints(), vec!["http://b:8080".to_string()]);
+        assert_eq!(book.endpoints(), vec!["http://127.0.0.1:8082".to_string()]);
     }
 
     #[test]
-    fn private_and_link_local_urls_are_rejected() {
+    fn clearnet_urls_are_rejected_onion_and_loopback_ok() {
         for endpoint in [
             "http://10.0.0.1:8080",
-            "http://172.16.0.1:8080",
             "http://192.168.1.1:8080",
             "http://169.254.169.254/",
-            "http://[fc00::1]:8080",
-            "http://[fe80::1]:8080",
+            "http://sikka-1:8080",
+            "https://1.sikkalabs.com",
+            "http://example.com",
         ] {
             assert!(
                 validate_endpoint_url(endpoint).is_err(),
                 "expected {endpoint} to be rejected"
             );
         }
-        // Loopback is fine for local testnets; hostnames and public IPs too.
         for endpoint in [
             "http://127.0.0.1:8080",
             "http://localhost:8080",
             "http://[::1]:8080",
-            "http://sikka-1:8080",
-            "https://1.sikkalabs.com",
+            "http://vgz5tb6cr3bewedb3zqhfrqgnfghrkvpjqguoeqragqyx247azeym7ad.onion",
         ] {
             validate_endpoint_url(endpoint).unwrap();
         }
     }
+
 
     #[test]
     fn unsigned_referral_cannot_evict_signed_peer() {
@@ -617,20 +628,20 @@ mod tests {
         let mut book = PeerBook::with_max(PublicKey::new(*me.public_bytes()).address(), 2);
 
         book.record(
-            &announce(&signed, "http://signed:8080", NOW),
+            &announce(&signed, "http://127.0.0.1:8085", NOW),
             NOW,
             chain_id(),
             &fingerprint(),
         )
         .unwrap();
-        book.add_endpoint("http://boot:8080", NOW);
+        book.add_endpoint("http://127.0.0.1:8084", NOW);
         assert_eq!(book.len(), 2);
 
         // May evict another placeholder, but never the signed peer.
-        assert!(book.add_endpoint("http://evil:8080", NOW));
+        assert!(book.add_endpoint("http://127.0.0.1:8086", NOW));
         assert_eq!(book.len(), 2);
         assert!(book.contains(&signed_address));
-        assert!(!book.endpoints().iter().any(|e| e == "http://boot:8080"));
+        assert!(!book.endpoints().iter().any(|e| e == "http://127.0.0.1:8084"));
     }
 
     #[test]
@@ -648,7 +659,7 @@ mod tests {
         let me = Keypair::generate().unwrap();
         let mut book = PeerBook::with_max(PublicKey::new(*me.public_bytes()).address(), 3);
         for i in 0..10 {
-            book.add_endpoint(&format!("http://peer-{i}:8080"), NOW + i);
+            book.add_endpoint(&format!("http://127.0.0.1:{}", 9000 + i), NOW + i);
         }
         assert_eq!(book.len(), 3);
     }

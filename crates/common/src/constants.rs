@@ -109,12 +109,17 @@ pub const DEFAULT_PORT: u16 = 64552;
 /// Default chain identifier, mixed into genesis.
 pub const DEFAULT_CHAIN_ID: &str = "sikka";
 
-/// Hardcoded bootstrap peers used when no override is supplied.
+/// Hardcoded Tor bootstrap peers (genesis validators' deterministic onions).
 pub const BOOTSTRAP_NODES: &[&str] = &[
-    "https://1.sikkalabs.com",
-    "https://2.sikkalabs.com",
-    "https://3.sikkalabs.com",
+    "http://vgz5tb6cr3bewedb3zqhfrqgnfghrkvpjqguoeqragqyx247azeym7ad.onion",
+    "http://gejjo77o6nxjtvydahgkcaaebczfj4sjgs2spspykqzqaof46exnqoad.onion",
 ];
+
+/// Default SOCKS5h endpoint for dialing `.onion` peers (Arti in the node image).
+pub const DEFAULT_TOR_SOCKS: &str = "127.0.0.1:9050";
+
+/// Ordinary peer request timeout — Tor circuits are slower than clearnet.
+pub const PEER_REQUEST_TIMEOUT_SECS: u64 = 60;
 
 /// Bonded stake required to finalize a checkpoint: `ceil(2/3 * total_active_bond)`.
 ///

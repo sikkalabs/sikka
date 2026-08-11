@@ -15,11 +15,13 @@ pub mod gossip;
 pub mod http;
 pub mod loops;
 pub mod node;
+pub mod prepare_tor;
 pub mod sync;
 
 pub use config::{NodeConfig, TrustedCheckpoint};
 pub use gossip::Gossip;
 pub use node::{Finalized, Node};
+pub use prepare_tor::prepare_tor;
 
 use std::sync::Arc;
 

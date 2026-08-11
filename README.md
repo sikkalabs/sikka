@@ -22,8 +22,8 @@ every transfer ever made.
 - **No history** — finalized payments are thrown away. Only balances and the
   latest checkpoint remain on-chain.
 - **Private by default** — without a permanent tx log, past payments are not
-  publicly reconstructable. Peer mesh is plain HTTP(S) between nodes; wallets
-  talk to any reachable node the same way.
+  publicly reconstructable. Peer mesh is Tor-only (signed JSON over onion
+  HTTP); wallets may use an optional clearnet reverse proxy to the same node.
 - **Built for micropayments** — feeless transfers and a regenerating spam battery (+1/min, cap 100) make high-frequency, low-value payments practical. Fresh accounts start at 0 battery to prevent funding-sybil attacks.
 - **Agent-ready** — plain HTTP + JSON-RPC. One endpoint to check balances,
   send, and bond — no heavy SDKs required.
@@ -35,8 +35,8 @@ every transfer ever made.
 - **Non-punitive consensus** — round-robin proposer rotation with automatic 10-second timeout fallbacks. Downtime never burns stake; only double-signing (equivocation) is slashed. Validators that repeatedly miss full-batch proposer turns are forced into the normal unbonding cooldown (default: 100 consecutive misses; configurable in genesis). Inflation each round is shared across the active bonded set (bond-weighted), independent of which exact quorum certificate sealed the prior checkpoint.
 - **Efficient mempool sync** — nodes exchange compact Bloom filters during peer reconciliation to request only missing transactions, minimizing network bandwidth.
 - **Pure-Rust storage** — built on `redb` (ACID key-value store) with 3 fixed tables (`accounts`, `validators`, `meta`), requiring zero C/C++ database dependencies.
-- **Simple ops** — one container, one published port, set `SIKKA_NODE_URL` to
-  your public clearnet URL. Docker is the production path.
+- **Simple ops** — one container, one published port, set `SIKKA_PRIVATE_KEY`.
+  Tor onion advertise is derived automatically. Docker is the production path.
 
 ---
 
@@ -47,7 +47,7 @@ every transfer ever made.
 | Genesis supply | **19,960,907** SIKKA (1 SIKKA = 10⁹ CHILLAR) |
 | Consensus | Checkpoint voting · ≥2/3 bonded stake · round-robin proposer |
 | Spam control | Battery (+1/min, cap 100, 1 per tx) |
-| Transport | Signed JSON over HTTP(S) · clearnet peer mesh |
+| Transport | Signed JSON over HTTP · Tor-only peer mesh (optional clearnet for wallets) |
 | Repo | [github.com/sikkalabs/sikka](https://github.com/sikkalabs/sikka) |
 
 ---

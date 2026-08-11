@@ -52,6 +52,7 @@ async fn spawn_solo() -> (String, Keypair) {
         bootstrap: Vec::new(),
         request_timeout: Duration::from_secs(5),
         max_checkpoint_delay: Duration::from_secs(0),
+        tor_socks: None,
         ..NodeConfig::default()
     };
 

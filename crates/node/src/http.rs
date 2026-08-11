@@ -1,9 +1,10 @@
 //! The HTTP surface: federation for peers, JSON-RPC for wallets.
 //!
 //! Both live on one port because a node is meant to be trivially deployable —
-//! one container, one port, one clearnet URL. Peer messages are
-//! authenticated by the signatures inside them, never by who sent the request,
-//! so there is nothing here that needs TLS to be safe.
+//! one container, one port. Peers reach this port via a Tor hidden service;
+//! wallets may use an optional clearnet reverse proxy to the same listener.
+//! Peer messages are authenticated by the signatures inside them, never by who
+//! sent the request, so there is nothing here that needs TLS to be safe.
 
 use std::sync::Arc;
 

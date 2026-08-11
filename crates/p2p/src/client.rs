@@ -1,15 +1,17 @@
 //! Outbound HTTP client.
 //!
-//! One `reqwest` client, reused for every peer. Messages are already signed at
-//! the application layer, so plain HTTP(S) is enough — reverse proxies and TLS
-//! terminators are fine.
+//! One `reqwest` client stack, reused for every peer. Messages are already
+//! signed at the application layer. Production dials use Tor SOCKS5h for
+//! `.onion` peers; loopback unit tests dial directly.
 
 use std::path::Path;
 use std::time::Duration;
 
 use sikka_common::bytes::Hash;
 use sikka_common::checkpoint::Checkpoint;
-use sikka_common::constants::{BULK_REQUEST_TIMEOUT_SECS, MAX_HTTP_BODY_BYTES, MAX_RPC_BODY_BYTES};
+use sikka_common::constants::{
+    BULK_REQUEST_TIMEOUT_SECS, MAX_HTTP_BODY_BYTES, MAX_RPC_BODY_BYTES, PEER_REQUEST_TIMEOUT_SECS,
+};
 use sikka_common::error::{Error, Result};
 use sikka_common::transaction::Transaction;
 use sikka_common::vote::Vote;
@@ -21,7 +23,7 @@ use sikka_state::{
 use tracing::{info, warn};
 
 use crate::bloom::BloomFilter;
-use crate::peers::{Peer, PeerAnnounce};
+use crate::peers::{is_loopback_endpoint, is_onion_endpoint, Peer, PeerAnnounce};
 use crate::wire::{
     Health, PeersRequest, PeersResponse, ProposalResponse, SubmitCheckpoint, SubmitProposal,
     SubmitTransaction, SubmitTransactionResponse, SubmitVote, TxSyncRequest, TxSyncResponse,
@@ -35,13 +37,16 @@ pub struct ClientConfig {
     /// Timeout for large transfers (proposals, finalized checkpoints, sync,
     /// and each independently resumable snapshot chunk).
     pub bulk_timeout: Duration,
+    /// SOCKS5h proxy (`host:port`) for `.onion` dials. `None` for loopback-only tests.
+    pub socks_proxy: Option<String>,
 }
 
 impl Default for ClientConfig {
     fn default() -> Self {
         Self {
-            timeout: Duration::from_secs(10),
+            timeout: Duration::from_secs(PEER_REQUEST_TIMEOUT_SECS),
             bulk_timeout: Duration::from_secs(BULK_REQUEST_TIMEOUT_SECS),
+            socks_proxy: None,
         }
     }
 }
@@ -49,31 +54,39 @@ impl Default for ClientConfig {
 /// Typed client for the federation endpoints.
 #[derive(Debug, Clone)]
 pub struct PeerClient {
-    http: reqwest::Client,
+    direct: reqwest::Client,
+    tor: Option<reqwest::Client>,
     timeout: Duration,
     bulk_timeout: Duration,
 }
 
 impl PeerClient {
     pub fn new(config: &ClientConfig) -> Result<Self> {
-        let http = reqwest::Client::builder()
-            .timeout(config.timeout)
-            .connect_timeout(config.timeout)
-            // Federation is request/response with many peers; pooling idle
-            // sockets to all of them buys nothing.
-            .pool_max_idle_per_host(2)
-            // Never follow redirects. Peers are untrusted endpoints; following a
-            // 3xx would let a malicious peer replay signed bodies (and probe)
-            // internal hosts the node itself could reach.
-            .redirect(reqwest::redirect::Policy::none())
-            .user_agent(concat!("sikka/", env!("CARGO_PKG_VERSION")))
-            .build()
-            .map_err(|e| Error::Network(e.to_string()))?;
+        let direct = build_http_client(config.timeout, None)?;
+        let tor = match &config.socks_proxy {
+            Some(addr) => Some(build_http_client(config.timeout, Some(addr))?),
+            None => None,
+        };
         Ok(Self {
-            http,
+            direct,
+            tor,
             timeout: config.timeout,
             bulk_timeout: config.bulk_timeout,
         })
+    }
+
+    fn http_for(&self, endpoint: &str) -> Result<&reqwest::Client> {
+        if is_loopback_endpoint(endpoint) {
+            return Ok(&self.direct);
+        }
+        if is_onion_endpoint(endpoint) {
+            return self.tor.as_ref().ok_or_else(|| {
+                Error::Network("onion peer dial requires socks_proxy / SIKKA_TOR_SOCKS".into())
+            });
+        }
+        Err(Error::Network(format!(
+            "refusing to dial non-onion peer endpoint {endpoint}"
+        )))
     }
 
     fn url(endpoint: &str, path: &str) -> String {
@@ -116,7 +129,7 @@ impl PeerClient {
             MAX_RPC_BODY_BYTES
         };
         let response = self
-            .http
+            .http_for(endpoint)?
             .post(Self::url(endpoint, path))
             .timeout(timeout)
             .json(body)
@@ -142,7 +155,7 @@ impl PeerClient {
             MAX_RPC_BODY_BYTES
         };
         let response = self
-            .http
+            .http_for(endpoint)?
             .get(Self::url(endpoint, path))
             .timeout(timeout)
             .send()
@@ -159,7 +172,7 @@ impl PeerClient {
         maximum: usize,
     ) -> Result<Vec<u8>> {
         let mut response = self
-            .http
+            .http_for(endpoint)?
             .get(Self::url(endpoint, path))
             .timeout(timeout)
             .send()
@@ -480,6 +493,27 @@ impl PeerClient {
     }
 }
 
+fn build_http_client(timeout: Duration, socks: Option<&str>) -> Result<reqwest::Client> {
+    let mut builder = reqwest::Client::builder()
+        .timeout(timeout)
+        .connect_timeout(timeout)
+        .pool_max_idle_per_host(2)
+        .redirect(reqwest::redirect::Policy::none())
+        .user_agent(concat!("sikka/", env!("CARGO_PKG_VERSION")));
+    if let Some(addr) = socks {
+        let proxy_url = if addr.contains("://") {
+            addr.to_string()
+        } else {
+            format!("socks5h://{addr}")
+        };
+        let proxy = reqwest::Proxy::all(&proxy_url).map_err(|e| Error::Network(e.to_string()))?;
+        builder = builder.proxy(proxy);
+    }
+    builder
+        .build()
+        .map_err(|e| Error::Network(e.to_string()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -487,16 +521,16 @@ mod tests {
     #[test]
     fn urls_join_without_doubling_slashes() {
         assert_eq!(
-            PeerClient::url("http://a:8080", "tx"),
-            "http://a:8080/api/tx"
+            PeerClient::url("http://127.0.0.1:8080", "tx"),
+            "http://127.0.0.1:8080/api/tx"
         );
         assert_eq!(
-            PeerClient::url("http://a:8080/", "/tx"),
-            "http://a:8080/api/tx"
+            PeerClient::url("http://127.0.0.1:8080/", "/tx"),
+            "http://127.0.0.1:8080/api/tx"
         );
         assert_eq!(
-            PeerClient::url("http://a:8080", "checkpoint/7"),
-            "http://a:8080/api/checkpoint/7"
+            PeerClient::url("http://127.0.0.1:8080", "checkpoint/7"),
+            "http://127.0.0.1:8080/api/checkpoint/7"
         );
     }
 
@@ -506,6 +540,12 @@ mod tests {
         PeerClient::new(&ClientConfig {
             timeout: Duration::from_secs(5),
             bulk_timeout: Duration::from_secs(60),
+            socks_proxy: None,
+        })
+        .unwrap();
+        PeerClient::new(&ClientConfig {
+            socks_proxy: Some("127.0.0.1:9050".into()),
+            ..ClientConfig::default()
         })
         .unwrap();
     }
@@ -518,6 +558,7 @@ mod tests {
         let client = PeerClient::new(&ClientConfig {
             timeout: Duration::from_secs(5),
             bulk_timeout: Duration::from_secs(30),
+            socks_proxy: None,
         })
         .unwrap();
 

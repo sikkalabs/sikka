@@ -1,16 +1,18 @@
 //! The node binary.
 //!
-//! Configuration comes from the environment (see [`sikka_node::NodeConfig`]) so
-//! that running a node is `docker run` with a genesis file mounted and nothing
-//! else to remember.
+//! Configuration comes from the environment (see [`sikka_node::NodeConfig`]).
+//! `sikka-node --prepare-tor` writes deterministic HS keys + torrc for the
+//! Docker entrypoint; otherwise the node serves forever.
 
 use tracing_subscriber::EnvFilter;
 
-use sikka_node::NodeConfig;
+use sikka_node::{prepare_tor, NodeConfig};
 
 #[tokio::main]
 async fn main() -> std::process::ExitCode {
     init_tracing();
+
+    let prepare_only = std::env::args().any(|a| a == "--prepare-tor");
 
     let config = match NodeConfig::from_env() {
         Ok(config) => config,
@@ -19,6 +21,20 @@ async fn main() -> std::process::ExitCode {
             return std::process::ExitCode::from(2);
         }
     };
+
+    if prepare_only {
+        return match prepare_tor(&config) {
+            Ok(advertise) => {
+                tracing::info!(%advertise, "tor hidden service prepared");
+                println!("{advertise}");
+                std::process::ExitCode::SUCCESS
+            }
+            Err(e) => {
+                tracing::error!(error = %e, "tor prepare failed");
+                std::process::ExitCode::FAILURE
+            }
+        };
+    }
 
     let running = match sikka_node::start(config).await {
         Ok(running) => running,
