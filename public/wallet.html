@@ -467,7 +467,7 @@
       return "0x" + hex(bytes);
     }
 
-    // Matches Transaction::signing_bytes (v4):
+    // Matches Transaction::signing_bytes (v1):
     // tag || str(chain_id) || genesis_fingerprint || kind || from || to || amount || nonce || timestamp || public_key
     function signingBytes({
       chainId: id,

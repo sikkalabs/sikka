@@ -75,6 +75,7 @@ pub fn router(state: AppState) -> Router {
         .route("/walletpro", get(walletpro_page))
         .route("/address.html", get(address_page))
         .route("/address", get(address_page))
+        .route("/proof.js", get(proof_js))
         .layer(middleware::from_fn(cors))
         .with_state(state)
 }
@@ -157,6 +158,17 @@ async fn site_index() -> Html<&'static str> {
     Html(include_str!("../../../public/index.html"))
 }
 
+/// Shared by `/wallet.html` and `/address.html` (ES module import).
+async fn proof_js() -> impl IntoResponse {
+    (
+        [(
+            header::CONTENT_TYPE,
+            HeaderValue::from_static("application/javascript; charset=utf-8"),
+        )],
+        include_str!("../../../public/proof.js"),
+    )
+}
+
 async fn api_index(State(state): State<AppState>) -> HttpResult<Json<Value>> {
     let health = state.node.health();
     Ok(Json(json!({
@@ -168,6 +180,7 @@ async fn api_index(State(state): State<AppState>) -> HttpResult<Json<Value>> {
         "wallet": "/wallet.html",
         "walletpro": "/walletpro.html",
         "address": "/address.html",
+        "proof": "/proof.js",
         "endpoints": [
             "/api/health", "/api/address/random", "/api/rpc", "/api/tx", "/api/tx/sync", "/api/vote",
             "/api/checkpoint/proposal", "/api/checkpoint/finalized",
