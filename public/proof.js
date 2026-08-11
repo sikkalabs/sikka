@@ -380,8 +380,36 @@ export function verifyAccountProof(proof, options = {}) {
     throw new Error("proof state_root does not match checkpoint");
   }
 
-  const validators = options.pinnedValidators ?? options.validators;
-  const signatures = verifyCheckpointSignatures(proof.checkpoint, validators);
+  const height = asBig(header.height);
+  const rawSigs = proof.checkpoint.validator_signatures;
+  // Height 0 is the unsigned genesis checkpoint (trust root). Quorum signatures
+  // only exist after the first sealed height — require a genesis fingerprint pin
+  // instead of validator precommits.
+  const isUnsignedGenesis =
+    height === 0n && (!Array.isArray(rawSigs) || rawSigs.length === 0);
+
+  let signatures = 0;
+  if (isUnsignedGenesis) {
+    const pin =
+      genesisFingerprint != null
+        ? genesisFingerprint
+        : chainInfo?.genesis_fingerprint ?? null;
+    if (pin == null) {
+      throw new Error(
+        "genesis checkpoint has no signatures — pass genesisFingerprint from chain.info"
+      );
+    }
+    const expected = normalizeHash(pin);
+    if (header.genesis_fingerprint == null) {
+      throw new Error("checkpoint missing genesis_fingerprint");
+    }
+    if (hex(expected) !== hex(normalizeHash(header.genesis_fingerprint))) {
+      throw new Error("genesis fingerprint mismatch — wrong chain or untrusted node");
+    }
+  } else {
+    const validators = options.pinnedValidators ?? options.validators;
+    signatures = verifyCheckpointSignatures(proof.checkpoint, validators);
+  }
 
   const address = normalizeAddress(proof.address);
   const key = unhex(address);
@@ -412,7 +440,7 @@ export function verifyAccountProof(proof, options = {}) {
     account: proof.account ?? null,
     balance,
     nonce,
-    height: asBig(header.height),
+    height,
     stateRoot: "0x" + hex(stateRoot),
     signatures,
   };

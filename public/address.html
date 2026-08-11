@@ -497,6 +497,7 @@
           cachedValidators.length > 0 ? cachedValidators : validators;
         const verified = verifyAccountProof(proof, {
           validators: activeValidators,
+          genesisFingerprint: chainInfo?.genesis_fingerprint ?? null,
           chainInfo,
         });
         const present = proof.account != null;
@@ -505,8 +506,12 @@
           : `absent · height ${verified.height}`;
         $("verifyOk").hidden = false;
         $("verifyOk").textContent = present
-          ? `Balance ${formatSikka(verified.balance)} verified at height ${verified.height} (${verified.signatures} validator signatures, quorum OK).`
-          : `Absence verified at height ${verified.height} (${verified.signatures} validator signatures, quorum OK).`;
+          ? verified.signatures > 0
+            ? `Balance ${formatSikka(verified.balance)} verified at height ${verified.height} (${verified.signatures} validator signatures, quorum OK).`
+            : `Balance ${formatSikka(verified.balance)} verified against genesis (height 0).`
+          : verified.signatures > 0
+            ? `Absence verified at height ${verified.height} (${verified.signatures} validator signatures, quorum OK).`
+            : `Absence verified against genesis (height 0).`;
       } catch (e) {
         $("proof").textContent = "failed";
         $("verifyErr").hidden = false;

@@ -414,6 +414,7 @@
     async function refreshBalance() {
       if (!wallet) return;
       try {
+        const binding = await ensureChainBinding();
         const [proof, validators, info] = await Promise.all([
           rpc("account.proof", { address: wallet.address }),
           rpc("validator.list"),
@@ -421,6 +422,7 @@
         ]);
         const verified = verifyAccountProof(proof, {
           validators: validatorsFromList(validators),
+          genesisFingerprint: binding.genesisFingerprint,
         });
         $("balance").textContent = `${formatSikka(verified.balance)} SIKKA`;
         $("battery").textContent = `${info.battery_now} / 100`;
