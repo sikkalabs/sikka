@@ -38,7 +38,7 @@ use sikka_p2p::mempool::{Admission, Mempool, DEFAULT_MAX_AGE_SECS};
 use sikka_p2p::peers::{Peer, PeerAnnounce, PeerBook};
 use sikka_p2p::wire::{Health, ProposalResponse};
 use sikka_rpc::types::{
-    AccountInfo, AccountProof, ChainInfo, MempoolInfo, TxStatus, ValidatorInfo,
+    AccountInfo, AccountProof, ChainInfo, MempoolInfo, TorInfo, TxStatus, ValidatorInfo,
 };
 use sikka_state::ledger::GenesisOutcome;
 use sikka_state::{
@@ -146,6 +146,8 @@ pub struct Node {
     funded_address_cache: Mutex<Option<(u64, Vec<FundedAddress>)>>,
     /// True while a background thread is building a snapshot archive.
     snapshot_building: Arc<AtomicBool>,
+    /// Cached Tor reachability for the landing page / chain.info.
+    tor_status: Mutex<TorInfo>,
     started_at: u64,
 }
 
@@ -264,6 +266,7 @@ impl Node {
             proposal_admit: Mutex::new(HashMap::new()),
             funded_address_cache: Mutex::new(None),
             snapshot_building: Arc::new(AtomicBool::new(false)),
+            tor_status: Mutex::new(initial_tor_status(&config)),
             started_at: now,
             config,
         });
@@ -358,8 +361,21 @@ impl Node {
             peers: self.peers.lock().len(),
             node_address: self.address,
             advertise: self.config.advertise.clone(),
+            tor: self.tor_status.lock().clone(),
             validator: chain.ledger.validator(&self.address)?.is_some(),
         })
+    }
+
+    /// Update Tor reachability (called by the background probe loop).
+    pub fn set_tor_status(&self, status: impl Into<String>, detail: impl Into<String>) {
+        *self.tor_status.lock() = TorInfo {
+            status: status.into(),
+            detail: detail.into(),
+        };
+    }
+
+    pub fn tor_status(&self) -> TorInfo {
+        self.tor_status.lock().clone()
     }
 
     pub fn account(&self, address: &Address) -> Result<AccountInfo> {
@@ -1923,6 +1939,20 @@ fn remember_proposal(known: &mut Option<CheckpointProposal>, proposal: &Checkpoi
 }
 
 /// Load genesis from disk when present; otherwise use the baked-in SIKKA chain.
+fn initial_tor_status(config: &NodeConfig) -> TorInfo {
+    if config.tor_socks.is_none() || !sikka_p2p::is_onion_endpoint(&config.advertise) {
+        TorInfo {
+            status: "disabled".into(),
+            detail: "Tor not required for this node".into(),
+        }
+    } else {
+        TorInfo {
+            status: "checking".into(),
+            detail: "waiting for first onion probe".into(),
+        }
+    }
+}
+
 fn load_genesis(config: &NodeConfig) -> Result<GenesisConfig> {
     if config.genesis_path.exists() {
         let json = std::fs::read_to_string(&config.genesis_path).map_err(|e| {

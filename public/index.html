@@ -193,6 +193,15 @@
       font-size: 0.82rem;
       color: var(--accent);
     }
+    .tor-note {
+      margin: 0.45rem 0 0;
+      font-size: 0.88rem;
+      line-height: 1.4;
+      color: var(--muted);
+    }
+    .tor-note.ok { color: var(--accent); }
+    .tor-note.down { color: #a11; }
+    .tor-note.checking { color: var(--muted); }
     .live {
       display: inline-flex;
       align-items: center;
@@ -257,6 +266,7 @@
         <div class="span">
           <div class="label">Tor identity</div>
           <div class="value onion" id="onion" title="">—</div>
+          <p class="tor-note" id="torNote" hidden></p>
         </div>
       </div>
       <p class="err" id="error" hidden></p>
@@ -342,6 +352,29 @@
         const onionEl = $("onion");
         onionEl.textContent = onionHost || "—";
         onionEl.title = advertise || "";
+        const tor = info.tor || {};
+        const torStatus = String(tor.status || "");
+        const torDetail = String(tor.detail || "");
+        const note = $("torNote");
+        if (!torStatus || torStatus === "disabled") {
+          note.hidden = true;
+          note.textContent = "";
+          note.className = "tor-note";
+        } else if (torStatus === "ok") {
+          note.hidden = false;
+          note.className = "tor-note ok";
+          note.textContent = "Tor connected — onion reachable";
+        } else if (torStatus === "checking") {
+          note.hidden = false;
+          note.className = "tor-note checking";
+          note.textContent = "Checking Tor…";
+        } else {
+          note.hidden = false;
+          note.className = "tor-note down";
+          note.textContent = torDetail
+            ? `Tor not connected — ${torDetail}`
+            : "Tor not connected — peer mesh unavailable";
+        }
         $("error").hidden = true;
       } catch (e) {
         $("dot").className = "dot off";

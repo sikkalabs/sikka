@@ -62,6 +62,7 @@ pub fn print_chain_info(info: &ChainInfo) {
         if info.validator { " (validator)" } else { "" }
     );
     println!("advertise      {}", info.advertise);
+    println!("tor            {} — {}", info.tor.status, info.tor.detail);
 }
 
 pub fn print_validators(validators: &[ValidatorInfo]) {

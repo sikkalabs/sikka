@@ -36,7 +36,8 @@ pub fn spawn_all(
         tokio::spawn(consensus_loop(node.clone(), gossip.clone(), client.clone())),
         tokio::spawn(mempool_loop(node.clone(), client.clone())),
         tokio::spawn(discovery_loop(node.clone(), client.clone())),
-        tokio::spawn(catchup_loop(node.clone(), gossip, client)),
+        tokio::spawn(catchup_loop(node.clone(), gossip, client.clone())),
+        tokio::spawn(tor_probe_loop(node.clone(), client)),
         tokio::spawn(maintenance_loop(node)),
     ]
 }
@@ -217,6 +218,38 @@ async fn catchup_loop(node: Arc<Node>, gossip: Arc<Gossip>, client: PeerClient) 
             );
             gossip.request_sync();
         }
+    }
+}
+
+/// Probe this node's own onion via SOCKS so the landing page knows if Tor works.
+async fn tor_probe_loop(node: Arc<Node>, client: PeerClient) {
+    let advertise = node.config().advertise.clone();
+    if node.config().tor_socks.is_none() || !sikka_p2p::is_onion_endpoint(&advertise) {
+        node.set_tor_status("disabled", "Tor not required for this node");
+        return;
+    }
+
+    node.set_tor_status("checking", "probing onion via SOCKS");
+    let mut ticker = ticker(Duration::from_secs(30));
+    loop {
+        match client.health(&advertise).await {
+            Ok(_) => {
+                let prev = node.tor_status();
+                node.set_tor_status("ok", "onion reachable via Tor");
+                if prev.status != "ok" {
+                    info!(%advertise, "Tor onion self-check succeeded");
+                }
+            }
+            Err(e) => {
+                let detail = format!("onion unreachable via Tor: {e}");
+                let prev = node.tor_status();
+                node.set_tor_status("down", detail.clone());
+                if prev.status != "down" {
+                    warn!(%advertise, error = %e, "Tor onion self-check failed");
+                }
+            }
+        }
+        ticker.tick().await;
     }
 }
 

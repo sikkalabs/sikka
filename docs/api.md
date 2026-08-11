@@ -149,7 +149,9 @@ remains. Confirm a payment by reading the recipient's balance.
 `validator_root`, `last_checkpoint_hash`, `last_checkpoint_time`,
 `total_supply`, `total_bonded`, `accounts`, `active_validators`,
 `checkpoint_tx_interval`, `mempool`, `peers`, `node_address`, `advertise`,
-`validator`. `advertise` is this node's peer URL (Tor onion in production).
+`tor`, `validator`. `advertise` is this node's peer URL (Tor onion in
+production). `tor` is `{ status, detail }` where `status` is `disabled`,
+`checking`, `ok`, or `down` (onion self-check via SOCKS).
 
 ### `account.get`
 

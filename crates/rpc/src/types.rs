@@ -31,8 +31,19 @@ pub struct ChainInfo {
     pub node_address: Address,
     /// Peer advertise URL (Tor onion in production).
     pub advertise: String,
+    /// Tor reachability for this node's advertise URL.
+    pub tor: TorInfo,
     /// Whether this node holds a bonded validator key.
     pub validator: bool,
+}
+
+/// Tor mesh status for this node (`chain.info.tor`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TorInfo {
+    /// `disabled` | `checking` | `ok` | `down`
+    pub status: String,
+    /// Short human-readable detail.
+    pub detail: String,
 }
 
 /// `account.get`
