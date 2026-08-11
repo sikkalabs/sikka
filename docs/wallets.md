@@ -28,7 +28,7 @@ const address = "0x" + hex(sha3_256(publicKey));
 
 Same seed always expands to the same key.
 
-### HD receive (`walletpro.html`)
+### HD receive (optional)
 
 One **master** 32-byte seed → many receive accounts (no change chain):
 
@@ -38,9 +38,7 @@ key_i        = ML-DSA-87.keygen(child_seed_i)
 ```
 
 Restore walks `i = 0,1,…` with `account.get` and stops after **10** consecutive
-unused accounts (`exists` / balance / nonce / bond all empty). The browser also
-stores `next_index` so unused receive addresses beyond the gap are not lost.
-UI: [`/walletpro.html`](../public/walletpro.html).
+unused accounts (`exists` / balance / nonce / bond all empty).
 
 ---
 
@@ -122,5 +120,4 @@ something is still in the mempool.
 ## Also available
 
 - Browser wallet on any node: `/wallet.html`
-- HD receive wallet: `/walletpro.html`
 - CLI inside the container: `docker exec sikka sikka …` — see [`docker.md`](docker.md)

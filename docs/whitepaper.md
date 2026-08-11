@@ -1032,7 +1032,7 @@ delay a duplicate arrival.
 
 ## 18. Fast-Sync and Stateless Wallets
 
-### 15.1 Chunked, resumable snapshots
+### 18.1 Chunked, resumable snapshots
 
 A new or returning node downloads a **snapshot** (finalized checkpoint +
 accounts + validators) rather than replaying history — which is impossible
@@ -1043,14 +1043,14 @@ anyway, because history is gone.
 - The reconstructed state must re-hash to the checkpoint's roots, and total
   supply is re-derived from balances + bonds (a snapshot cannot smuggle coins).
 
-### 15.2 Weak subjectivity
+### 18.2 Weak subjectivity
 
 A node accepts an unpinned snapshot only across a **single-height gap**
 (`WEAK_SUBJECTIVITY_GAP = 1`). Anything larger requires an operator-pinned
 `SIKKA_TRUSTED_CHECKPOINT=<height>:<hash>` — even when the validator root is
 unchanged — otherwise a former ≥2/3 set could forge a long-range fork.
 
-### 15.3 Stateless, verifiable wallets
+### 18.3 Stateless, verifiable wallets
 
 A wallet holds **a key and nothing else** — no chain data, no history, no
 cache. It asks any node for a balance and *checks the answer*:
@@ -1065,6 +1065,27 @@ verify_account_proof(proof, validators):
 
 A lying node cannot pass all four checks, so a wallet never has to trust the
 node it talks to — it can point at any public node safely.
+
+### 18.4 Many receive addresses from one seed
+
+The protocol is account-based: leftovers stay on the sender, so there is no
+UTXO “change address.” Anyone can still build a wallet that hands out a fresh
+receive address per payment — useful for privacy hygiene and bookkeeping —
+without any special chain support.
+
+Idea: keep one **master** 32-byte seed offline, and derive child seeds:
+
+```
+child_seed_i = SHA3-256(master ‖ "SIKKA/recv/v1" ‖ u32le(i))
+key_i        = ML-DSA-87.keygen(child_seed_i)
+address_i    = SHA3-256(public_key_i)
+```
+
+Each `i` is an independent SIKKA account (its own balance, nonce, battery).
+To restore, walk `i = 0, 1, …` via `account.get` and stop after a gap of unused
+accounts (ten in a row is a reasonable default). Spend from whichever child
+holds funds; the simple browser wallet (`/wallet.html`) is one-key-only —
+multi-receive is left to wallets you write yourself (see `docs/wallets.md`).
 
 ---
 
