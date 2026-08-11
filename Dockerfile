@@ -26,7 +26,8 @@ RUN apt-get update \
 COPY --from=builder /build/target/release/sikka-node /usr/local/bin/sikka-node
 COPY --from=builder /build/target/release/sikka /usr/local/bin/sikka
 COPY docker/entrypoint.sh /usr/local/bin/sikka-entrypoint
-RUN chmod 755 /usr/local/bin/sikka-entrypoint
+COPY docker/healthcheck.sh /usr/local/bin/sikka-healthcheck
+RUN chmod 755 /usr/local/bin/sikka-entrypoint /usr/local/bin/sikka-healthcheck
 
 USER sikka
 WORKDIR /data
@@ -39,7 +40,8 @@ ENV SIKKA_LOG=info \
     SIKKA_KEYSTORE=/data/node_key.json \
     SIKKA_NODE=http://127.0.0.1:64552
 
-HEALTHCHECK --interval=15s --timeout=5s --start-period=90s --retries=8 \
-    CMD curl -fsS http://127.0.0.1:64552/api/health > /dev/null || exit 1
+# start-period covers Tor bootstrap; health requires RPC + SOCKS (not onion ok).
+HEALTHCHECK --interval=15s --timeout=5s --start-period=120s --retries=8 \
+    CMD ["/usr/local/bin/sikka-healthcheck"]
 
 ENTRYPOINT ["/usr/local/bin/sikka-entrypoint"]

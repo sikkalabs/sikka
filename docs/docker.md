@@ -3,8 +3,10 @@
 Image: [`ghcr.io/sikkalabs/sikka:latest`](https://github.com/orgs/sikkalabs/packages) (amd64 + arm64).
 
 **Peer mesh is Tor-only.** The image runs the Tor daemon (`tor`: SOCKS +
-hidden service) alongside `sikka-node`. Each node derives a deterministic v3
-onion from `SIKKA_PRIVATE_KEY` and advertises only that onion to peers.
+hidden service) alongside `sikka-node`. The entrypoint waits until SOCKS is
+ready before starting the node, restarts Tor if it exits (capped), and exits
+the container if Tor cannot stay up — so Docker `restart` policies recover the
+pair. Healthchecks require RPC **and** a live SOCKS listener.
 Bootstrap defaults to the two genesis validators' onions. HS key material is
 written under `/data/arti/ctor/` in C-Tor format (Arti ctor-compatible); an
 `arti.toml` is also generated for a future Arti sidecar swap.
