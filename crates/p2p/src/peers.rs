@@ -19,7 +19,7 @@ use sikka_common::constants::TX_TIME_TOLERANCE_SECS;
 use sikka_common::error::{Error, Result};
 
 /// Domain tag for signed peer announcements.
-pub const ANNOUNCE_TAG: &[u8] = b"SIKKA/peer-announce/v4";
+pub const ANNOUNCE_TAG: &[u8] = b"SIKKA/peer-announce/v1";
 
 /// Maximum peers tracked, so discovery cannot exhaust memory.
 pub const DEFAULT_MAX_PEERS: usize = 512;

@@ -12,9 +12,9 @@ use crate::constants::TX_TIME_TOLERANCE_SECS;
 use crate::error::{Error, Result};
 
 /// Domain tag covering the signed payload of a transaction.
-pub const TX_SIGNING_TAG: &[u8] = b"SIKKA/tx/v4";
+pub const TX_SIGNING_TAG: &[u8] = b"SIKKA/tx/v1";
 /// Domain tag for transaction ids.
-pub const TX_ID_TAG: &[u8] = b"SIKKA/tx-id/v2";
+pub const TX_ID_TAG: &[u8] = b"SIKKA/tx-id/v1";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]

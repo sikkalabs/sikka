@@ -17,8 +17,8 @@ const SIG_LEN = 4627;
 const SMT_LEAF_TAG = new TextEncoder().encode("SIKKA/smt-leaf/v1");
 const SMT_NODE_TAG = new TextEncoder().encode("SIKKA/smt-node/v1");
 const ACCOUNT_LEAF_TAG = new TextEncoder().encode("SIKKA/account-leaf/v1");
-const CHECKPOINT_TAG = new TextEncoder().encode("SIKKA/checkpoint/v4");
-const VOTE_TAG = new TextEncoder().encode("SIKKA/vote/v5");
+const CHECKPOINT_TAG = new TextEncoder().encode("SIKKA/checkpoint/v1");
+const VOTE_TAG = new TextEncoder().encode("SIKKA/vote/v1");
 const SIGNING_CONTEXT = new TextEncoder().encode("SIKKA-v1");
 const EMPTY_HASH = new Uint8Array(32);
 const MAX_DEPTH = 256;
@@ -130,7 +130,7 @@ export function accountLeafHash(account, addressBytes) {
   return digestParts([ACCOUNT_LEAF_TAG, body]);
 }
 
-/** CheckpointHeader::encode (SIKKA/checkpoint/v4 — includes genesis fingerprint) */
+/** CheckpointHeader::encode (SIKKA/checkpoint/v1 — includes genesis fingerprint) */
 function encodeCheckpointHeader(header) {
   if (header.genesis_fingerprint == null) {
     throw new Error("checkpoint header missing genesis_fingerprint");
@@ -162,7 +162,7 @@ function checkpointHeader(checkpoint) {
   return checkpoint;
 }
 
-/** vote_signing_bytes — SIKKA/vote/v5 binds chain_id + genesis_fingerprint */
+/** vote_signing_bytes — SIKKA/vote/v1 binds chain_id + genesis_fingerprint */
 export function voteSigningBytes(
   chainId,
   genesisFingerprintBytes,

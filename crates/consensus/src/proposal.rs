@@ -26,7 +26,7 @@ use crate::equivocation::Equivocation;
 use crate::{proposer_for_round, round_at, PROPOSER_TIMEOUT_SECS};
 
 /// Domain tag for the proposer's signature over a proposal.
-pub const PROPOSAL_TAG: &[u8] = b"SIKKA/proposal/v4";
+pub const PROPOSAL_TAG: &[u8] = b"SIKKA/proposal/v1";
 
 /// Bytes the proposer signs: domain tag + chain id + genesis fingerprint + header hash.
 ///

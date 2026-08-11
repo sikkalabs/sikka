@@ -64,16 +64,17 @@ Full RPC: [`api.md`](api.md).
 
 ## Sign a transfer
 
-1. `chain.info` → take `chain_id` (exact string; do not invent one).
+1. `chain.info` → take `chain_id` and `genesis_fingerprint` (exact values; do not invent them).
 2. `account.get` → use `next_nonce`.
 3. Build signing bytes (matches `Transaction::signing_bytes`):
 
 ```text
-SIKKA/tx/v3 ‖ str(chain_id) ‖ kind ‖ from ‖ to ‖ amount ‖ nonce ‖ timestamp ‖ public_key
+SIKKA/tx/v1 ‖ str(chain_id) ‖ genesis_fingerprint ‖ kind ‖ from ‖ to ‖ amount ‖ nonce ‖ timestamp ‖ public_key
 ```
 
 `str(s)` is `u32` little-endian UTF-8 length + UTF-8 bytes (same as the Rust
 codec `Writer::str`).  
+`genesis_fingerprint`: 32 raw bytes from `chain.info`.  
 `kind`: transfer `0`, bond `1`, unbond `2`.  
 `from` / `to`: 32 raw address bytes.  
 `amount` / `nonce` / `timestamp`: little-endian `u64`.  
@@ -99,6 +100,7 @@ const signature = ml_dsa87.sign(msg, secretKey, {
   "nonce": 0,
   "timestamp": 1720000000,
   "chain_id": "sikka",
+  "genesis_fingerprint": "0x…",
   "public_key": "<2592-byte hex>",
   "signature": "<4627-byte hex>"
 }

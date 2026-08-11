@@ -558,24 +558,26 @@ inflation; spam is bounded by per-account battery (§10) instead of price.
 ### 9.2 The signed payload
 
 ```
-signing_bytes =  "SIKKA/tx/v3"
+signing_bytes =  "SIKKA/tx/v1"
               ‖  str(chain_id)          // u32le length + utf-8
+              ‖  genesis_fingerprint    // 32 bytes
               ‖  kind_tag               // 0 | 1 | 2
               ‖  from ‖ to              // 32 bytes each
               ‖  amount ‖ nonce ‖ timestamp   // u64le each
               ‖  public_key             // 2592 bytes ML-DSA-87
 ```
 
-The `chain_id` is bound into the signature and the transaction id, so a
-transaction signed for one chain can never be replayed on another that shares
-keys. The `public_key` is carried explicitly (the ledger stores only the
-32-byte address) and the protocol checks it hashes to `from` — a proposer
-cannot swap a different key onto a cached id to skip verification.
+The `chain_id` and genesis fingerprint are bound into the signature and the
+transaction id, so a transaction signed for one network can never be replayed
+on another that shares keys or only the same human-readable chain name. The
+`public_key` is carried explicitly (the ledger stores only the 32-byte address)
+and the protocol checks it hashes to `from` — a proposer cannot swap a
+different key onto a cached id to skip verification.
 
 ### 9.3 Transaction id
 
 ```
-id = SHA3-256("SIKKA/tx-id/v2" ‖ signing_bytes)
+id = SHA3-256("SIKKA/tx-id/v1" ‖ signing_bytes)
 ```
 
 The signature itself is excluded, so re-signing the same payload (ML-DSA is

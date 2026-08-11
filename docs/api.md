@@ -214,11 +214,12 @@ Only the last 100 heights are retained.
 | `nonce` | u64 | must match `next_nonce` |
 | `timestamp` | u64 | unix seconds; ±5 minutes of node clock |
 | `chain_id` | string | must match `chain.info.chain_id` |
+| `genesis_fingerprint` | hex (32 bytes) | must match `chain.info.genesis_fingerprint` |
 | `public_key` | hex (2592 bytes) | ML-DSA-87 |
 | `signature` | hex (4627 bytes) | context `SIKKA-v1` |
 
 Signing payload:  
-`SIKKA/tx/v3` ‖ `str(chain_id)` ‖ kind_tag ‖ from ‖ to ‖ amount ‖ nonce ‖ timestamp ‖ public_key  
+`SIKKA/tx/v1` ‖ `str(chain_id)` ‖ genesis_fingerprint ‖ kind_tag ‖ from ‖ to ‖ amount ‖ nonce ‖ timestamp ‖ public_key  
 (`str` = u32 LE length + UTF-8; integers are little-endian u64;  
 `transfer=0`, `bond=1`, `unbond=2`).
 

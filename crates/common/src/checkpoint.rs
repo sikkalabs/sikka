@@ -11,7 +11,7 @@ use crate::codec::{Decode, Encode, Reader, Writer};
 use crate::error::{Error, Result};
 
 /// Domain tag for the checkpoint hash preimage.
-pub const CHECKPOINT_TAG: &[u8] = b"SIKKA/checkpoint/v4";
+pub const CHECKPOINT_TAG: &[u8] = b"SIKKA/checkpoint/v1";
 /// Domain tag for the transaction-set commitment.
 pub const TX_ROOT_TAG: &[u8] = b"SIKKA/tx-root/v1";
 

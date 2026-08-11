@@ -11,7 +11,7 @@ use crate::constants::UNBONDING_SECS;
 use crate::error::Result;
 
 /// Domain tag for validator leaves in the validator Sparse Merkle Tree.
-pub const VALIDATOR_LEAF_TAG: &[u8] = b"SIKKA/validator-leaf/v2";
+pub const VALIDATOR_LEAF_TAG: &[u8] = b"SIKKA/validator-leaf/v1";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Validator {

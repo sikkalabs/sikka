@@ -22,7 +22,7 @@ use crate::codec::{Decode, Encode, Reader, Writer};
 use crate::error::{Error, Result};
 
 /// Domain tag for the signed vote payload.
-pub const VOTE_TAG: &[u8] = b"SIKKA/vote/v5";
+pub const VOTE_TAG: &[u8] = b"SIKKA/vote/v1";
 
 /// Which consensus step a vote belongs to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]

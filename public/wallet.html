@@ -213,7 +213,7 @@
       </div>
       <p class="ok" id="sendOk" hidden></p>
       <p class="warn">
-        Signing uses ML-DSA-87 (<code>SIKKA/tx/v4</code>, context
+        Signing uses ML-DSA-87 (<code>SIKKA/tx/v1</code>, context
         <code>SIKKA-v1</code>) bound to the node’s <code>chain_id</code>.
         Nothing is sent until you click Send. Prefer <code>sikka new</code> for
         long-term keys.
@@ -233,7 +233,7 @@
     const PK_LEN = 2592;
     const SIG_LEN = 4627;
     const CHILLAR_PER_SIKKA = 1_000_000_000n;
-    const TX_SIGNING_TAG = new TextEncoder().encode("SIKKA/tx/v4");
+    const TX_SIGNING_TAG = new TextEncoder().encode("SIKKA/tx/v1");
     const SIGNING_CONTEXT = new TextEncoder().encode("SIKKA-v1");
     const DEFAULT_NODE = location.protocol.startsWith("http")
       ? location.origin
