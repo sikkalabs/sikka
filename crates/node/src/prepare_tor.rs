@@ -127,7 +127,7 @@ fn split_host_port(socks: &str) -> Result<(&str, u16)> {
     let socks = socks.strip_prefix("socks5h://").unwrap_or(socks);
     let socks = socks.strip_prefix("socks5://").unwrap_or(socks);
     let (host, port) = socks.rsplit_once(':').ok_or_else(|| {
-        Error::Other(format!("SIKKA_TOR_SOCKS '{socks}' must be host:port"))
+        Error::Other(format!("Tor SOCKS '{socks}' must be host:port"))
     })?;
     let port: u16 = port
         .parse()

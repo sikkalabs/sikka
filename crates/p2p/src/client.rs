@@ -81,7 +81,7 @@ impl PeerClient {
         }
         if is_onion_endpoint(endpoint) {
             return self.tor.as_ref().ok_or_else(|| {
-                Error::Network("onion peer dial requires socks_proxy / SIKKA_TOR_SOCKS".into())
+                Error::Network("onion peer dial requires socks_proxy".into())
             });
         }
         Err(Error::Network(format!(

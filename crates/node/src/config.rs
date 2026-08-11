@@ -1,8 +1,9 @@
 //! Node configuration.
 //!
-//! Environment knobs: `SIKKA_PRIVATE_KEY`, `SIKKA_BOOTSTRAP`, `SIKKA_TOR_SOCKS`, …
-//! Advertise URL is always the deterministic Tor onion derived from the node
-//! key — there is no clearnet peer advertise env.
+//! Operator env knobs (Docker): `SIKKA_PRIVATE_KEY`, `SIKKA_TRUSTED_CHECKPOINT`,
+//! `SIKKA_LOG`. Everything else is fixed for the image (`/data`, Tor SOCKS,
+//! baked-in bootstrap onions). Advertise URL is always the deterministic Tor
+//! onion derived from the node key.
 
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::path::PathBuf;
@@ -28,7 +29,7 @@ pub struct NodeConfig {
     /// Where redb files and the key live. Always `/data` in production.
     pub data_dir: PathBuf,
     /// Optional genesis document. When absent (or the path does not exist), the
-    /// baked-in SIKKA genesis is used.
+    /// baked-in SIKKA genesis is used. Operators may drop `/data/genesis.json`.
     pub genesis_path: PathBuf,
     /// ML-DSA-87 keystore. Always `/data/node_key.json` in production.
     pub key_path: PathBuf,
@@ -94,65 +95,17 @@ impl Default for NodeConfig {
 impl NodeConfig {
     /// Read the remaining knobs from the environment.
     ///
-    /// Data dir (`/data`), key path (`/data/node_key.json`), listen port
-    /// ([`DEFAULT_PORT`]), and validator mode (`true`) are fixed. Tests may
-    /// still override fields on a constructed [`NodeConfig`].
+    /// Paths (`/data`), listen port, Tor SOCKS, bootstrap peers, mempool size,
+    /// and timing are fixed for the Docker image. Tests may still override
+    /// fields on a constructed [`NodeConfig`].
     pub fn from_env() -> Result<Self> {
         let mut config = Self::default();
 
-        if let Some(dir) = env("SIKKA_DATA_DIR") {
-            let data_dir = PathBuf::from(dir);
-            config.data_dir = data_dir.clone();
-            config.genesis_path = data_dir.join("genesis.json");
-            config.key_path = data_dir.join("node_key.json");
-        }
-        if let Some(path) = env("SIKKA_GENESIS") {
-            config.genesis_path = PathBuf::from(path);
-        }
         if let Some(key) = env("SIKKA_PRIVATE_KEY") {
             config.private_key = Some(key);
         }
-        if let Some(path) = env("SIKKA_KEYSTORE") {
-            config.key_path = PathBuf::from(path);
-        }
-
-        config.listen = SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), DEFAULT_PORT);
-
-        if let Some(list) = env("SIKKA_BOOTSTRAP") {
-            config.bootstrap = list
-                .split(',')
-                .map(str::trim)
-                .filter(|s| !s.is_empty())
-                .map(normalize_endpoint)
-                .collect();
-        }
-        if let Some(socks) = env("SIKKA_TOR_SOCKS") {
-            if socks.eq_ignore_ascii_case("none") || socks.eq_ignore_ascii_case("off") {
-                config.tor_socks = None;
-            } else {
-                config.tor_socks = Some(socks);
-            }
-        }
         if let Some(value) = env("SIKKA_TRUSTED_CHECKPOINT") {
             config.trusted_checkpoint = Some(parse_trusted_checkpoint(&value)?);
-        }
-        if let Some(capacity) = env("SIKKA_MEMPOOL_CAPACITY") {
-            let capacity: usize = capacity.parse().map_err(|_| {
-                Error::Other(format!("SIKKA_MEMPOOL_CAPACITY '{capacity}' invalid"))
-            })?;
-            config.mempool_capacity = capacity.max(1).min(100_000);
-        }
-        if let Some(secs) = env("SIKKA_MAX_CHECKPOINT_DELAY") {
-            let secs: u64 = secs.parse().map_err(|_| {
-                Error::Other(format!("SIKKA_MAX_CHECKPOINT_DELAY '{secs}' invalid"))
-            })?;
-            config.max_checkpoint_delay = Duration::from_secs(secs);
-        }
-        if let Some(ms) = env("SIKKA_PROPOSE_INTERVAL_MS") {
-            let ms: u64 = ms
-                .parse()
-                .map_err(|_| Error::Other(format!("SIKKA_PROPOSE_INTERVAL_MS '{ms}' invalid")))?;
-            config.propose_interval = Duration::from_millis(ms.max(50));
         }
 
         Ok(config)

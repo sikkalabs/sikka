@@ -54,7 +54,7 @@ open http://127.0.0.1:64552/wallet.html  # browser wallet on this node
 ```
 
 Joiners: different `--name`, volume, and seed. Peers find each other over Tor
-via the hardcoded onion bootstrap (or `SIKKA_BOOTSTRAP`).
+via the hardcoded onion bootstrap.
 
 ### Local Tor mesh test (two validators)
 
@@ -123,12 +123,14 @@ docker exec sikka sikka help
 | Variable | Default in image | Meaning |
 | --- | --- | --- |
 | `SIKKA_PRIVATE_KEY` | unset | 32-byte seed or full secret (hex); else a key is created under `/data` |
-| `SIKKA_BOOTSTRAP` | genesis validators' `.onion` URLs | first Tor peers |
-| `SIKKA_TOR_SOCKS` | `127.0.0.1:9050` | SOCKS5h for onion dials (`none` disables Tor — tests only) |
-| `SIKKA_DATA_DIR` | `/data` | state, keystore, Tor HS keys |
-| `SIKKA_GENESIS` | baked-in if missing | optional custom genesis path |
 | `SIKKA_TRUSTED_CHECKPOINT` | unset | `<height>:<hash>` trust anchor required when fast-sync crosses more than one height |
 | `SIKKA_LOG` | `info` | tracing filter |
+
+Paths, Tor SOCKS (`127.0.0.1:9050`), and bootstrap peers are fixed in the image.
+Optional custom genesis: drop a file at `/data/genesis.json` (otherwise baked-in).
+
+`SIKKA_KEYSTORE` / `SIKKA_NODE` are set in the image for the in-container
+`sikka` CLI (`docker exec sikka sikka …`), not for `sikka-node` itself.
 
 Do not copy `SIKKA_TRUSTED_CHECKPOINT` from an untrusted peer. Verify the
 checkpoint hash independently through multiple operators or a release

@@ -12,7 +12,6 @@ services:
     environment:
       SIKKA_PRIVATE_KEY: ${validator1}
       SIKKA_LOG: info
-      SIKKA_TOR_SOCKS: 127.0.0.1:9050
     volumes:
       - v1-data:/data
     ports:
@@ -25,7 +24,6 @@ services:
     environment:
       SIKKA_PRIVATE_KEY: ${validator2}
       SIKKA_LOG: info
-      SIKKA_TOR_SOCKS: 127.0.0.1:9050
     volumes:
       - v2-data:/data
     ports:

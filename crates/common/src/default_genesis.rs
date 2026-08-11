@@ -1,6 +1,6 @@
 //! The baked-in genesis for the SIKKA network.
 //!
-//! A node with no `SIKKA_GENESIS` file starts from this document: the admin
+//! A node with no `/data/genesis.json` starts from this document: the admin
 //! address holds the liquid mint (cold treasury — not a validator), and two
 //! operators are funded and bonded at height 0. Peers find each other via the
 //! hardcoded Tor onion bootstrap list, so genesis validators carry no endpoints.

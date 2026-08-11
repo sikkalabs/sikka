@@ -2,10 +2,10 @@
 # Docker entrypoint: prepare deterministic Tor HS keys, start tor, then sikka-node.
 set -euo pipefail
 
-DATA_DIR="${SIKKA_DATA_DIR:-/data}"
+DATA_DIR="/data"
 TORRC="${DATA_DIR}/torrc"
-SOCKS="${SIKKA_TOR_SOCKS:-127.0.0.1:9050}"
-SOCKS_PORT="${SOCKS##*:}"
+SOCKS="127.0.0.1:9050"
+SOCKS_PORT="9050"
 
 echo "sikka: preparing Tor hidden service keys"
 ADVERTISE="$(/usr/local/bin/sikka-node --prepare-tor 2>/dev/null | tail -n1)"

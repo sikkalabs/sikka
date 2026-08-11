@@ -33,11 +33,11 @@ WORKDIR /data
 VOLUME ["/data"]
 EXPOSE 64552
 
+# Node knobs: SIKKA_PRIVATE_KEY, SIKKA_TRUSTED_CHECKPOINT, SIKKA_LOG.
+# SIKKA_KEYSTORE / SIKKA_NODE are for the in-container `sikka` CLI only.
 ENV SIKKA_LOG=info \
     SIKKA_KEYSTORE=/data/node_key.json \
-    SIKKA_NODE=http://127.0.0.1:64552 \
-    SIKKA_DATA_DIR=/data \
-    SIKKA_TOR_SOCKS=127.0.0.1:9050
+    SIKKA_NODE=http://127.0.0.1:64552
 
 HEALTHCHECK --interval=15s --timeout=5s --start-period=90s --retries=8 \
     CMD curl -fsS http://127.0.0.1:64552/api/health > /dev/null || exit 1
