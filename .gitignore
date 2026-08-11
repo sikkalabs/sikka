@@ -1,6 +1,7 @@
 # Build output. Cargo.lock is committed on purpose: this workspace ships
 # binaries, so builds should be reproducible.
 /target/
+/target-user/
 **/*.rs.bk
 
 # Node state. A node writes its databases and its key into its data directory;
