@@ -18,7 +18,7 @@ works, down to the integer arithmetic that mints a CHILLAR.
 2. [Design Principles](#2-design-principles)
 3. [The Unit: SIKKA and CHILLAR](#3-the-unit-sikka-and-chillar)
 4. [Supply and Distribution](#4-supply-and-distribution)
-5. [The 80% Public Allocation: ERC-20 + Vesting](#5-the-80-public-allocation-erc-20--vesting)
+5. [The 80% Public Allocation: ERC-20 + Uniswap Auction](#5-the-80-public-allocation-erc-20--uniswap-auction)
 6. [The 20% Faucet Allocation](#6-the-20-faucet-allocation)
 7. [Inflation: 1.5%/year, forever, in integer arithmetic](#7-inflation)
 8. [The Ledger: State, Not History](#8-the-ledger-state-not-history)
@@ -207,7 +207,7 @@ and nothing can be minted except the deterministic inflation of
 ```
 Supply at genesis:           19,960,907 SIKKA
 Split ─────────────────────────────────────────────
-  80%  Public purchase (ERC-20, vested)    15,968,726 SIKKA
+  80%  Public purchase (ERC-20, auctioned)    15,968,726 SIKKA
   20%  Faucet (test the network)            3,992,181 SIKKA
        ─────────────────────────────────────
        100%                                 19,960,907 SIKKA
@@ -215,7 +215,7 @@ Split ────────────────────────�
 
 | Share | SIKKA | CHILLAR | Purpose |
 | --- | ---: | ---: | --- |
-| **80%** | 15,968,726 | 15,968,726,000,000,000 | Bought via the SIKKA ERC-20 token `0xbAB5a2CC8C9Eb4042eEAE289b26B66166cf04a81`, vested and released linearly through `SikkaVesting` at `0xe4A5f67529D40ACfF666303Dd0B6F72A734198B3` |
+| **80%** | 15,968,726 | 15,968,726,000,000,000 | Bought via the SIKKA ERC-20 token `0x1387f900f9b1aca12c1a8e54c0df4fd26f85d42d`, distributed publicly through the [Uniswap auction](https://app.uniswap.org/explore/auctions/ethereum/0xf2DcBF7Ab79eeE7AB7f633962b93537b6b4183cE) |
 | **20%** | 3,992,181 | 3,992,181,000,000,000 | Faucet: given away so anyone can test and try the network directly, with zero cost and zero permission |
 
 ### 4.2 How it lands on-chain
@@ -225,13 +225,13 @@ The on-chain genesis encodes the *operational* structure of those allocations
 
 | On-chain account | SIKKA | Note |
 | --- | ---: | --- |
-| Cold treasury (admin) | **19,906,907** | Custodian of the liquid mint — not a validator. Holds the vested + faucet allocations |
+| Cold treasury (admin) | **19,906,907** | Custodian of the liquid mint — not a validator. Holds the auctioned + faucet allocations |
 | Genesis validator A | 30,000 | 10,000 bonded + 20,000 liquid |
 | Genesis validator B | 24,000 | 4,000 bonded + 20,000 liquid |
 | **Total** | **19,960,907** | |
 
 ```
-             genesis supply
+              genesis supply
         ┌──────────────────────┐
         │       19,960,907     │
         └──────────┬───────────┘
@@ -241,13 +241,10 @@ The on-chain genesis encodes the *operational* structure of those allocations
         └──────────┬───────────┘
         ┌──────────▼───────────┐        ┌─────────────────────────┐
         │  80%  public tranche │        │  20%  faucet tranche    │
-        │  ERC-20 token        │        │  free for testing       │
-        │  0xbAB5…4a81         │        │  anyone can try the net │
-        │        │             │        └─────────────────────────┘
-        │        ▼             │
-        │  SikkaVesting        │
-        │  0xe4A5…8B3          │
-        │  1 SIKKA / 4 seconds │
+        │  Uniswap auction     │        │  free for testing       │
+        │  ERC-20 token        │        │  anyone can try the net │
+        │  0x1387…2d2d         │        └─────────────────────────┘
+        │  liquidity locked    │
         └──────────────────────┘
 ```
 
@@ -257,73 +254,26 @@ genesis validators are for operational security, not distribution.
 
 ---
 
-## 5. The 80% Public Allocation: ERC-20 + Vesting
+## 5. The 80% Public Allocation: ERC-20 + Uniswap Auction
 
-### 5.1 The two contracts
+### 5.1 The contract and the auction
+
+The 80% public allocation was sold directly through a **Uniswap auction** —
+a transparent, on-chain price-discovery sale. Bidders participate in the
+auction window and receive SIKKA at the clearing price; the resulting
+liquidity settles into a permanently locked Uniswap v4 pool, so it can never
+be withdrawn by the creator.
 
 | Contract | Address | Role |
 | --- | --- | --- |
-| **SikkaToken** (ERC-20) | `0xbAB5a2CC8C9Eb4042eEAE289b26B66166cf04a81` | the purchase instrument — a *guest pass*; its `burn()` is the only door into the native chain (§5.5) |
-| **SikkaVesting** | `0xe4A5f67529D40ACfF666303Dd0B6F72A734198B3` | linear time-lock release of the purchased supply to the beneficiary |
+| **SikkaToken** (ERC-20) | `0x1387f900f9b1aca12c1a8e54c0df4fd26f85d42d` | the purchase instrument — a *guest pass*; its `burn()` is the only door into the native chain (§5.2) |
 
-### 5.2 SikkaVesting mechanics (verbatim from the contract)
+The ERC-20 is the sole purchase instrument: buy SIKKA through the
+[Uniswap auction](https://app.uniswap.org/explore/auctions/ethereum/0xf2DcBF7Ab79eeE7AB7f633962b93537b6b4183cE)
+or on secondary markets (Uniswap, Matcha), then burn-to-bridge 1:1 into the
+native chain (§5.2).
 
-| Constant | Value | Meaning |
-| --- | ---: | --- |
-| `token` | `0xbAB5a2CC…` | the ERC-20 this contract releases |
-| `RELEASE_INTERVAL` | `4` seconds | one release tick |
-| `RELEASE_AMOUNT` | `1 × 10⁹` | 1 SIKKA per tick (CHILLAR denomination, 9 decimals) |
-| `start` | `block.timestamp` at deployment | the clock starts only once |
-| `released` | cumulative CHILLAR paid out | monotonic, never exceeds `owed()` |
-
-The release schedule is a pure function of wall-clock time:
-
-```
-  owed(t)      =  max(0, ⌊(t − start) / 4⌋) × 1 SIKKA
-  releasable() =  min(owed(now) − released, balanceOf(contract))
-  release()    =  transfer(releasable() to beneficiary)
-```
-
-### 5.3 The release curve
-
-| Elapsed | SIKKA released | % of 80% tranche | % of total supply |
-| --- | ---: | ---: | ---: |
-| 1 day | 21,600 | 0.14% | 0.11% |
-| 1 month | 648,000 | 4.06% | 3.25% |
-| 6 months | 3,888,000 | 24.35% | 19.48% |
-| 1 year | 7,884,000 | 49.37% | 39.50% |
-| ≈ 2.02 years (≈ 739 days) | **15,968,726** | **100%** | **80%** |
-
-```
- released SIKKA (thousands)
-  16,000 ┤                                                     ● 100%
-        ┤
-  12,000 ┤
-        ┤                                          ● ~75%
-   8,000 ┤                              ● ~50%
-        ┤                   ● ~25%
-   4,000 ┤
-        ┤        ●
-        └──────────────────────────────────────────────────────────►
-            0     6      12     18     24   months (1 SIKKA / 4 s)
-```
-
-At **1 SIKKA every 4 seconds** the entire 80% tranche — 15,968,726 SIKKA — is
-released in ≈ **739 days (~2.02 years)**, a constant drip that smooths the
-token into circulation and prevents any single-epoch dump.
-
-### 5.4 Safety rails on the contract
-
-| Mechanism | What it prevents |
-| --- | --- |
-| `nonReentrant` guard | re-entrant `release()` draining the contract |
-| `owed()` is monotonic; `released` only increases inside `release()` | double-claiming |
-| `release()` requires `amount > 0` | no-op spam |
-| `rescueOtherToken()` refuses `token` | cannot exfiltrate the vesting token |
-| `updateBeneficiary()` is `onlyBeneficiary` | the deployer cannot be robbed |
-| `start` immutable, set at deployment | the schedule cannot be re-anchored later |
-
-### 5.5 The one-way bridge: burn to enter
+### 5.2 The one-way bridge: burn to enter
 
 The ERC-20 is deliberately **a guest pass, not the chain** — the token
 contract's own docstring says so. It exists for one reason: to let an
@@ -354,6 +304,13 @@ amount of native SIKKA from the escrow to `sikkaAddress`, **1:1**. The
 direction never reverses: there is no mint function, no un-burn, no bridge
 back. The total SIKKA that can ever exist on Ethereum only decreases; every
 burn moves value across, one way.
+
+Today the burn is executed by the **SIKKA team** on behalf of holders: a buyer
+sends ERC-20 SIKKA to the team's burn address and names their 32-byte Sikka
+destination address; the team calls `burn` and the relayer delivers native
+SIKKA 1:1. An automated **burn-and-claim smart contract** is planned for
+**Q1 2027** that will let anyone burn and claim directly on-chain, with no
+team involvement.
 
 This works because the escrow is real: the ERC-20's fixed supply (19,960,907
 SIKKA) is fully backed by native supply held on the Sikka chain, so a burn is
@@ -386,7 +343,7 @@ As long as that holds, every outstanding ERC-20 token can be honoured 1:1.
 
 **3,992,181 SIKKA (20% of supply)** are reserved as a faucet so that anyone —
 human or agent — can obtain real SIKKA without buying, without KYC and without
-waiting for a vesting release. The purpose is direct and deliberate:
+waiting for an auction settlement. The purpose is direct and deliberate:
 
 - test the network (send, bond, unbond, run a validator) with real stakes;
 - build wallets and agents against a live chain;
@@ -399,7 +356,6 @@ waiting for a vesting release. The purpose is direct and deliberate:
 | Mechanism | faucet grants from the cold treasury |
 | Recipients | anyone testing the network |
 | Cost | zero (no gas exists — see §9) |
-| Vesting | none — immediate utility, the point is to use it |
 
 Fresh faucet-funded accounts start with an empty battery (§10) so that even a
 free-money mass-funding attack cannot turn into a sybil spam attack.
@@ -1169,24 +1125,7 @@ function checkpoint_inflation(supply, dt):
     return supply · factor / 10¹⁸
 ```
 
-### 21.4 SikkaVesting release
-
-```
-function owed(t):
-    if t < start: return 0
-    return ((t − start) / 4) · 1_000_000_000       // 1 SIKKA per 4 s
-
-function releasable():
-    due  ← owed(now)
-    return min(due − released, token.balanceOf(this))
-
-function release():
-    require releasable() > 0
-    released += releasable()
-    token.transfer(beneficiary, releasable())      // reentrancy-guarded
-```
-
-### 21.5 Account proof verification
+### 21.4 Account proof verification
 
 ```
 function verify(proof, root, key, value):
@@ -1196,7 +1135,7 @@ function verify(proof, root, key, value):
     return false
 ```
 
-### 21.6 The one-way bridge (burn to enter)
+### 21.5 The one-way bridge (burn to enter)
 
 ```
 function burn(sikkaAddress, amount):                     // ERC-20 side
@@ -1212,6 +1151,10 @@ loop (relayer, watching Burned):                         // native side
         escrow.send(sikkaAddress, amount)                // 1:1 from the cold treasury
     assert escrow_balance() >= totalSupply(ERC-20)       // escrow invariant holds
 ```
+
+Until the automated burn-and-claim contract ships (Q1 2027, §5.2), the `burn`
+call is executed by the SIKKA team on behalf of holders; the relayer delivery
+remains the same either way.
 
 ---
 
@@ -1234,7 +1177,7 @@ loop (relayer, watching Burned):                         // native side
 | **Weak subjectivity** | trust anchor needed to sync across >1 height |
 | **Cold treasury** | the admin address holding the liquid mint (not a validator); also the bridge escrow |
 | **Guest pass** | the SikkaToken ERC-20 on Ethereum; a claim on native SIKKA, redeemable only by burning |
-| **Burn / Bridge** | `SikkaToken.burn(sikkaAddress, amount)` + a relayer delivering native SIKKA 1:1 from the escrow; one-way (§5.5) |
+| **Burn / Bridge** | `SikkaToken.burn(sikkaAddress, amount)` + a relayer delivering native SIKKA 1:1 from the escrow; one-way (§5.2) |
 | **Faucet** | the 20% allocation given away to test the network |
 
 ---
@@ -1254,9 +1197,8 @@ loop (relayer, watching Burned):                         // native side
 | [9] | SIKKA storage — `crates/state/src/store.rs` |
 | [10] | SIKKA wallet proofs — `crates/wallet/src/proof.rs` |
 | [11] | SIKKA API — `docs/api.md` |
-| [12] | SikkaToken (SIKKA ERC-20, burn-to-enter) — `0xbAB5a2CC8C9Eb4042eEAE289b26B66166cf04a81` — <https://etherscan.io/token/0xbab5a2cc8c9eb4042eeae289b26b66166cf04a81#code> |
-| [13] | SikkaVesting — `0xe4A5f67529D40ACfF666303Dd0B6F72A734198B3` — <https://etherscan.io/address/0xe4a5f67529d40acff666303dd0b6f72a734198b3#code> |
-| [14] | Repository — <https://github.com/sikkalabs/sikka> |
+| [12] | SikkaToken (SIKKA ERC-20, burn-to-enter, launched via the [Uniswap auction](https://app.uniswap.org/explore/auctions/ethereum/0xf2DcBF7Ab79eeE7AB7f633962b93537b6b4183cE)) — `0x1387f900f9b1aca12c1a8e54c0df4fd26f85d42d` — <https://etherscan.io/token/0x1387f900f9b1aca12c1a8e54c0df4fd26f85d42d#code> |
+| [13] | Repository — <https://github.com/sikkalabs/sikka> |
 
 ---
 
