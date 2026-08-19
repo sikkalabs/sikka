@@ -9,7 +9,7 @@
 //! Proposals carry the proposer's ML-DSA signature over the header hash so peers
 //! can reject forgeries before verifying a bulk of transaction signatures.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use serde::{Deserialize, Serialize};
 
@@ -204,11 +204,15 @@ fn slashings(ledger: &Ledger, evidence: &[Equivocation]) -> Result<Vec<Address>>
 
 /// Build a proposal for the next height from `candidates`.
 ///
-/// Transactions that fail are silently dropped from the checkpoint: they were
-/// invalid against the state at this height, and including them would make the
-/// checkpoint unverifiable. Ids that failed with [`Error::BadNonce`] are
-/// returned so the caller can purge them from the mempool — they can never
-/// apply until the gap is filled, and re-batching them only wastes CPU.
+/// Transactions that fail are omitted from the checkpoint: they were invalid
+/// against the state at this height, and including them would make the
+/// checkpoint unverifiable.
+///
+/// Mempool drops are only the *first* [`Error::BadNonce`] for a sender and that
+/// sender's later candidates in this batch — a real gap, which can never apply.
+/// A battery, timestamp, or balance miss is left in the pool so the whole nonce
+/// run can retry at the next height, instead of purging the tail and stranding
+/// the head.
 ///
 /// The returned [`Staged`] must be committed once the checkpoint reaches quorum,
 /// or rolled back.
@@ -227,16 +231,11 @@ pub fn build_proposal(
 
     let ordered = canonical_order(candidates);
     let outcome = ledger.execute(&ordered, context)?;
-    let drop_from_mempool: Vec<Hash> = outcome
-        .rejected
-        .iter()
-        .filter(|(_, err)| matches!(err, Error::BadNonce { .. }))
-        .map(|(id, _)| *id)
-        .collect();
+    let drop_from_mempool = mempool_drops(&ordered, &outcome.rejected);
     let applied = outcome.applied.clone();
     if applied.is_empty() && evidence.is_empty() {
         return Err(Error::Other(format!(
-            "nothing to checkpoint: no transaction applied and no evidence to record ({} bad-nonce drop candidates)",
+            "nothing to checkpoint: no transaction applied and no evidence to record ({} mempool drop candidates)",
             drop_from_mempool.len()
         )));
     }
@@ -256,6 +255,38 @@ pub fn build_proposal(
         staged,
     };
     Ok((proposal, verified, drop_from_mempool))
+}
+
+/// Ids that should leave the mempool after this execute.
+///
+/// Walks `ordered` (canonical nonce order per sender). The first reject for a
+/// sender decides: [`Error::BadNonce`] drops that tx and the rest of the run;
+/// any other error keeps the run for a later height.
+fn mempool_drops(ordered: &[Transaction], rejected: &[(Hash, Error)]) -> Vec<Hash> {
+    let rejected_at: HashMap<Hash, &Error> =
+        rejected.iter().map(|(id, err)| (*id, err)).collect();
+    let mut drop_rest = HashSet::new();
+    let mut keep_rest = HashSet::new();
+    let mut drop = Vec::new();
+    for tx in ordered {
+        let Some(err) = rejected_at.get(&tx.id()) else {
+            continue;
+        };
+        if keep_rest.contains(&tx.from) {
+            continue;
+        }
+        if drop_rest.contains(&tx.from) {
+            drop.push(tx.id());
+            continue;
+        }
+        if matches!(err, Error::BadNonce { .. }) {
+            drop_rest.insert(tx.from);
+            drop.push(tx.id());
+        } else {
+            keep_rest.insert(tx.from);
+        }
+    }
+    drop
 }
 
 /// What gives a header the right to exist.

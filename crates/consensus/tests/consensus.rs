@@ -770,3 +770,70 @@ fn genesis_is_identical_on_every_node() {
     }
     assert!(net.genesis_time < net.now);
 }
+
+#[test]
+fn a_failed_head_does_not_purge_the_nonce_tail() {
+    let mut net = Testnet::new();
+    let bob_key = Keypair::generate().unwrap();
+    let bob = PublicKey::new(*bob_key.public_bytes()).address();
+    let now = net.now;
+    net.round(
+        vec![Transaction::transfer(net.alice(), bob, 1_000, 0, now, net.chain_id(), net.genesis_fingerprint()).unwrap()],
+        now,
+    );
+
+    let later = now + 1;
+    let head = Transaction::transfer(&bob_key, Address([0x11; 32]), 10, 0, later, net.chain_id(), net.genesis_fingerprint()).unwrap();
+    let tail = Transaction::transfer(&bob_key, Address([0x22; 32]), 10, 1, later, net.chain_id(), net.genesis_fingerprint()).unwrap();
+    let filler = Transaction::transfer(net.alice(), Address([0x33; 32]), 1, 1, later, net.chain_id(), net.genesis_fingerprint()).unwrap();
+
+    let height = net.nodes[0].ledger.height() + 1;
+    let index = net.proposer_index(height);
+    let proposer = net.nodes[index].address;
+    let node = &mut net.nodes[index];
+    let (proposal, verified, drops) = build_proposal(
+        &mut node.ledger,
+        vec![head.clone(), tail.clone(), filler.clone()],
+        Vec::new(),
+        later,
+        proposer,
+        0,
+    )
+    .unwrap();
+    node.ledger.rollback(verified.staged);
+
+    assert!(
+        drops.is_empty(),
+        "battery miss on nonce 0 must not BadNonce-purge nonce 1"
+    );
+    assert_eq!(proposal.transactions.len(), 1);
+    assert_eq!(proposal.transactions[0].id(), filler.id());
+}
+
+#[test]
+fn a_real_nonce_gap_is_still_dropped() {
+    let mut net = Testnet::new();
+    let bob = Address([0xbbu8; 32]);
+    let now = net.now;
+    let filler = Transaction::transfer(net.alice(), bob, 1, 0, now, net.chain_id(), net.genesis_fingerprint()).unwrap();
+    let gap = Transaction::transfer(net.alice(), bob, 1, 5, now, net.chain_id(), net.genesis_fingerprint()).unwrap();
+
+    let height = net.nodes[0].ledger.height() + 1;
+    let index = net.proposer_index(height);
+    let proposer = net.nodes[index].address;
+    let node = &mut net.nodes[index];
+    let (proposal, verified, drops) = build_proposal(
+        &mut node.ledger,
+        vec![filler.clone(), gap.clone()],
+        Vec::new(),
+        now,
+        proposer,
+        0,
+    )
+    .unwrap();
+    node.ledger.rollback(verified.staged);
+
+    assert_eq!(proposal.transactions.len(), 1);
+    assert_eq!(proposal.transactions[0].id(), filler.id());
+    assert_eq!(drops, vec![gap.id()]);
+}

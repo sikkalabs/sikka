@@ -19,6 +19,7 @@ use sikka_common::bytes::{Address, Hash};
 use sikka_common::checkpoint::{Checkpoint, CheckpointHeader};
 use sikka_common::constants::{
     min_bond, round_at, BATTERY_COST_PER_TX, DEFAULT_MAX_MISSED_PROPOSER_SLOTS,
+    PROPOSER_TIMEOUT_SECS,
 };
 use sikka_common::error::{Error, Result};
 use sikka_common::genesis::GenesisConfig;
@@ -43,7 +44,6 @@ fn signers_of(checkpoint: &Checkpoint) -> Vec<Address> {
 /// Economic time may advance at most one proposer timeout per round (+1 for the
 /// winning round).
 fn economic_timestamp(last_checkpoint_time: u64, round: u32, header_timestamp: u64) -> u64 {
-    const PROPOSER_TIMEOUT_SECS: u64 = 10; // must match sikka_consensus::PROPOSER_TIMEOUT_SECS
     let max = last_checkpoint_time.saturating_add(
         u64::from(round.saturating_add(1)).saturating_mul(PROPOSER_TIMEOUT_SECS),
     );
@@ -58,11 +58,11 @@ pub struct ExecutionContext {
     /// Checkpoint timestamp. This — not any node's wall clock — is the clock
     /// transactions are validated against, so replay is deterministic.
     pub timestamp: u64,
-    /// Pinned economic clock for inflation and battery settlement.
+    /// Pinned economic clock for battery settlement.
     ///
-    /// A proposer cannot amplify inflation or battery regeneration by picking a
-    /// far-future header timestamp; this caps elapsed time to at most one
-    /// proposer timeout per round.
+    /// A proposer cannot amplify battery regeneration by picking a far-future
+    /// header timestamp; this caps elapsed time to at most one proposer timeout
+    /// per round.
     pub economic_timestamp: u64,
     /// Round-robin proposer for this height; receives the rounding remainder of
     /// the inflation payout.
@@ -563,15 +563,18 @@ impl Ledger {
     /// node's mempool — battery is only charged when a transaction executes.
     ///
     /// The rules come from `apply_transaction`, the same code a checkpoint runs,
-    /// so admission cannot drift away from execution. `economic_timestamp` is
-    /// pinned to the admission clock (`timestamp`) so regenerated battery is
-    /// visible here the same way `battery_now` is on RPC — without that pin,
-    /// settlement uses 0 and accounts stuck at stored battery 0 can never enter
-    /// the mempool.
+    /// so admission cannot drift away from execution. Economic time matches
+    /// [`Self::execute`] for a timely proposal at `timestamp` (one timeout per
+    /// due round), so a send is only queued if this height can settle its battery.
     pub fn would_apply(&self, transactions: &[Transaction], timestamp: u64) -> Result<()> {
         let mut overlay = Overlay::new(self);
         let mut context = ExecutionContext::new(self.meta.height + 1, timestamp, Address::default());
-        context.economic_timestamp = timestamp;
+        context.round = round_at(timestamp, self.meta.last_checkpoint_time);
+        context.economic_timestamp = economic_timestamp(
+            self.meta.last_checkpoint_time,
+            context.round,
+            timestamp,
+        );
         for tx in transactions {
             Self::apply_transaction(&mut overlay, tx, &context, self.meta.total_supply)?;
         }

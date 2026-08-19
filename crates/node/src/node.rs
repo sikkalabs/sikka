@@ -566,9 +566,18 @@ impl Node {
         // anyway, so admitting one only lets a coinless address fill every
         // mempool on the network for free. Anything at or above this nonce is
         // replaced rather than queued behind, so it is not counted.
-        let mut run = mempool.pending_run(&transaction.from, committed);
-        run.retain(|t| t.nonce < transaction.nonce);
+        let pending = mempool.pending_run(&transaction.from, committed);
+        let mut run: Vec<Transaction> = pending
+            .iter()
+            .filter(|t| t.nonce < transaction.nonce)
+            .cloned()
+            .collect();
         run.push(transaction.clone());
+        run.extend(
+            pending
+                .into_iter()
+                .filter(|t| t.nonce > transaction.nonce),
+        );
         chain.ledger.would_apply(&run, now)?;
         transaction.check_chain_id(&chain.ledger.meta().chain_id)?;
         transaction.check_genesis_fingerprint(&chain.ledger.meta().genesis_fingerprint)?;
@@ -2709,6 +2718,17 @@ mod tests {
             .submit_transaction(transfer(&f.alice, bob, 1, 0, &f.chain_id(), f.genesis_fingerprint()))
             .unwrap();
         assert_eq!(f.node.mempool_info().pending, 1);
+
+        // Replacing nonce 0 must still leave nonce 1 affordable.
+        f.node
+            .submit_transaction(transfer(&f.alice, bob, 1, 1, &f.chain_id(), f.genesis_fingerprint()))
+            .unwrap();
+        let error = f
+            .node
+            .submit_transaction(transfer(&f.alice, bob, balance, 0, &f.chain_id(), f.genesis_fingerprint()))
+            .unwrap_err();
+        assert!(matches!(error, Error::InsufficientBalance { .. }));
+        assert_eq!(f.node.mempool_info().pending, 2);
     }
 
     #[test]

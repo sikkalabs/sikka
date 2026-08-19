@@ -271,8 +271,8 @@ fn admission_credits_regenerated_battery() {
     assert_eq!(f.ledger.account(&bob).unwrap().battery, 0);
     assert_eq!(f.ledger.account(&bob).unwrap().battery_at(now + 600), MAX_BATTERY);
 
-    // Ten minutes later Bob has regenerated battery on RPC, and mempool
-    // admission must see the same credit (would_apply pins economic_timestamp).
+    // Ten minutes later Bob has regenerated battery, and a timely proposal at
+    // that clock has enough economic time for admission to match execute.
     let later = now + 600;
     let tx = Transaction::transfer(
         &f.bob,
@@ -285,6 +285,49 @@ fn admission_credits_regenerated_battery() {
     )
     .unwrap();
     f.ledger.would_apply(&[tx], later).unwrap();
+}
+
+#[test]
+fn admission_uses_the_same_economic_clock_as_execute() {
+    let mut f = Fixture::new();
+    let bob = Fixture::address(&f.bob);
+    let now = GENESIS_TIME + 600;
+    f.apply(
+        &[Transaction::transfer(&f.alice, bob, 1_000, 0, now, f.chain_id(), f.genesis_fingerprint()).unwrap()],
+        now,
+    );
+
+    let too_soon = now + 30;
+    let early = Transaction::transfer(
+        &f.bob,
+        Address([7u8; 32]),
+        10,
+        0,
+        too_soon,
+        f.chain_id(),
+        f.genesis_fingerprint(),
+    )
+    .unwrap();
+    assert!(
+        matches!(
+            f.ledger.would_apply(&[early], too_soon).unwrap_err(),
+            Error::InsufficientBattery { .. }
+        ),
+        "30s is less than one battery tick under the round cap"
+    );
+
+    let ready_at = now + 60;
+    let ready = Transaction::transfer(
+        &f.bob,
+        Address([7u8; 32]),
+        10,
+        0,
+        ready_at,
+        f.chain_id(),
+        f.genesis_fingerprint(),
+    )
+    .unwrap();
+    f.ledger.would_apply(&[ready], ready_at).unwrap();
 }
 
 #[test]
@@ -788,24 +831,28 @@ fn many_accounts_stay_consistent() {
     let mut f = Fixture::new();
     let now = GENESIS_TIME + 600;
 
-    // Fan out to 60 distinct addresses across several checkpoints.
-    let mut nonce = 0u64;
-    for round in 0..3u64 {
-        let txs: Vec<Transaction> = (0..20u64)
-            .map(|i| {
-                let mut raw = [0u8; 32];
-                raw[0] = (round * 20 + i) as u8;
-                raw[1] = 0xaa;
-                let tx = Transaction::transfer(&f.alice, Address(raw), 1_000, nonce, now, f.chain_id(), f.genesis_fingerprint()).unwrap();
-                nonce += 1;
-                tx
-            })
-            .collect();
-        let outcome = f.apply(&txs, now);
-        assert_eq!(outcome.applied.len(), 20);
-    }
+    // One checkpoint of ten transfers — Alice's battery cap is 10.
+    let txs: Vec<Transaction> = (0..10u64)
+        .map(|i| {
+            let mut raw = [0u8; 32];
+            raw[0] = i as u8;
+            raw[1] = 0xaa;
+            Transaction::transfer(
+                &f.alice,
+                Address(raw),
+                1_000,
+                i,
+                now,
+                f.chain_id(),
+                f.genesis_fingerprint(),
+            )
+            .unwrap()
+        })
+        .collect();
+    let outcome = f.apply(&txs, now);
+    assert_eq!(outcome.applied.len(), 10);
 
-    assert_eq!(f.ledger.account_count().unwrap(), 62);
+    assert_eq!(f.ledger.account_count().unwrap(), 12);
     assert_eq!(f.ledger.audit_supply().unwrap(), f.ledger.total_supply());
 
     // The tree rebuilt from the database must produce the committed root.
