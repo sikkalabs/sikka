@@ -76,13 +76,14 @@ when Tor relays are unreachable.
 ### Fund and bond (joiners)
 
 Genesis already stakes the bootstrap operators. A new node needs coins, then a
-bond (at least ~0.001% of supply ≈ **200 SIKKA** on the default mint):
+bond (at least ~0.001% of supply ≈ **200 SIKKA** on the default mint). Full
+walkthrough: [`staking.md`](staking.md).
 
 ```bash
 docker exec sikka-2 sikka address
-docker exec sikka sikka send <joiner-address> 400
+docker exec sikka sikka send <joiner-address> 400 --wait
 docker exec sikka-2 sikka bond 400
-docker exec sikka-2 sikka unbond    # later — starts the cooldown
+docker exec sikka-2 sikka unbond    # later — starts the 7-day cooldown
 ```
 
 ---
