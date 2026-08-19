@@ -5,10 +5,10 @@
 > *sikkā* (Punjabi, from Persian) — the die used for minting coins, and by
 > extension the authority to coin money.
 
-SIKKA is a feeless, post-quantum, state-based cryptocurrency designed for
+SIKKA is a feeless, post-quantum, state-based blockchain designed for
 humans, AI agents and micropayments. This document explains *why* it must
-exist, *how* it is distributed and paid for, and *exactly* how the network
-works, down to the integer arithmetic that mints a CHILLAR.
+exist and *exactly* how the network works, down to the integer arithmetic
+that mints a CHILLAR.
 
 ---
 
@@ -17,26 +17,24 @@ works, down to the integer arithmetic that mints a CHILLAR.
 1. [The Problem: another coin, but why?](#1-the-problem)
 2. [Design Principles](#2-design-principles)
 3. [The Unit: SIKKA and CHILLAR](#3-the-unit-sikka-and-chillar)
-4. [Supply and Distribution](#4-supply-and-distribution)
-5. [The 80% Public Allocation: ERC-20 + Uniswap Auction](#5-the-80-public-allocation-erc-20--uniswap-auction)
-6. [The 20% Faucet Allocation](#6-the-20-faucet-allocation)
-7. [Inflation: 1.5%/year, forever, in integer arithmetic](#7-inflation)
-8. [The Ledger: State, Not History](#8-the-ledger-state-not-history)
-9. [Transactions](#9-transactions)
-10. [Anti-Spam Battery](#10-anti-spam-battery)
-11. [Cryptography](#11-cryptography)
-12. [Consensus: Checkpoint Voting](#12-consensus-checkpoint-voting)
- 13. [Protocol Invariants](#13-protocol-invariants)
- 14. [Validator Economics and Attack Cost](#14-validator-economics-and-attack-cost)
- 15. [Throughput and Performance](#15-throughput-and-performance)
- 16. [Storage](#16-storage)
- 17. [Networking](#17-networking)
- 18. [Fast-Sync and Stateless Wallets](#18-fast-sync-and-stateless-wallets)
- 19. [Threat Model](#19-threat-model)
- 20. [Comparison](#20-comparison)
- 21. [Pseudocode Appendix](#21-pseudocode-appendix)
- 22. [Glossary](#22-glossary)
- 23. [References](#23-references)
+4. [Genesis](#4-genesis)
+5. [Inflation: 1.5%/year, forever, in integer arithmetic](#5-inflation)
+6. [The Ledger: State, Not History](#6-the-ledger-state-not-history)
+7. [Transactions](#7-transactions)
+8. [Anti-Spam Battery](#8-anti-spam-battery)
+9. [Cryptography](#9-cryptography)
+10. [Consensus: Checkpoint Voting](#10-consensus-checkpoint-voting)
+11. [Protocol Invariants](#11-protocol-invariants)
+12. [Validator Economics and Attack Cost](#12-validator-economics-and-attack-cost)
+13. [Throughput and Performance](#13-throughput-and-performance)
+14. [Storage](#14-storage)
+15. [Networking](#15-networking)
+16. [Fast-Sync and Stateless Wallets](#16-fast-sync-and-stateless-wallets)
+17. [Threat Model](#17-threat-model)
+18. [Comparison](#18-comparison)
+19. [Pseudocode Appendix](#19-pseudocode-appendix)
+20. [Glossary](#20-glossary)
+21. [References](#21-references)
 
 ---
 
@@ -195,37 +193,27 @@ The CHILLAR count of the entire genesis supply:
 
 ---
 
-## 4. Supply and Distribution
+## 4. Genesis
 
 ### 4.1 Total supply
 
 The genesis mints exactly **19,960,907 SIKKA** (`DEFAULT_GENESIS_SUPPLY_SIKKA`
 in `crates/common/src/default_genesis.rs`). No other supply exists at height 0,
 and nothing can be minted except the deterministic inflation of
-[§7](#7-inflation).
+[§5](#5-inflation).
 
 ```
 Supply at genesis:           19,960,907 SIKKA
-Split ─────────────────────────────────────────────
-  80%  Public purchase (ERC-20, auctioned)    15,968,726 SIKKA
-  20%  Faucet (test the network)            3,992,181 SIKKA
-       ─────────────────────────────────────
-       100%                                 19,960,907 SIKKA
 ```
 
-| Share | SIKKA | CHILLAR | Purpose |
-| --- | ---: | ---: | --- |
-| **80%** | 15,968,726 | 15,968,726,000,000,000 | Bought via the SIKKA ERC-20 token `0x1387f900f9b1aca12c1a8e54c0df4fd26f85d42d`, distributed publicly through the [Uniswap auction](https://app.uniswap.org/explore/auctions/ethereum/0xf2DcBF7Ab79eeE7AB7f633962b93537b6b4183cE) |
-| **20%** | 3,992,181 | 3,992,181,000,000,000 | Faucet: given away so anyone can test and try the network directly, with zero cost and zero permission |
+### 4.2 Bootstrap accounts
 
-### 4.2 How it lands on-chain
-
-The on-chain genesis encodes the *operational* structure of those allocations
+The on-chain genesis encodes the accounts that start the network
 (`default_genesis.rs`):
 
 | On-chain account | SIKKA | Note |
 | --- | ---: | --- |
-| Cold treasury (admin) | **19,906,907** | Custodian of the liquid mint — not a validator. Holds the auctioned + faucet allocations |
+| Cold treasury (admin) | **19,906,907** | Custodian of the liquid mint — not a validator |
 | Genesis validator A | 30,000 | 10,000 bonded + 20,000 liquid |
 | Genesis validator B | 24,000 | 4,000 bonded + 20,000 liquid |
 | **Total** | **19,960,907** | |
@@ -236,135 +224,22 @@ The on-chain genesis encodes the *operational* structure of those allocations
         │       19,960,907     │
         └──────────┬───────────┘
                    │
-        ┌──────────▼───────────┐
-        │     80% / 20%        │
-        └──────────┬───────────┘
-        ┌──────────▼───────────┐        ┌─────────────────────────┐
-        │  80%  public tranche │        │  20%  faucet tranche    │
-        │  Uniswap auction     │        │  free for testing       │
-        │  ERC-20 token        │        │  anyone can try the net │
-        │  0x1387…2d2d         │        └─────────────────────────┘
-        │  liquidity locked    │
-        └──────────────────────┘
+     ┌─────────────┼──────────────┐
+     ▼             ▼              ▼
+  treasury    validator A    validator B
+  19,906,907  10k bonded     4k bonded
+              20k liquid     20k liquid
 ```
 
-Bonds are locked *out of* allocations (they do not add to supply —
-`GenesisConfig::total_supply` sums only allocations). The 20,000-liquid
-genesis validators are for operational security, not distribution.
+Each genesis validator's bond is taken from that account's balance — bonds do
+not add extra supply. The two genesis validators exist so the network can
+produce checkpoints from height 0.
 
 ---
 
-## 5. The 80% Public Allocation: ERC-20 + Uniswap Auction
+## 5. Inflation
 
-### 5.1 The contract and the auction
-
-The 80% public allocation was sold directly through a **Uniswap auction** —
-a transparent, on-chain price-discovery sale. Bidders participate in the
-auction window and receive SIKKA at the clearing price; the resulting
-liquidity settles into a permanently locked Uniswap v4 pool, so it can never
-be withdrawn by the creator.
-
-| Contract | Address | Role |
-| --- | --- | --- |
-| **SikkaToken** (ERC-20) | `0x1387f900f9b1aca12c1a8e54c0df4fd26f85d42d` | the purchase instrument — a *guest pass*; its `burn()` is the only door into the native chain (§5.2) |
-
-The ERC-20 is the sole purchase instrument: buy SIKKA through the
-[Uniswap auction](https://app.uniswap.org/explore/auctions/ethereum/0xf2DcBF7Ab79eeE7AB7f633962b93537b6b4183cE)
-or on secondary markets (Uniswap, Matcha), then burn-to-bridge 1:1 into the
-native chain (§5.2).
-
-### 5.2 The one-way bridge: burn to enter
-
-The ERC-20 is deliberately **a guest pass, not the chain** — the token
-contract's own docstring says so. It exists for one reason: to let an
-Ethereum-side buyer open a door into the native network.
-
-The two contracts share one supply and one denomination:
-
-| Property | SikkaToken (Ethereum) | Native SIKKA chain |
-| --- | --- | --- |
-| Total supply | `19,960,907 × 10⁹` | `19,960,907` SIKKA (genesis) |
-| Decimals | 9 | 9 (CHILLAR) |
-| Minting | none — supply only decreases | inflation only (§7) |
-
-A holder who wants native SIKKA calls `burn`:
-
-```
-function burn(sikkaAddress, amount):            // SikkaToken, Ethereum
-    require amount > 0
-    require sikkaAddress != bytes32(0)          // the 32-byte native address
-    balanceOf[msg.sender] -= amount
-    totalSupply         -= amount               // ERC-20 shrinks forever
-    emit Transfer(msg.sender, address(0), amount)
-    emit Burned(msg.sender, sikkaAddress, amount)
-```
-
-A **relayer** — a node process watching for `Burned` events — delivers the same
-amount of native SIKKA from the escrow to `sikkaAddress`, **1:1**. The
-direction never reverses: there is no mint function, no un-burn, no bridge
-back. The total SIKKA that can ever exist on Ethereum only decreases; every
-burn moves value across, one way.
-
-Today the burn is executed by the **SIKKA team** on behalf of holders: a buyer
-sends ERC-20 SIKKA to the team's burn address and names their 32-byte Sikka
-destination address; the team calls `burn` and the relayer delivers native
-SIKKA 1:1. An automated **burn-and-claim smart contract** is planned for
-**Q1 2027** that will let anyone burn and claim directly on-chain, with no
-team involvement.
-
-This works because the escrow is real: the ERC-20's fixed supply (19,960,907
-SIKKA) is fully backed by native supply held on the Sikka chain, so a burn is
-always honoured from the escrow rather than by inflating. On the native side
-this means the **cold treasury is simultaneously the mint's custodian and the
-bridge escrow** (§4.2): every CHILLAR it pays out for a `Burned` event reduces
-its balance by exactly the amount the ERC-20 just destroyed.
-
-Safety rails (in the token contract):
-
-| Rule | What it prevents |
-| --- | --- |
-| `amount > 0` | no-op burn spam |
-| `sikkaAddress != bytes32(0)` | burning into a void |
-| `_transfer` forbids `to == address(this)` | tokens cannot be parked inside the token contract |
-| no `mint` function exists | the ERC-20 side is strictly deflationary |
-| `burn` deducts `msg.sender`'s own balance | self-service; no allowance game needed |
-
-The bridge invariant the relayer enforces:
-
-```
-escrow_balance(native treasury)  ≥  totalSupply(ERC-20)     at all times
-```
-
-As long as that holds, every outstanding ERC-20 token can be honoured 1:1.
-
----
-
-## 6. The 20% Faucet Allocation
-
-**3,992,181 SIKKA (20% of supply)** are reserved as a faucet so that anyone —
-human or agent — can obtain real SIKKA without buying, without KYC and without
-waiting for an auction settlement. The purpose is direct and deliberate:
-
-- test the network (send, bond, unbond, run a validator) with real stakes;
-- build wallets and agents against a live chain;
-- bootstrap a distributed holder base rather than a concentrated one;
-- let the fee-less, private model be *felt*, not just read about.
-
-| Property | Value |
-| --- | --- |
-| Tranche | 3,992,181 SIKKA (20% of supply) |
-| Mechanism | faucet grants from the cold treasury |
-| Recipients | anyone testing the network |
-| Cost | zero (no gas exists — see §9) |
-
-Fresh faucet-funded accounts start with an empty battery (§10) so that even a
-free-money mass-funding attack cannot turn into a sybil spam attack.
-
----
-
-## 7. Inflation
-
-### 7.1 The schedule
+### 5.1 The schedule
 
 - **Rate:** 1.5% per year (`ANNUAL_INFLATION_BPS = 150`).
 - **Compounding:** continuous (`exp(ln(1.015) · t) − 1`), forever.
@@ -388,7 +263,7 @@ minted = total_supply × ( exp(LN_RATE · dt / year) − 1 )
 which over exactly one year is precisely `total_supply × 1.5%` (because
 `exp(ln(1.015)) = 1.015`).
 
-### 7.2 Integer-only `exp`
+### 5.2 Integer-only `exp`
 
 Floating point is a consensus bug: `powf` is not bit-identical across CPUs, and
 validators must agree on the **last CHILLAR**. SIKKA therefore computes
@@ -409,7 +284,7 @@ function expm1_fixed(x):                  // x in units of 1e18
 Truncation means the protocol **never mints more** than the schedule allows —
 the safe direction.
 
-### 7.3 Projected supply (exact integer math)
+### 5.3 Projected supply (exact integer math)
 
 | Year | Total supply (SIKKA) | Minted that year (SIKKA) |
 | --- | ---: | ---: |
@@ -422,7 +297,7 @@ the safe direction.
 | 10 | 23,165,447 | 342,346 |
 | 20 | 26,884,447 | 397,307 |
 
-Values computed by running the protocol's own `checkpoint_inflation` (§7.2)
+Values computed by running the protocol's own `checkpoint_inflation` (§5.2)
 once per year on the previous year's supply — the same truncating integer
 math every validator executes.
 
@@ -430,12 +305,12 @@ The effective yearly dilution of *existing* holders is small and bounded, and
 it is the entire cost of running a zero-fee network. No entity can pause,
 change or front-run it.
 
-### 7.4 Who gets the inflation
+### 5.4 Who gets the inflation
 
 Every checkpoint pays the minted CHILLAR across the **active bonded
 validator set, weighted by bond**, with the rounding remainder going to the
 proposer. Validators are paid for securing the chain, not for ordering
-transactions (ordering is deterministic — see §9.5).
+transactions (ordering is deterministic — see §7.5).
 
 ```
 function distribute_rewards(amount, validators, proposer):
@@ -453,7 +328,7 @@ certificates for the same header can never fork the next height's state.
 
 ---
 
-## 8. The Ledger: State, Not History
+## 6. The Ledger: State, Not History
 
 This is the design that makes SIKKA *private by default* and *bounded in
 storage*.
@@ -484,7 +359,7 @@ A transaction that moves value updates two account leaves and nothing else.
 When ≥2/3 of bonded stake signs the resulting state root, the transactions
 that produced it are **thrown away**.
 
-### 8.1 Execute → Stage → Commit
+### 6.1 Execute → Stage → Commit
 
 Every state change runs through three explicit phases (`Ledger` in
 `crates/state/src/ledger.rs`), so a validator can check a proposal *without*
@@ -498,9 +373,9 @@ trusting or committing to it:
 
 ---
 
-## 9. Transactions
+## 7. Transactions
 
-### 9.1 Three kinds, no fee field
+### 7.1 Three kinds, no fee field
 
 | Kind | Tag | Purpose | `to` | `amount` |
 | --- | ---: | --- | --- | --- |
@@ -509,9 +384,9 @@ trusting or committing to it:
 | `unbond` | 2 | start the 7-day cooldown | zero | 0 |
 
 The `Transaction` struct has **no gas field**. Validators are paid by protocol
-inflation; spam is bounded by per-account battery (§10) instead of price.
+inflation; spam is bounded by per-account battery (§8) instead of price.
 
-### 9.2 The signed payload
+### 7.2 The signed payload
 
 ```
 signing_bytes =  "SIKKA/tx/v1"
@@ -530,7 +405,7 @@ on another that shares keys or only the same human-readable chain name. The
 and the protocol checks it hashes to `from` — a proposer cannot swap a
 different key onto a cached id to skip verification.
 
-### 9.3 Transaction id
+### 7.3 Transaction id
 
 ```
 id = SHA3-256("SIKKA/tx-id/v1" ‖ signing_bytes)
@@ -539,7 +414,7 @@ id = SHA3-256("SIKKA/tx-id/v1" ‖ signing_bytes)
 The signature itself is excluded, so re-signing the same payload (ML-DSA is
 randomised by default) yields the same id and cannot enter the mempool twice.
 
-### 9.4 Validation
+### 7.4 Validation
 
 ```
 function validate(tx, now):
@@ -549,7 +424,7 @@ function validate(tx, now):
     check_genesis_fingerprint(tx)         // tx.genesis_fingerprint == ledger fingerprint
 ```
 
-### 9.5 Canonical ordering — nobody can front-run
+### 7.5 Canonical ordering — nobody can front-run
 
 Inside a checkpoint, transactions are sorted by a pure function of their
 content, **never by arrival time**:
@@ -562,7 +437,7 @@ Because the proposer cannot choose the order, it cannot reorder, front-run or
 selectively censor. Every validator replays the identical list and gets the
 identical root, or refuses to sign.
 
-### 9.6 Atomic execution rules
+### 7.6 Atomic execution rules
 
 ```
 function apply_transaction(state, tx, context, supply):
@@ -583,7 +458,7 @@ function apply_transaction(state, tx, context, supply):
 
 ---
 
-## 10. Anti-Spam Battery
+## 8. Anti-Spam Battery
 
 Fee-less chains must stop free spam by a different mechanism. SIKKA gives each
 account a **battery** — a rate limiter, not a price.
@@ -621,7 +496,7 @@ Key properties:
 
 ---
 
-## 11. Cryptography
+## 9. Cryptography
 
 Two primitives, nothing else (`crates/crypto/src/lib.rs`):
 
@@ -640,7 +515,7 @@ address = SHA3-256(public_key)          // 32 bytes, 0x-hex on the wire
 ML-DSA is used with a native context string, `"SIKKA-v1"`, which domain-
 separates every signature so one message kind cannot be replayed as another.
 
-### 11.1 The quantum threat to existing chains
+### 9.1 The quantum threat to existing chains
 
 ```
       Pre-quantum (ECDSA/Ed25519)              Post-quantum (SIKKA)
@@ -654,7 +529,7 @@ separates every signature so one message kind cannot be replayed as another.
 
 ---
 
-## 12. Consensus: Checkpoint Voting
+## 10. Consensus: Checkpoint Voting
 
 Consensus is deliberately small. It does not order transactions (that is
 deterministic), it does not vote on them individually, and it answers exactly
@@ -662,7 +537,7 @@ one question:
 
 > **Does at least two-thirds of the bonded stake agree that this is the state?**
 
-### 12.1 Actors
+### 10.1 Actors
 
 | Term | Meaning |
 | --- | --- |
@@ -672,7 +547,7 @@ one question:
 | Proposer | round-robin `(height + round) mod active_set` |
 | Checkpoint | header (roots, supply, tx_root, round, proposer) + precommit signatures |
 
-### 12.2 The two-phase vote (Tendermint-style, minimal)
+### 10.2 The two-phase vote (Tendermint-style, minimal)
 
 | Step | Rule |
 | --- | --- |
@@ -692,7 +567,7 @@ Quorum is stake-weighted: `ceil(⅔ × total_active_bond)`.
        │══════════════════════════════▶│  finalize, discard txs
 ```
 
-### 12.3 Liveness without punishment
+### 10.3 Liveness without punishment
 
 - Round-robin proposer with a **10-second timeout**; each round hands the turn
   to the next validator in line (`round_at` is a pure function of two agreed
@@ -705,7 +580,7 @@ Quorum is stake-weighted: `ceil(⅔ × total_active_bond)`.
 - Repeated full-batch proposer misses (default 100, configurable) start a
   **normal unbonding cooldown** — stake is returned, not burned.
 
-### 12.4 Equivocation evidence
+### 10.4 Equivocation evidence
 
 ```
 Equivocation = two valid, conflicting votes
@@ -717,7 +592,7 @@ Equivocation = two valid, conflicting votes
 Because the two signed votes are self-proving, any node can assemble the
 evidence and the next checkpoint burns the bond.
 
-### 12.5 Finality and pruning
+### 10.5 Finality and pruning
 
 - A checkpoint is final when precommit signatures cover ≥2/3 bonded stake.
 - Only the **last 100 checkpoints** are retained (`CHECKPOINT_HISTORY`).
@@ -725,7 +600,7 @@ evidence and the next checkpoint burns the bond.
 
 ---
 
-## 13. Protocol Invariants
+## 11. Protocol Invariants
 
 Everything in this document reduces to a small set of rules the network never
 violates. They are worth stating once, together, because every other section is
@@ -757,9 +632,9 @@ same roots (I1–I4, I6) or refuse to sign (I5, I7, I8).
 
 ---
 
-## 14. Validator Economics and Attack Cost
+## 12. Validator Economics and Attack Cost
 
-### 14.1 The validator's yield
+### 12.1 The validator's yield
 
 Inflation mints exactly 1.5% of supply per year and pays it to the active
 validator set weighted by bond. A validator's return on its *own* bond is
@@ -786,7 +661,7 @@ which is exactly the decentralisation pressure a feeless chain needs. A holder
 who does not bond is diluted by the full annual rate. Staking is open to
 anyone: the minimum bond is `supply/100,000` (≈ 200 SIKKA on mainnet).
 
-### 14.2 What an attacker must buy
+### 12.2 What an attacker must buy
 
 Finality requires precommit signatures over ≥ ⅔ of `total_active_bond`. To
 finalise a state honest validators would reject, an attacker must control ≥ ⅔
@@ -799,13 +674,13 @@ Two SIKKA-specific consequences:
 - **There is no history to rewrite.** Once a checkpoint is final, its state
   root is the record and the producing transactions are gone. "Rewriting the
   past" is not a transaction-level attack; the only target is a *new node's*
-  view of the present, which is pinned by weak subjectivity (§18.2).
+  view of the present, which is pinned by weak subjectivity (§16.2).
 - **Stake is the only weapon, and it is paid for in SIKKA.** An attacker's ⅔
   stake is locked in the protocol while it attacks; the instant it equivocates,
   the evidence travels inside the very next proposal and the bond is burned.
   Attacking with ⅔ of the stake costs ⅔ of the stake, with certainty.
 
-### 14.3 Why the 7-day unbonding closes the escape hatch
+### 12.3 Why the 7-day unbonding closes the escape hatch
 
 The combination of *only-equivocation-is-slashable* and a *7-day cooldown* is
 what keeps the ⅔ bound real:
@@ -817,7 +692,7 @@ what keeps the ⅔ bound real:
 | 7-day cooldown | a validator cannot unbond, re-bond under a fresh identity and equivocate at lower cost; it cannot dump the bond before slashing lands |
 | Offline never burns stake | liveness failures force a *return of* stake (100 missed full-batch turns), never destruction — punishment is reserved for deliberate malice |
 
-### 14.4 The cost of the network, and who pays it
+### 12.4 The cost of the network, and who pays it
 
 On a fee chain, users pay validators per transaction. SIKKA replaces that with
 a fixed 1.5%/yr dilution of all holders — a cost that does **not** scale with
@@ -838,13 +713,13 @@ charges its users in inflation, not in per-transaction rent.**
 
 ---
 
-## 15. Throughput and Performance
+## 13. Throughput and Performance
 
 Throughput is governed by two deliberately different mechanisms: the **battery**
 limits how fast a single account can push transactions, and the **checkpoint
 batch** limits how much is finalised at once. There is no arbitrary "gas" knob.
 
-### 15.1 Sustained throughput scales with active accounts
+### 13.1 Sustained throughput scales with active accounts
 
 Battery regenerates at 1 unit per 60 s, costs 1 per transaction, and caps at
 100. In steady state an account can therefore send **1 transaction per minute
@@ -865,7 +740,7 @@ Throughput is bounded by *the number of real users*, not by CPU or bandwidth —
 the anti-spam property doing its job. An attacker with 1,000 fresh addresses
 gets ~17 tx/s of influence, no matter how fast its hardware is.
 
-### 15.2 Burst and latency
+### 13.2 Burst and latency
 
 | Mechanism | Value | Consequence |
 | --- | ---: | --- |
@@ -880,7 +755,7 @@ gets ~17 tx/s of influence, no matter how fast its hardware is.
   busy chain:   submit ──► pooled ──► next turn (≤ 500 ms) ─► prevote ─► precommit ─► final
 ```
 
-### 15.3 The real bottlenecks
+### 13.3 The real bottlenecks
 
 | Bottleneck | Detail |
 | --- | --- |
@@ -895,7 +770,7 @@ the two mechanisms above.
 
 ---
 
-## 16. Storage
+## 14. Storage
 
 Pure-Rust `redb` (ACID, zero C/C++ DB dependencies). Exactly **three tables**:
 
@@ -913,7 +788,7 @@ A ten-year-old chain with 10M accounts and a one-day-old chain with 10M
 accounts are the **same size**. This is the direct consequence of the
 state-not-history design.
 
-### 13.1 Sparse Merkle Tree
+### 14.1 Sparse Merkle Tree
 
 The state root is a SMT over the 256-bit address space
 (`crates/state/src/smt.rs`), engineered for three simultaneous properties:
@@ -948,9 +823,9 @@ entitled to vote is itself committed to in the header.
 
 ---
 
-## 17. Networking
+## 15. Networking
 
-### 17.1 Tor-only peer mesh, signed JSON
+### 15.1 Tor-only peer mesh, signed JSON
 
 There is no bespoke wire protocol. Nodes are clients and servers over ordinary
 HTTP. **Peer-to-peer federation is Tor-only:** each node derives a deterministic
@@ -969,7 +844,7 @@ for wallets and SDKs; honest nodes never use clearnet URLs as peer endpoints.
 | `GET /api/state/snapshot/…` | chunked fast-sync |
 | `POST /api/rpc` | JSON-RPC for wallets/CLI/agents |
 
-### 17.2 Mempool sync with Bloom filters
+### 15.2 Mempool sync with Bloom filters
 
 Peer-to-peer mempool reconciliation uses a **Bloom filter** summarising what a
 node already holds; the peer replies only with the txs the filter does not
@@ -987,9 +862,9 @@ delay a duplicate arrival.
 
 ---
 
-## 18. Fast-Sync and Stateless Wallets
+## 16. Fast-Sync and Stateless Wallets
 
-### 18.1 Chunked, resumable snapshots
+### 16.1 Chunked, resumable snapshots
 
 A new or returning node downloads a **snapshot** (finalized checkpoint +
 accounts + validators) rather than replaying history — which is impossible
@@ -1000,14 +875,14 @@ anyway, because history is gone.
 - The reconstructed state must re-hash to the checkpoint's roots, and total
   supply is re-derived from balances + bonds (a snapshot cannot smuggle coins).
 
-### 18.2 Weak subjectivity
+### 16.2 Weak subjectivity
 
 A node accepts an unpinned snapshot only across a **single-height gap**
 (`WEAK_SUBJECTIVITY_GAP = 1`). Anything larger requires an operator-pinned
 `SIKKA_TRUSTED_CHECKPOINT=<height>:<hash>` — even when the validator root is
 unchanged — otherwise a former ≥2/3 set could forge a long-range fork.
 
-### 18.3 Stateless, verifiable wallets
+### 16.3 Stateless, verifiable wallets
 
 A wallet holds **a key and nothing else** — no chain data, no history, no
 cache. It asks any node for a balance and *checks the answer*:
@@ -1023,7 +898,7 @@ verify_account_proof(proof, validators):
 A lying node cannot pass all four checks, so a wallet never has to trust the
 node it talks to — it can point at any public node safely.
 
-### 18.4 Many receive addresses from one seed
+### 16.4 Many receive addresses from one seed
 
 The protocol is account-based: leftovers stay on the sender, so there is no
 UTXO “change address.” Anyone can still build a wallet that hands out a fresh
@@ -1046,13 +921,13 @@ multi-receive is left to wallets you write yourself (see `docs/wallets.md`).
 
 ---
 
-## 19. Threat Model
+## 17. Threat Model
 
 | Threat | Defence |
 | --- | --- |
 | Quantum computer forges signatures | ML-DSA-87 (Cat-5) everywhere; no ECDSA/Ed25519 |
 | Transaction spam | per-account battery (+1/min, cap 10, 1/tx); fresh accounts start empty |
-| Sybil funding → spam | faucet/target accounts start at 0 battery; genesis accounts start full (cannot be minted) |
+| Sybil funding → spam | newly funded accounts start at 0 battery; genesis accounts start full (cannot be minted) |
 | Equivocation / double-signing | the only slashable offence; bond burned on proof |
 | Long-range fork | weak-subjectivity gap = 1; `SIKKA_TRUSTED_CHECKPOINT` pin |
 | Proposer front-running / reordering | canonical order `(from, nonce, id)`; replay produces identical roots |
@@ -1066,7 +941,7 @@ multi-receive is left to wallets you write yourself (see `docs/wallets.md`).
 
 ---
 
-## 20. Comparison
+## 18. Comparison
 
 | | Bitcoin | Ethereum | Monero | SIKKA |
 | --- | --- | --- | --- | --- |
@@ -1083,9 +958,9 @@ multi-receive is left to wallets you write yourself (see `docs/wallets.md`).
 
 ---
 
-## 21. Pseudocode Appendix
+## 19. Pseudocode Appendix
 
-### 21.1 The consensus loop (node)
+### 19.1 The consensus loop (node)
 
 ```
 loop every PROPOSE_INTERVAL:
@@ -1107,7 +982,7 @@ loop every PROPOSE_INTERVAL:
         if precommits reach ⅔: finalize, discard txs, prune mempool
 ```
 
-### 21.2 Battery regeneration
+### 19.2 Battery regeneration
 
 ```
 function battery_at(account, now):
@@ -1115,17 +990,17 @@ function battery_at(account, now):
     return min(10, account.battery + elapsed_minutes)
 ```
 
-### 21.3 Checkpoint inflation (exact integer)
+### 19.3 Checkpoint inflation (exact integer)
 
 ```
 function checkpoint_inflation(supply, dt):
     if supply == 0 or dt == 0: return 0
     x ← LN_RATE · dt / SECONDS_PER_YEAR            // LN_RATE = ⌊ln(1.015)·10¹⁸⌋
-    factor ← expm1_fixed(x)                        // §7.2, series, truncating
+    factor ← expm1_fixed(x)                        // §5.2, series, truncating
     return supply · factor / 10¹⁸
 ```
 
-### 21.4 Account proof verification
+### 19.4 Account proof verification
 
 ```
 function verify(proof, root, key, value):
@@ -1135,30 +1010,9 @@ function verify(proof, root, key, value):
     return false
 ```
 
-### 21.5 The one-way bridge (burn to enter)
-
-```
-function burn(sikkaAddress, amount):                     // ERC-20 side
-    require amount > 0 and balanceOf[msg.sender] >= amount
-    balanceOf[msg.sender] -= amount
-    totalSupply -= amount                                // deflationary; no re-mint
-    emit Transfer(msg.sender, address(0), amount)
-    emit Burned(msg.sender, sikkaAddress, amount)
-
-loop (relayer, watching Burned):                         // native side
-    for each Burned(burner, sikkaAddress, amount):
-        require amount <= escrow_balance()               // never inflate
-        escrow.send(sikkaAddress, amount)                // 1:1 from the cold treasury
-    assert escrow_balance() >= totalSupply(ERC-20)       // escrow invariant holds
-```
-
-Until the automated burn-and-claim contract ships (Q1 2027, §5.2), the `burn`
-call is executed by the SIKKA team on behalf of holders; the relayer delivery
-remains the same either way.
-
 ---
 
-## 22. Glossary
+## 20. Glossary
 
 | Term | Definition |
 | --- | --- |
@@ -1175,14 +1029,11 @@ remains the same either way.
 | **Validator root** | SMT root over all validators |
 | **Snapshot** | finalized checkpoint + state dump, used for fast-sync |
 | **Weak subjectivity** | trust anchor needed to sync across >1 height |
-| **Cold treasury** | the admin address holding the liquid mint (not a validator); also the bridge escrow |
-| **Guest pass** | the SikkaToken ERC-20 on Ethereum; a claim on native SIKKA, redeemable only by burning |
-| **Burn / Bridge** | `SikkaToken.burn(sikkaAddress, amount)` + a relayer delivering native SIKKA 1:1 from the escrow; one-way (§5.2) |
-| **Faucet** | the 20% allocation given away to test the network |
+| **Cold treasury** | the admin address holding the liquid mint at genesis (not a validator) |
 
 ---
 
-## 23. References
+## 21. References
 
 | # | Source |
 | --- | --- |
@@ -1197,8 +1048,7 @@ remains the same either way.
 | [9] | SIKKA storage — `crates/state/src/store.rs` |
 | [10] | SIKKA wallet proofs — `crates/wallet/src/proof.rs` |
 | [11] | SIKKA API — `docs/api.md` |
-| [12] | SikkaToken (SIKKA ERC-20, burn-to-enter, launched via the [Uniswap auction](https://app.uniswap.org/explore/auctions/ethereum/0xf2DcBF7Ab79eeE7AB7f633962b93537b6b4183cE)) — `0x1387f900f9b1aca12c1a8e54c0df4fd26f85d42d` — <https://etherscan.io/token/0x1387f900f9b1aca12c1a8e54c0df4fd26f85d42d#code> |
-| [13] | Repository — <https://github.com/sikkalabs/sikka> |
+| [12] | Repository — <https://github.com/sikkalabs/sikka> |
 
 ---
 

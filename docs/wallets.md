@@ -73,7 +73,7 @@ SIKKA/tx/v1 ‖ str(chain_id) ‖ genesis_fingerprint ‖ kind ‖ from ‖ to �
 `str(s)` is `u32` little-endian UTF-8 length + UTF-8 bytes (same as the Rust
 codec `Writer::str`).  
 `genesis_fingerprint`: 32 raw bytes from `chain.info` — a hash of this
-network's genesis (allocations, validators, timestamp, etc.).  
+network's genesis (accounts, validators, timestamp, etc.).  
 `kind`: transfer `0`, bond `1`, unbond `2`.  
 `from` / `to`: 32 raw address bytes.  
 `amount` / `nonce` / `timestamp`: little-endian `u64`.  
