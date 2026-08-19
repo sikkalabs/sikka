@@ -95,6 +95,7 @@ opposite on every axis that matters:
 | Fees on every transfer | **0% fees forever** — validators paid by inflation |
 | Ledger of every payment, kept forever | **State only** — history discarded after finality |
 | ECDSA / Ed25519 | **ML-DSA-87 (FIPS 204, NIST Cat-5)** post-quantum signatures |
+| Public IPs, DNS, TLS overlays | **Tor-native peer mesh** — a node's network id *is* its onion |
 | Big SDKs, contracts, gas | **One JSON-RPC endpoint**, 3 transaction kinds, no gas |
 | Storage grows with usage | **Storage grows with accounts only** |
 | Micropayments uneconomic | **Feeless + regenerating battery** = per-unit pricing viable |
@@ -103,15 +104,16 @@ opposite on every axis that matters:
 
 ## 2. Design Principles
 
-The entire codebase is built on six rules. Every constant, every hash tag and
+The entire codebase is built on seven rules. Every constant, every hash tag and
 every function traces back to one of them.
 
 | Principle | Implementation |
 | --- | --- |
 | **No fees.** | `Transaction` has no fee field; validators are paid by inflation (`crates/common/src/inflation.rs`). |
 | **No history.** | `StateStore` keeps 3 tables; `Checkpoint` commits the state root; transactions are discarded (`crates/state/src/store.rs`). |
-| **Private by default.** | Absence of a permanent ledger; payments cannot be reconstructed (`crates/state/src/ledger.rs`). |
-| **Post-quantum.** | Every signature ML-DSA-87; every hash SHA3-256; no ECDSA/Ed25519 in the tree (`crates/crypto/src/lib.rs`). |
+| **Private by default.** | No permanent ledger; peer mesh is Tor-only so nodes never publish an IP (`crates/state/src/ledger.rs`, `crates/onion`). |
+| **Tor-native.** | Federation is onion-only. The `.onion` is derived from the node key, not picked at random (`crates/onion/src/lib.rs`). |
+| **Post-quantum.** | Every consensus signature ML-DSA-87; every hash SHA3-256; no ECDSA/Ed25519 in the tree (`crates/crypto/src/lib.rs`). |
 | **Proofs, not trust.** | SMT inclusion/absence proofs against a signed checkpoint (`crates/wallet/src/proof.rs`). |
 | **Determinism above all.** | Integer-only arithmetic; no floating point in consensus (`crates/common/src/inflation.rs`, `crates/common/src/amount.rs`). |
 
@@ -123,6 +125,7 @@ every function traces back to one of them.
                     │  wallet.html   sikka CLI   AI agents      │
                     └──────────────┬───────────────────────────┘
                                    │  POST /api/rpc  (JSON-RPC)
+                                   │  optional clearnet reverse proxy
                                    ▼
         ┌──────────────────────────────────────────────────────────┐
         │                        NODE  (port 64552)                │
@@ -135,12 +138,14 @@ every function traces back to one of them.
         │  │ LEDGER: execute → stage → commit                     │ │
         │  │  Smt(accounts)   Smt(validators)   meta             │ │
         │  └────────────────────────────────────┬────────────────┘ │
-        └──────────────────────────────────────┬──────────────────┘
-                                               │
-        ┌──────────────────────────────────────▼──────────────────┐
-        │        redb  (ACID, pure-Rust, 3 tables)                │
-        │        accounts │ validators │ meta                     │
-        └─────────────────────────────────────────────────────────┘
+        └──────────────┬─────────────────────────┬────────────────┘
+                       │                         │
+        ┌──────────────▼──────────┐   advertise = http://<derived>.onion
+        │  redb  (3 tables)       │              │
+        │  accounts│validators│meta│   ┌─────────▼────────────────────┐
+        └─────────────────────────┘   │  TOR hidden service + SOCKS5h │
+                                      │  peer mesh is onion-only      │
+                                      └───────────────────────────────┘
 ```
 
 ---
@@ -825,14 +830,33 @@ entitled to vote is itself committed to in the header.
 
 ## 15. Networking
 
+SIKKA is **Tor-native**, not “Tor as an option.” The peer mesh has no clearnet
+path, no DNS names, and no operator-chosen listen address. A node’s network
+identity is a Tor v3 onion derived from the same ML-DSA-87 seed that signs
+consensus messages — so reinstalling the node with the same key republishes the same
+`.onion`. Wallets may reach a node through an optional reverse proxy; peers
+never do.
+
 ### 15.1 Tor-only peer mesh, signed JSON
 
 There is no bespoke wire protocol. Nodes are clients and servers over ordinary
-HTTP. **Peer-to-peer federation is Tor-only:** each node derives a deterministic
-v3 onion from its ML-DSA seed, advertises `http://….onion`, and dials peers
-through SOCKS5h. Application-layer ML-DSA-87 signatures make transport TLS
-unnecessary. Optional clearnet reverse proxies may expose the same HTTP port
-for wallets and SDKs; honest nodes never use clearnet URLs as peer endpoints.
+HTTP. **Peer-to-peer federation is Tor-only:** each node advertises
+`http://<56chars>.onion` (hidden-service virtport 80, no port in the name) and
+dials peers through SOCKS5h (`127.0.0.1:9050` in the production image).
+Application-layer ML-DSA-87 signatures make transport TLS unnecessary — every
+transaction, vote, proposal and peer announcement is already signed.
+
+The client **refuses to dial** any host that is not a v3 onion (loopback is
+allowed only so unit tests can mesh without Tor). Signed announcements that
+carry a clearnet URL are rejected the same way. Optional clearnet reverse
+proxies may expose port 64552 for wallets and SDKs; honest nodes never use
+those URLs as peer endpoints.
+
+Genesis validators carry **no endpoints** in the genesis file. The two
+bootstrap onions are the deterministic addresses of the two genesis keys,
+hardcoded in `BOOTSTRAP_NODES` (`crates/common/src/constants.rs`). A joiner
+needs only its seed: Tor, the hidden service, and the advertise URL are
+derived at boot (`sikka-node --prepare-tor`, then the node process).
 
 | Endpoint | Role |
 | --- | --- |
@@ -843,8 +867,48 @@ for wallets and SDKs; honest nodes never use clearnet URLs as peer endpoints.
 | `POST /api/checkpoint/finalized` | finalized checkpoint |
 | `GET /api/state/snapshot/…` | chunked fast-sync |
 | `POST /api/rpc` | JSON-RPC for wallets/CLI/agents |
+| `POST /api/peers` | signed peer announcements |
 
-### 15.2 Mempool sync with Bloom filters
+Each node probes its own onion through SOCKS (`tor` status: `checking` → `ok`
+or `down`) so an operator knows the hidden service is actually reachable, not
+merely configured.
+
+### 15.2 Deterministic onion identity
+
+Tor v3 hidden services are keyed by **ed25519** — that is a Tor requirement,
+not a SIKKA consensus key. Consensus, payments and peer announcements stay
+ML-DSA-87. The onion key is a **transport companion** derived from the node
+secret so that:
+
+```
+same ML-DSA seed  →  same ed25519 HS key  →  same .onion  forever
+```
+
+Derivation (`crates/onion/src/lib.rs`):
+
+```
+ikm    ← SHA3-256( "SIKKA/tor-onion-v3/ikm/v1"  ‖  ml_dsa_secret )
+seed   ← HKDF-SHA3-256(ikm, info = "SIKKA/tor-onion-v3/v1")   // 32-byte ed25519 seed
+pk     ← ed25519_public(seed)
+chk    ← SHA3-256( ".onion checksum" ‖ pk ‖ 0x03 )[0..2]
+host   ← base32(pk ‖ chk ‖ 0x03) + ".onion"                  // 56 chars + ".onion"
+advertise = "http://" + host                                 // virtport 80
+```
+
+The expanded ed25519 secret (SHA-512(seed) with clamping) is written into a
+C-Tor HiddenServiceDir (`hs_ed25519_secret_key`, `hs_ed25519_public_key`,
+`hostname`) that Arti can also load via its ctor keystore. Tor never generates
+a random identity for a SIKKA node: if the files are missing, the node
+re-derives them from the keystore. Domain tags keep this material from
+colliding with any consensus hash.
+
+A peer *is* an ML-DSA-87 key. The 32-byte account address is
+`SHA3-256(public_key)`; the onion is HKDF of the matching secret. Announcements
+are signed
+(`SIKKA/peer-announce/v1` ‖ chain_id ‖ genesis_fingerprint ‖ endpoint ‖ timestamp)
+so a node cannot be told that some other key lives at an attacker’s onion.
+
+### 15.3 Mempool sync with Bloom filters
 
 Peer-to-peer mempool reconciliation uses a **Bloom filter** summarising what a
 node already holds; the peer replies only with the txs the filter does not
@@ -925,7 +989,7 @@ multi-receive is left to wallets you write yourself (see `docs/wallets.md`).
 
 | Threat | Defence |
 | --- | --- |
-| Quantum computer forges signatures | ML-DSA-87 (Cat-5) everywhere; no ECDSA/Ed25519 |
+| Quantum computer forges signatures | ML-DSA-87 (Cat-5) on every consensus message; Tor HS ed25519 is transport-only and never signs value |
 | Transaction spam | per-account battery (+1/min, cap 10, 1/tx); fresh accounts start empty |
 | Sybil funding → spam | newly funded accounts start at 0 battery; genesis accounts start full (cannot be minted) |
 | Equivocation / double-signing | the only slashable offence; bond burned on proof |
@@ -938,6 +1002,9 @@ multi-receive is left to wallets you write yourself (see `docs/wallets.md`).
 | Mempool memory DoS | capacity caps, eviction of oldest safe runs, nonce-gap purging, 600 s TTL |
 | Snapshot smuggling | re-derive supply & roots from the dump; chunk hashes verified |
 | History analysis | no transaction ledger exists after finality — nothing to analyse |
+| IP / ASN surveillance of validators | Tor-only peer mesh; onions derived from the node key; clearnet peer URLs rejected |
+| Endpoint hijack (“this key lives at my IP”) | signed peer announcements bind ML-DSA key → onion; unsigned referrals cannot evict |
+| Random Tor identity drift | onion is HKDF of the ML-DSA secret — reinstall keeps the same `.onion` |
 
 ---
 
@@ -953,6 +1020,7 @@ multi-receive is left to wallets you write yourself (see `docs/wallets.md`).
 | Storage growth | ∝ usage | ∝ usage | ∝ usage | **∝ accounts** |
 | Wallet trust model | SPV (fraud proofs) | full node / RPC trust | full node | **SMT proofs vs. signed checkpoint** |
 | Consensus | PoW | PoS | PoW | **checkpoint voting, ⅔ bonded** |
+| Peer transport | clearnet / DNS | clearnet / DNS | optional overlays | **Tor-native; identity = onion** |
 | Fee payer economics | transactor | transactor | transactor | **protocol inflation** |
 | Client surface | SDKs, RPC variants | contracts, gas, SDKs | wallet-only | **one JSON-RPC endpoint, 3 tx kinds** |
 
@@ -1010,6 +1078,21 @@ function verify(proof, root, key, value):
     return false
 ```
 
+### 19.5 Deterministic Tor v3 onion
+
+```
+function onion_identity(ml_dsa_secret):
+    ikm  ← SHA3-256("SIKKA/tor-onion-v3/ikm/v1" ‖ ml_dsa_secret)
+    seed ← HKDF-SHA3-256(ikm, info="SIKKA/tor-onion-v3/v1")     // 32-byte ed25519 seed
+    pk   ← ed25519_public(seed)                                 // transport only
+    chk  ← SHA3-256(".onion checksum" ‖ pk ‖ 0x03)[0..2]
+    host ← base32(pk ‖ chk ‖ 0x03) + ".onion"
+    return "http://" + host                                     // virtport 80
+```
+
+The ed25519 key never signs a transaction, vote, proposal or announcement.
+Those stay ML-DSA-87. Same secret → same onion on every boot.
+
 ---
 
 ## 20. Glossary
@@ -1030,6 +1113,8 @@ function verify(proof, root, key, value):
 | **Snapshot** | finalized checkpoint + state dump, used for fast-sync |
 | **Weak subjectivity** | trust anchor needed to sync across >1 height |
 | **Cold treasury** | the admin address holding the liquid mint at genesis (not a validator) |
+| **Onion identity** | Tor v3 `.onion` derived from the node’s ML-DSA secret via HKDF; transport-only |
+| **Peer announce** | signed claim `key → http://….onion`; clearnet endpoints are rejected |
 
 ---
 
@@ -1048,7 +1133,8 @@ function verify(proof, root, key, value):
 | [9] | SIKKA storage — `crates/state/src/store.rs` |
 | [10] | SIKKA wallet proofs — `crates/wallet/src/proof.rs` |
 | [11] | SIKKA API — `docs/api.md` |
-| [12] | Repository — <https://github.com/sikkalabs/sikka> |
+| [12] | SIKKA Tor onion identity — `crates/onion/src/lib.rs` |
+| [13] | Repository — <https://github.com/sikkalabs/sikka> |
 
 ---
 
