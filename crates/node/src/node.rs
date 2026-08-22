@@ -47,7 +47,7 @@ use sikka_state::{
 };
 use sikka_wallet::Keystore;
 
-use crate::config::NodeConfig;
+use crate::config::{NodeConfig, TrustedCheckpoint};
 
 /// A finalized checkpoint and the transactions (plus slashing evidence) that
 /// produced it.
@@ -148,6 +148,9 @@ pub struct Node {
     snapshot_building: Arc<AtomicBool>,
     /// Cached Tor reachability for the landing page / chain.info.
     tor_status: Mutex<TorInfo>,
+    /// Weak-subjectivity pin learned from hardcoded bootstrap nodes. Operator
+    /// `SIKKA_TRUSTED_CHECKPOINT` still wins when both are set.
+    attested_checkpoint: Mutex<Option<TrustedCheckpoint>>,
     started_at: u64,
 }
 
@@ -267,6 +270,7 @@ impl Node {
             funded_address_cache: Mutex::new(None),
             snapshot_building: Arc::new(AtomicBool::new(false)),
             tor_status: Mutex::new(initial_tor_status(&config)),
+            attested_checkpoint: Mutex::new(None),
             started_at: now,
             config,
         });
@@ -1727,7 +1731,7 @@ impl Node {
         }
 
         let checkpoint_hash = checkpoint.hash();
-        let pinned = match self.config.trusted_checkpoint {
+        let pinned = match self.effective_trusted_checkpoint() {
             Some(anchor) if anchor.height == height => {
                 if anchor.hash != checkpoint_hash {
                     return Err(Error::Other(format!(
@@ -1744,8 +1748,9 @@ impl Node {
         if gap > sikka_common::constants::WEAK_SUBJECTIVITY_GAP && !pinned {
             return Err(Error::Other(format!(
                 "snapshot gap from {local_height} to {height} exceeds weak-subjectivity \
-                 limit {}; set SIKKA_TRUSTED_CHECKPOINT={height}:{checkpoint_hash} after \
-                 independently verifying that checkpoint{}",
+                 limit {}; hardcoded bootstrap nodes could not attest this tip — set \
+                 SIKKA_TRUSTED_CHECKPOINT={height}:{checkpoint_hash} after independently \
+                 verifying that checkpoint{}",
                 sikka_common::constants::WEAK_SUBJECTIVITY_GAP,
                 if validators_changed {
                     " (validator set also changed)"
@@ -1755,6 +1760,59 @@ impl Node {
             )));
         }
         Ok(pinned)
+    }
+
+    /// Operator pin, or a pin learned from bootstrap attestation.
+    pub fn effective_trusted_checkpoint(&self) -> Option<TrustedCheckpoint> {
+        self.config
+            .trusted_checkpoint
+            .or_else(|| *self.attested_checkpoint.lock())
+    }
+
+    pub fn set_attested_checkpoint(&self, pin: TrustedCheckpoint) {
+        *self.attested_checkpoint.lock() = Some(pin);
+    }
+
+    /// Decide whether a bootstrap's latest checkpoint can authorize a snapshot pin.
+    ///
+    /// `Ok(true)` — same validator root as us, signatures verify against the
+    /// locally known set. `Ok(false)` — validator set changed, so this hash is
+    /// only a social claim. `Err` — wrong chain, not ahead, or a same-root
+    /// checkpoint whose signatures do not check out.
+    pub fn evaluate_bootstrap_checkpoint(&self, checkpoint: &Checkpoint) -> Result<bool> {
+        let chain = self.chain();
+        let meta = chain.ledger.meta();
+        if checkpoint.header.genesis_fingerprint != meta.genesis_fingerprint {
+            return Err(Error::GenesisMismatch);
+        }
+        if checkpoint.header.chain_id != meta.chain_id {
+            return Err(Error::ChainIdMismatch {
+                expected: meta.chain_id.clone(),
+                actual: checkpoint.header.chain_id.clone(),
+            });
+        }
+        let local_height = chain.ledger.height();
+        let height = checkpoint.header.height;
+        if height <= local_height {
+            return Err(Error::Other(format!(
+                "bootstrap checkpoint at height {height} is not ahead of local height {local_height}"
+            )));
+        }
+        if checkpoint.header.validator_root != chain.ledger.validator_root() {
+            return Ok(false);
+        }
+        let validators = chain.ledger.validators()?;
+        let authorized: Vec<(Address, PublicKey, u64)> = validators
+            .iter()
+            .filter(|validator| validator.is_active_at(height))
+            .map(|validator| (validator.address, validator.public_key.clone(), validator.bond))
+            .collect();
+        if authorized.is_empty() {
+            return Err(Error::NoActiveValidators);
+        }
+        checkpoint
+            .verify_signatures(authorized.iter().map(|(address, key, bond)| (address, key, *bond)))?;
+        Ok(true)
     }
 
     /// Validate a manifest's chain identity and trust anchor before downloading
@@ -1803,8 +1861,8 @@ impl Node {
         )?;
 
         // A one-height transition is authorized by the locally known active
-        // set. Larger gaps always need an operator-pinned trust anchor (see
-        // WEAK_SUBJECTIVITY_GAP), even when validator_root is unchanged.
+        // set. Larger gaps need a pin: operator `SIKKA_TRUSTED_CHECKPOINT` or
+        // a hash attested by the hardcoded bootstrap nodes.
         let validators: Vec<Validator> = if pinned {
             snapshot.validators.clone()
         } else {

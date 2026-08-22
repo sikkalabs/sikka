@@ -1,9 +1,11 @@
 //! Node configuration.
 //!
-//! Operator env knobs (Docker): `SIKKA_PRIVATE_KEY`, `SIKKA_TRUSTED_CHECKPOINT`,
-//! `SIKKA_LOG`. Everything else is fixed for the image (`/data`, Tor SOCKS,
-//! baked-in bootstrap onions). Advertise URL is always the deterministic Tor
-//! onion derived from the node key.
+//! Operator env knobs (Docker): `SIKKA_PRIVATE_KEY`, `SIKKA_TRUSTED_CHECKPOINT`
+//! (optional override), `SIKKA_LOG`. Everything else is fixed for the image
+//! (`/data`, Tor SOCKS, baked-in bootstrap onions). Advertise URL is always
+//! the deterministic Tor onion derived from the node key. Multi-height
+//! fast-sync pins come from those bootstrap onions unless the operator sets
+//! `SIKKA_TRUSTED_CHECKPOINT`.
 
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::path::PathBuf;
@@ -59,7 +61,8 @@ pub struct NodeConfig {
     /// Timeout for large peer transfers (proposals, finalized checkpoints,
     /// mempool sync, snapshots).
     pub bulk_request_timeout: Duration,
-    /// Required trust anchor when a multi-height snapshot changes validators.
+    /// Optional operator override for the weak-subjectivity pin. When unset,
+    /// hardcoded bootstrap nodes attest the live tip for multi-height sync.
     pub trusted_checkpoint: Option<TrustedCheckpoint>,
     /// Seal a checkpoint after this long even if the pool is short of a full
     /// batch, so a quiet chain still makes progress. Zero disables it.

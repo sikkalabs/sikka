@@ -199,7 +199,7 @@ async fn catchup_loop(node: Arc<Node>, gossip: Arc<Gossip>, client: PeerClient) 
     match sync::fast_sync(&node, &client).await {
         Ok(Some(height)) => info!(height, "synced at startup"),
         Ok(None) => debug!("already at the network's height"),
-        Err(e) => debug!(error = %e, "nothing to sync from at startup"),
+        Err(e) => warn!(error = %e, "startup fast-sync failed"),
     }
 
     let mut ticker = ticker(Duration::from_secs(15));

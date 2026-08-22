@@ -941,10 +941,27 @@ anyway, because history is gone.
 
 ### 16.2 Weak subjectivity
 
-A node accepts an unpinned snapshot only across a **single-height gap**
-(`WEAK_SUBJECTIVITY_GAP = 1`). Anything larger requires an operator-pinned
-`SIKKA_TRUSTED_CHECKPOINT=<height>:<hash>` — even when the validator root is
-unchanged — otherwise a former ≥2/3 set could forge a long-range fork.
+A node accepts an unpinned snapshot from an ordinary gossip peer only across a
+**single-height gap** (`WEAK_SUBJECTIVITY_GAP = 1`). Anything larger needs a
+pin, otherwise a former ≥2/3 set could forge a long-range fork.
+
+The pin is normally **attested by the hardcoded bootstrap onions** already in
+the binary (the same nodes used for first contact). A joiner asks those onions
+for `checkpoint/latest`, keeps the highest height, and:
+
+- if that checkpoint still has the locally known `validator_root` and its
+  signatures verify against the local set, one honest bootstrap is enough —
+  forging it requires the live ≥2/3 keys, which can already finalize the chain;
+- if the validator set has changed, a ≥2/3 majority of the *configured*
+  bootstrap list must agree on the hash (they are making a social claim the
+  joiner cannot check locally);
+- if bootstraps publish distinct hashes at the same height, the node refuses
+  to guess.
+
+`SIKKA_TRUSTED_CHECKPOINT=<height>:<hash>` remains an operator override for
+bootstrap disagreement, a validator-set transition the bootstraps have not
+yet attested, or an air-gapped restore. Do not copy that hash from an
+untrusted peer.
 
 ### 16.3 Stateless, verifiable wallets
 
@@ -993,7 +1010,7 @@ multi-receive is left to wallets you write yourself (see `docs/wallets.md`).
 | Transaction spam | per-account battery (+1/min, cap 10, 1/tx); fresh accounts start empty |
 | Sybil funding → spam | newly funded accounts start at 0 battery; genesis accounts start full (cannot be minted) |
 | Equivocation / double-signing | the only slashable offence; bond burned on proof |
-| Long-range fork | weak-subjectivity gap = 1; `SIKKA_TRUSTED_CHECKPOINT` pin |
+| Long-range fork | weak-subjectivity gap = 1; bootstrap-attested pin (manual `SIKKA_TRUSTED_CHECKPOINT` as override) |
 | Proposer front-running / reordering | canonical order `(from, nonce, id)`; replay produces identical roots |
 | Unsigned-CPU DoS on proposals | proposer signature verified *before* per-tx ML-DSA work |
 | Vote flood DoS | votes only tracked ≤ 1 height ahead; ML-DSA verified on arrival |

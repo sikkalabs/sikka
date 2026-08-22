@@ -176,8 +176,9 @@ impl Testnet {
 
     /// Add a node that is not a validator and has no state at all.
     ///
-    /// `trusted` is required when the network tip is more than one height ahead
-    /// of genesis (weak-subjectivity window).
+    /// Bootstraps the joiner with every running node so it can attest a
+    /// weak-subjectivity pin the same way production joiners use the hardcoded
+    /// genesis onions. Pass `trusted` only to override that attestation.
     async fn join_observer(&self, trusted: Option<TrustedCheckpoint>) -> TestNode {
         let bootstrap: Vec<String> = self.nodes.iter().map(|n| n.endpoint.clone()).collect();
         spawn_node(&self.genesis_path, None, bootstrap, false, trusted).await
@@ -440,16 +441,11 @@ async fn a_new_node_joins_and_fast_syncs_to_the_current_state() {
     }
     let target = net.nodes[0].node.height();
     assert!(target >= 3);
-    let tip = net.nodes[0].node.checkpoint(target).unwrap();
 
-    // A node with an empty database joins with an independently pinned tip —
-    // multi-height snapshot sync always needs a weak-subjectivity checkpoint.
-    let joiner = net
-        .join_observer(Some(TrustedCheckpoint {
-            height: tip.header.height,
-            hash: tip.hash(),
-        }))
-        .await;
+    // A node with an empty database joins with no operator pin. The live
+    // validators are its bootstrap list, so they attest the tip the same way
+    // production joiners learn a pin from the hardcoded genesis onions.
+    let joiner = net.join_observer(None).await;
     assert_eq!(joiner.node.height(), 0, "a joiner starts from genesis");
 
     let deadline = Instant::now() + Duration::from_secs(30);
