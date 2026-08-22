@@ -56,7 +56,9 @@ open http://127.0.0.1:64552/wallet.html  # browser wallet on this node
 ```
 
 Joiners: different `--name`, volume, and seed. Peers find each other over Tor
-via the hardcoded onion bootstrap.
+via the hardcoded onion bootstrap. A joiner that starts at genesis learns the
+live checkpoint hash from those same bootstrap onions — you do not set
+`SIKKA_TRUSTED_CHECKPOINT` for a normal join.
 
 ### Local Tor mesh test (two validators)
 
@@ -126,7 +128,7 @@ docker exec sikka sikka help
 | Variable | Default in image | Meaning |
 | --- | --- | --- |
 | `SIKKA_PRIVATE_KEY` | unset | 32-byte seed or full secret (hex); else a key is created under `/data` |
-| `SIKKA_TRUSTED_CHECKPOINT` | unset | `<height>:<hash>` trust anchor required when fast-sync crosses more than one height |
+| `SIKKA_TRUSTED_CHECKPOINT` | unset | optional `<height>:<hash>` override; joiners normally learn the pin from the hardcoded bootstrap onions |
 | `SIKKA_LOG` | `info` | tracing filter |
 
 Paths, Tor SOCKS (`127.0.0.1:9050`), and bootstrap peers are fixed in the image.
@@ -135,10 +137,9 @@ Optional custom genesis: drop a file at `/data/genesis.json` (otherwise baked-in
 `SIKKA_KEYSTORE` / `SIKKA_NODE` are set in the image for the in-container
 `sikka` CLI (`docker exec sikka sikka …`), not for `sikka-node` itself.
 
-Do not copy `SIKKA_TRUSTED_CHECKPOINT` from an untrusted peer. Verify the
-checkpoint hash independently through multiple operators or a release
-announcement first. Any gap beyond one height needs a pin, even when the
-validator root is unchanged.
+Leave `SIKKA_TRUSTED_CHECKPOINT` unset unless bootstrap nodes disagree on the
+tip or you are restoring from a known hash. Do not copy a checkpoint hash from
+an untrusted gossip peer.
 
 ---
 

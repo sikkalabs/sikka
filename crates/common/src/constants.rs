@@ -65,13 +65,14 @@ pub const DEFAULT_MAX_MISSED_PROPOSER_SLOTS: u32 = 100;
 /// Number of recent checkpoints retained; older ones are pruned.
 pub const CHECKPOINT_HISTORY: u64 = 100;
 
-/// Maximum height gap a node may fast-sync across without an independently
-/// pinned trusted checkpoint.
+/// Maximum height gap a node may fast-sync across without a trust pin.
 ///
-/// A gap of one height can still be closed by replaying a finalized checkpoint.
-/// Anything larger requires `SIKKA_TRUSTED_CHECKPOINT`, even when
-/// `validator_root` is unchanged — otherwise a former ≥2/3 set can forge a
-/// long-range fork that keeps the same root and trick a stale node.
+/// A gap of one height can still be closed by replaying a finalized checkpoint
+/// against the locally known validator set. Anything larger needs a pin: an
+/// operator `SIKKA_TRUSTED_CHECKPOINT`, or a hash attested by the hardcoded
+/// bootstrap nodes. Unattested snapshots from ordinary gossip peers are never
+/// enough — otherwise a former ≥2/3 set can forge a long-range fork and trick
+/// a stale node.
 pub const WEAK_SUBJECTIVITY_GAP: u64 = 1;
 
 /// Votes more than this many heights ahead of the local tip are ignored.

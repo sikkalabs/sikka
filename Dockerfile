@@ -34,7 +34,7 @@ WORKDIR /data
 VOLUME ["/data"]
 EXPOSE 64552
 
-# Node knobs: SIKKA_PRIVATE_KEY, SIKKA_TRUSTED_CHECKPOINT, SIKKA_LOG.
+# Node knobs: SIKKA_PRIVATE_KEY, SIKKA_TRUSTED_CHECKPOINT (optional), SIKKA_LOG.
 # SIKKA_KEYSTORE / SIKKA_NODE are for the in-container `sikka` CLI only.
 ENV SIKKA_LOG=info \
     SIKKA_KEYSTORE=/data/node_key.json \

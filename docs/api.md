@@ -302,10 +302,11 @@ The old monolithic `GET /api/state/snapshot` JSON response no longer exists.
 
 Snapshot chunks prove their contents against the checkpoint roots, but they do
 not prove an arbitrary history against a long-range fork. A node accepts an
-unpinned snapshot only across a single-height gap. Any larger gap requires an
-independently verified
-`SIKKA_TRUSTED_CHECKPOINT=<height>:<checkpoint-hash>` trust anchor — even when
-the validator root is unchanged.
+unpinned snapshot from an ordinary gossip peer only across a single-height gap.
+Any larger gap needs a pin: the hardcoded bootstrap onions attest the live tip
+automatically (see the whitepaper §16.2). `SIKKA_TRUSTED_CHECKPOINT=<height>:<checkpoint-hash>`
+is the operator override when bootstraps disagree or the validator set has
+changed without a bootstrap quorum.
 
 ---
 
