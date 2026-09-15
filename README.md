@@ -4,6 +4,11 @@ The simplest cryptocurrency for humans, AI agents, and micropayments.
 
 **0% fees. No transaction history. Private by default.**
 
+Named after *sikkā* — the Punjabi word for coin in the history of
+[Sikh coinage](https://en.wikipedia.org/wiki/Sikh_coinage), borrowed from
+Persian, where it meant both a die for minting and, by extension, the
+authority to coin money.
+
 Nodes keep balances, not ledgers of every payment. Consensus signs the state
 root, then discards the transactions. Storage grows with accounts — not with
 every transfer ever made.
