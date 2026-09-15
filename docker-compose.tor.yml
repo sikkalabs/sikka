@@ -1,6 +1,9 @@
 # Tor-mesh local test: two genesis validators over onion.
 #
 # Usage:
+#   cp .env.example .env   # then fill in real seeds
+#   ./docker/test-tor-mesh.sh
+#   # or manually:
 #   docker compose -f docker-compose.tor.yml up --build
 #
 # Requires .env with validator1= / validator2= 32-byte seeds.
@@ -11,7 +14,7 @@ services:
     container_name: sikka-validator1
     environment:
       SIKKA_PRIVATE_KEY: ${validator1}
-      SIKKA_LOG: info
+      SIKKA_LOG: ${SIKKA_LOG:-info}
     volumes:
       - v1-data:/data
     ports:
@@ -23,7 +26,7 @@ services:
     container_name: sikka-validator2
     environment:
       SIKKA_PRIVATE_KEY: ${validator2}
-      SIKKA_LOG: info
+      SIKKA_LOG: ${SIKKA_LOG:-info}
     volumes:
       - v2-data:/data
     ports:

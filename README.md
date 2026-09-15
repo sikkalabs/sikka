@@ -104,7 +104,7 @@ podman volume rm sikka-data   # deletes chain state + keys
 | Unit + integration (host) | `cargo test --workspace --locked` | Same command CI runs; `Cargo.toml` already raises test `opt-level` because ML-DSA-87 is too slow in debug |
 | Full suite (container) | `podman build -f Dockerfile.test -t sikka-test . && podman run --rm sikka-test` | Unit tests + ledger/consensus integration + 4-node HTTP testnet on loopback; never touches the host |
 | Lint / format | `cargo fmt --all -- --check` then `cargo clippy --workspace --all-targets --locked -- -D warnings` | Both enforced in CI |
-| Local Tor mesh (2 validators) | `./docker/test-tor-mesh.sh` | Needs `.env` with `validator1=` / `validator2=` 32-byte seeds; script auto-uses `podman` if `docker` is absent |
+| Local Tor mesh (2 validators) | `cp .env.example .env && ./docker/test-tor-mesh.sh [--strict]` | Seeds validated upfront as 64-hex; script auto-uses `podman` if `docker` is absent; `--strict` fails instead of partial-OK when Tor is blocked |
 
 Tor mesh details:
 

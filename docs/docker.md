@@ -62,13 +62,17 @@ live checkpoint hash from those same bootstrap onions — you do not set
 
 ### Local Tor mesh test (two validators)
 
-With `.env` containing `validator1=` / `validator2=` seeds:
-
 ```bash
-./docker/test-tor-mesh.sh
+cp .env.example .env   # fill in real validator1= / validator2= seeds
+./docker/test-tor-mesh.sh            # partial-OK (exit 0) if Tor is blocked
+./docker/test-tor-mesh.sh --strict   # fail instead — use this in CI
 # or
 docker compose -f docker-compose.tor.yml --env-file .env up --build
 ```
+
+Seeds are validated as 64-hex upfront, peer counts are parsed as JSON, and
+the onion cross-dial uses validator2's live address (never hardcoded).
+`SIKKA_LOG` can be overridden per run (default `info`).
 
 Maps `64553` / `64554` for local RPC health checks while the peer mesh stays
 on onions. Docker needs outbound access to the Tor network for full onion
