@@ -149,18 +149,32 @@ pub fn run(args: &GenesisArgs, json: bool) -> Result<()> {
             "genesis": args.out,
             "chain_id": genesis.chain_id,
             "fingerprint": genesis.fingerprint(),
-            "total_supply": supply,
-            "validators": created.iter().map(|(path, address)| serde_json::json!({
+            "total_supply_chillar": supply,
+            "total_supply_sikka": format_sikka(supply),
+            "validators": created.iter().enumerate().map(|(i, (path, address))| serde_json::json!({
                 "keystore": path,
                 "address": address,
+                "bond_chillar": bond,
+                "bond_sikka": format_sikka(bond),
+                "allocation_chillar": validator_allocation,
+                "allocation_sikka": format_sikka(validator_allocation),
+                "endpoint": args.endpoint_template.as_ref().map(|template| template.replace("{i}", &(i + 1).to_string())),
             })).collect::<Vec<_>>(),
         }))?;
     } else {
         println!("wrote {}", args.out.display());
         println!("chain        {}", genesis.chain_id);
         println!("fingerprint  {}", genesis.fingerprint());
-        println!("supply       {} SIKKA", format_sikka(supply));
-        println!("min bond     {} SIKKA", format_sikka(minimum));
+        println!(
+            "supply       {} SIKKA ({} CHILLAR)",
+            format_sikka(supply),
+            supply
+        );
+        println!(
+            "min bond     {} SIKKA ({} CHILLAR)",
+            format_sikka(minimum),
+            minimum
+        );
         for (path, address) in &created {
             println!("validator    {address}  ({})", path.display());
         }

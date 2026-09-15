@@ -22,7 +22,11 @@ pub fn print_account(info: &AccountInfo) {
         return;
     }
     println!("{}", info.address);
-    println!("balance      {} SIKKA", format_sikka(info.balance));
+    println!(
+        "balance      {} SIKKA ({} CHILLAR)",
+        format_sikka(info.balance),
+        info.balance
+    );
     println!("nonce        {}", info.nonce);
     println!("next nonce   {}", info.next_nonce);
     println!("battery      {} available now", info.battery_now);
@@ -30,7 +34,7 @@ pub fn print_account(info: &AccountInfo) {
         println!("             next charge in {seconds}s");
     }
     if let Some(bond) = info.bond {
-        println!("bond         {} SIKKA", format_sikka(bond));
+        println!("bond         {} SIKKA ({} CHILLAR)", format_sikka(bond), bond);
     }
 }
 
@@ -42,10 +46,15 @@ pub fn print_chain_info(info: &ChainInfo) {
         "checkpoint     {} at {}",
         info.last_checkpoint_hash, info.last_checkpoint_time
     );
-    println!("supply         {} SIKKA", format_sikka(info.total_supply));
     println!(
-        "bonded         {} SIKKA ({:.1}%)",
+        "supply         {} SIKKA ({} CHILLAR)",
+        format_sikka(info.total_supply),
+        info.total_supply
+    );
+    println!(
+        "bonded         {} SIKKA ({} CHILLAR, {:.1}%)",
         format_sikka(info.total_bonded),
+        info.total_bonded,
         percentage(info.total_bonded, info.total_supply)
     );
     println!("accounts       {}", info.accounts);
@@ -81,9 +90,10 @@ pub fn print_validators(validators: &[ValidatorInfo]) {
             "pending"
         };
         println!(
-            "{}  {:>18} SIKKA  {state}",
+            "{}  {:>18} SIKKA ({} CHILLAR)  {state}",
             validator.address,
-            format_sikka(validator.bond)
+            format_sikka(validator.bond),
+            validator.bond
         );
     }
 }
@@ -98,8 +108,16 @@ pub fn print_checkpoint(checkpoint: &Checkpoint) {
     println!("transactions   {}", header.tx_count);
     println!("timestamp      {}", header.timestamp);
     println!("proposer       {}", header.proposer);
-    println!("supply         {} SIKKA", format_sikka(header.total_supply));
-    println!("bonded         {} SIKKA", format_sikka(header.total_bonded));
+    println!(
+        "supply         {} SIKKA ({} CHILLAR)",
+        format_sikka(header.total_supply),
+        header.total_supply
+    );
+    println!(
+        "bonded         {} SIKKA ({} CHILLAR)",
+        format_sikka(header.total_bonded),
+        header.total_bonded
+    );
     println!("signatures     {}", checkpoint.validator_signatures.len());
 }
 

@@ -40,6 +40,7 @@ struct Cli {
     key: PathBuf,
 
     /// Print raw JSON instead of a human summary.
+    /// Amounts in JSON output are CHILLAR integers (1 SIKKA = 10^9 CHILLAR).
     #[arg(long, global = true)]
     json: bool,
 
@@ -73,7 +74,7 @@ enum Command {
     /// Send SIKKA.
     Send {
         to: Address,
-        /// Amount in SIKKA, e.g. `12.5`.
+        /// Amount in SIKKA, e.g. `12.5` (up to 9 decimal places).
         amount: String,
         /// Wait until the transfer is reflected in the recipient's balance.
         #[arg(long)]
@@ -81,7 +82,7 @@ enum Command {
     },
     /// Bond a stake and become a validator.
     Bond {
-        /// Amount in SIKKA.
+        /// Amount in SIKKA, e.g. `400` (up to 9 decimal places).
         amount: String,
     },
     /// Begin unbonding, releasing the stake after the unbonding period.
@@ -170,7 +171,8 @@ async fn run(cli: Cli) -> Result<()> {
                 if cli.json {
                     format::print_json(&serde_json::json!({
                         "address": verified.address,
-                        "balance": verified.balance(),
+                        "balance_chillar": verified.balance(),
+                        "balance_sikka": format_sikka(verified.balance()),
                         "nonce": verified.nonce(),
                         "height": verified.height,
                         "state_root": verified.state_root,
@@ -178,7 +180,11 @@ async fn run(cli: Cli) -> Result<()> {
                         "verified": true,
                     }))?;
                 } else {
-                    println!("{} SIKKA", format_sikka(verified.balance()));
+                    println!(
+                        "{} SIKKA ({} CHILLAR)",
+                        format_sikka(verified.balance()),
+                        verified.balance()
+                    );
                     println!(
                         "verified against checkpoint {} signed by {} validators",
                         verified.height, verified.signatures
@@ -215,7 +221,12 @@ async fn run(cli: Cli) -> Result<()> {
             if cli.json {
                 format::print_json(&receipt)?;
             } else {
-                println!("sent {} SIKKA to {}", format_sikka(amount), to);
+                println!(
+                    "sent {} SIKKA ({} CHILLAR) to {}",
+                    format_sikka(amount),
+                    amount,
+                    to
+                );
                 println!("transaction {}", receipt.id);
                 if account.battery_now <= 1 {
                     println!(
@@ -249,7 +260,11 @@ async fn run(cli: Cli) -> Result<()> {
             if cli.json {
                 format::print_json(&receipt)?;
             } else {
-                println!("bonding {} SIKKA", format_sikka(amount));
+                println!(
+                    "bonding {} SIKKA ({} CHILLAR)",
+                    format_sikka(amount),
+                    amount
+                );
                 println!("transaction {}", receipt.id);
                 println!("you become an active validator one checkpoint after this is final");
             }

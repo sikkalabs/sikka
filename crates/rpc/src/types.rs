@@ -21,6 +21,7 @@ pub struct ChainInfo {
     pub last_checkpoint_time: u64,
     /// Total supply in CHILLAR. Grows by 1.5% annually, forever.
     pub total_supply: u64,
+    /// Total bonded stake in CHILLAR.
     pub total_bonded: u64,
     pub accounts: u64,
     pub active_validators: usize,
@@ -52,6 +53,7 @@ pub struct AccountInfo {
     pub address: Address,
     /// False for an address that has never received coins.
     pub exists: bool,
+    /// Liquid balance in CHILLAR (1 SIKKA = 10^9 CHILLAR).
     pub balance: u64,
     pub nonce: u64,
     /// Battery as of the last transaction this account sent.
@@ -64,7 +66,7 @@ pub struct AccountInfo {
     pub seconds_until_battery: Option<u64>,
     /// The nonce a new transaction should use, counting anything pending.
     pub next_nonce: u64,
-    /// Bond, if this account is a validator.
+    /// Bond in CHILLAR, if this account is a validator.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bond: Option<u64>,
 }
@@ -146,6 +148,7 @@ pub struct TxStatus {
 pub struct ValidatorInfo {
     pub address: Address,
     pub public_key: PublicKey,
+    /// Bonded stake in CHILLAR.
     pub bond: u64,
     pub active_from: u64,
     pub active: bool,
