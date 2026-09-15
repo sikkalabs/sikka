@@ -23,7 +23,9 @@ pub enum VoteOutcome {
     Accepted { checkpoint_hash: Hash, votes: usize },
     /// The same vote again; harmless when gossiped.
     Duplicate,
-    /// Two different hashes for the same `(height, round, kind)`.
+    /// Two conflicting votes from one validator: different hashes at the same
+    /// `(height, round, kind)`, or — for precommits — different hashes at the
+    /// same height in any rounds (a breach of the precommit lock).
     Equivocated(Box<Equivocation>),
 }
 
@@ -62,6 +64,28 @@ impl VoteTracker {
     /// Record a vote, verifying its signature first.
     pub fn record(&mut self, vote: Vote) -> Result<VoteOutcome> {
         vote.verify(&self.chain_id, &self.genesis_fingerprint)?;
+        // Enforce the per-height precommit lock: once a validator has
+        // precommitted a hash at this height (any round), a precommit for a
+        // rival hash is equivocation — even across rounds. Prevotes are
+        // exempt: validators may legitimately prevote different hashes in
+        // later rounds while a partition heals.
+        if vote.kind == VoteKind::Precommit {
+            if let Some(prior) = self
+                .precommit_lock(vote.height, &vote.validator)
+                .cloned()
+            {
+                if prior.checkpoint_hash != vote.checkpoint_hash {
+                    let evidence = Equivocation::new(
+                        prior,
+                        vote,
+                        &self.chain_id,
+                        &self.genesis_fingerprint,
+                    )?;
+                    self.equivocations.push(evidence.clone());
+                    return Ok(VoteOutcome::Equivocated(Box::new(evidence)));
+                }
+            }
+        }
         let height = self.heights.entry(vote.height).or_default();
         // Bound future rounds: tentative votes at an arbitrary round are the
         // one knob a bonded key can turn to fill this tracker (and this node's
@@ -429,6 +453,39 @@ mod tests {
             .record(committee.prevote(0, 1, 0, Hash([2u8; 32])))
             .unwrap();
         assert!(matches!(outcome, VoteOutcome::Equivocated(_)));
+    }
+
+    #[test]
+    fn cross_round_precommits_for_rival_hashes_are_equivocation() {
+        let committee = Committee::new(3);
+        let mut tracker = VoteTracker::new(chain_id(), fingerprint());
+        tracker
+            .record(committee.precommit(0, 1, 0, Hash([1u8; 32])))
+            .unwrap();
+        // Same validator, later round, different hash: a breach of the
+        // per-height precommit lock, not a legitimate re-vote.
+        let outcome = tracker
+            .record(committee.precommit(0, 1, 1, Hash([2u8; 32])))
+            .unwrap();
+        assert!(matches!(outcome, VoteOutcome::Equivocated(_)));
+        assert_eq!(tracker.equivocations().len(), 1);
+    }
+
+    #[test]
+    fn reaffirming_the_locked_hash_is_not_equivocation() {
+        let committee = Committee::new(3);
+        let mut tracker = VoteTracker::new(chain_id(), fingerprint());
+        tracker
+            .record(committee.precommit(0, 1, 0, Hash([1u8; 32])))
+            .unwrap();
+        // Same hash again in a later round: re-affirmation, still counts.
+        assert!(matches!(
+            tracker
+                .record(committee.precommit(0, 1, 1, Hash([1u8; 32])))
+                .unwrap(),
+            VoteOutcome::Accepted { .. }
+        ));
+        assert!(tracker.equivocations().is_empty());
     }
 
     #[test]

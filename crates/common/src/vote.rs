@@ -8,8 +8,10 @@
 //!    hash in that round. Precommits are what finalize, and once cast they lock
 //!    the validator onto that hash for the height.
 //!
-//! Equivocation is signing two different hashes for the same
-//! `(height, round, kind)`. That is the only slashable offence.
+//! Equivocation — the only slashable offence — is signing two different
+//! hashes where the protocol demands one voice: at the same
+//! `(height, round, kind)` for either phase, and, for precommits, anywhere
+//! at the same height (the precommit lock: one hash per height, all rounds).
 //!
 //! Every vote is bound to a chain id so signatures cannot be replayed across
 //! chains that share validator keys.
