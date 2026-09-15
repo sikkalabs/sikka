@@ -1,10 +1,31 @@
 #!/usr/bin/env bash
 # Boot the Tor mesh compose stack and verify both validators come up.
 #
-# Full onion-to-onion discovery needs Tor relay egress from Docker. On networks
+# Full onion-to-onion discovery needs Tor relay egress from the container
+# runtime. On networks
 # that block Tor, this script still verifies: image boot, HS key prep, SOCKS,
 # node health, and onion advertise. When Tor bootstraps, it also checks peers.
 set -euo pipefail
+
+# Container runtime: Podman first, Docker fallback. Override with CONTAINER_RUNTIME.
+RUNTIME="${CONTAINER_RUNTIME:-}"
+if [[ -z "$RUNTIME" ]]; then
+  if command -v podman >/dev/null 2>&1; then
+    RUNTIME=podman
+  else
+    RUNTIME=docker
+  fi
+fi
+# Compose wrapper: `podman compose` (plugin) or `podman-compose` (pip) or `docker compose`.
+COMPOSE=("$RUNTIME" compose)
+if [[ "$RUNTIME" == "podman" ]] && ! podman compose version >/dev/null 2>&1; then
+  if command -v podman-compose >/dev/null 2>&1; then
+    COMPOSE=(podman-compose)
+  else
+    echo "podman found but no compose provider; install podman-compose (pip install podman-compose)" >&2
+    exit 1
+  fi
+fi
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
@@ -24,8 +45,8 @@ if [[ -z "${validator1:-}" || -z "${validator2:-}" ]]; then
   exit 1
 fi
 
-echo "==> building and starting validators"
-docker compose -f docker-compose.tor.yml --env-file .env up --build -d
+echo "==> building and starting validators ($RUNTIME)"
+"${COMPOSE[@]}" -f docker-compose.tor.yml --env-file .env up --build -d
 
 echo "==> waiting for local health endpoints"
 for port in 64553 64554; do
@@ -40,14 +61,14 @@ for port in 64553 64554; do
   done
   if [[ "$ok" != 1 ]]; then
     echo "timeout waiting for health on ${port}" >&2
-    docker compose -f docker-compose.tor.yml logs --tail=80
+    "${COMPOSE[@]}" -f docker-compose.tor.yml logs --tail=80
     exit 1
   fi
 done
 
 echo "==> checking onion advertise + HS keys"
 for c in sikka-validator1 sikka-validator2; do
-  host="$(docker exec "$c" cat /data/arti/ctor/hostname | tr -d '\n')"
+  host="$("$RUNTIME" exec "$c" cat /data/arti/ctor/hostname | tr -d '\n')"
   if [[ ! "$host" =~ \.onion$ ]]; then
     echo "$c missing .onion hostname" >&2
     exit 1
@@ -70,7 +91,7 @@ fi
 echo "==> waiting for Tor bootstrap (up to ~3 minutes)"
 bootstrapped=0
 for _ in $(seq 1 36); do
-  if docker logs sikka-validator1 2>&1 | grep -q 'Bootstrapped 100%'; then
+  if "$RUNTIME" logs sikka-validator1 2>&1 | grep -q 'Bootstrapped 100%'; then
     bootstrapped=1
     break
   fi
@@ -92,12 +113,12 @@ echo "validator1 health: ${h1}"
 echo "validator2 health: ${h2}"
 
 # Cross-check via SOCKS inside the container.
-if ! docker exec sikka-validator1 bash -c \
+if ! "$RUNTIME" exec sikka-validator1 bash -c \
   'curl -fsS --max-time 90 --socks5-hostname 127.0.0.1:9050 http://gejjo77o6nxjtvydahgkcaaebczfj4sjgs2spspykqzqaof46exnqoad.onion/api/health' \
   >/tmp/sikka-onion-health.json 2>/tmp/sikka-onion-health.err; then
   echo "onion dial failed:" >&2
   cat /tmp/sikka-onion-health.err >&2 || true
-  docker compose -f docker-compose.tor.yml logs --tail=80
+  "${COMPOSE[@]}" -f docker-compose.tor.yml logs --tail=80
   exit 1
 fi
 echo "onion health: $(cat /tmp/sikka-onion-health.json)"

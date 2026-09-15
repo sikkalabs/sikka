@@ -15,6 +15,120 @@ every transfer ever made.
 
 ---
 
+## Quickstart (Podman)
+
+Prerequisites: [Podman](https://podman.io/) 4+. No Rust toolchain needed to
+run a node. Every `podman` command below also works with `docker` as a
+drop-in replacement.
+
+```bash
+# 1. Pull the prebuilt image (amd64 + arm64)
+podman pull ghcr.io/sikkalabs/sikka:latest
+
+# 2. Run a node — only the seed is required
+podman run -d --name sikka \
+  -p 64552:64552 \
+  -v sikka-data:/data \
+  -e SIKKA_PRIVATE_KEY=<32-byte-seed-hex> \
+  ghcr.io/sikkalabs/sikka:latest
+
+# 3. Check it
+podman logs -f sikka
+curl -s http://127.0.0.1:64552/api/health
+open http://127.0.0.1:64552/wallet.html  # browser wallet on this node
+```
+
+Peer mesh is Tor-only (built into the image) — no ports to open, no domain
+to configure. The onion address is derived automatically from
+`SIKKA_PRIVATE_KEY`. Optional clearnet for wallets is just a reverse proxy
+in front of port **64552**.
+
+> **SELinux (Fedora / RHEL):** append `:Z` to the volume flag
+> (`-v sikka-data:/data:Z`) so the rootless container can write `/data`.
+
+Full ops guide: [`docs/docker.md`](docs/docker.md) ·
+Stake your node: [`docs/staking.md`](docs/staking.md).
+
+---
+
+## Development
+
+```bash
+# Rust toolchain (matches CI + container builds)
+rustup toolchain install 1.90
+rustup default 1.90
+
+# Fast native checks (no container needed)
+cargo fmt --all -- --check
+cargo clippy --workspace --all-targets --locked -- -D warnings
+cargo test --workspace --locked
+```
+
+Container builds with Podman (same `Dockerfile`, OCI-compatible):
+
+```bash
+# Production node image
+podman build -t ghcr.io/sikkalabs/sikka:latest .
+
+# Test image — runs the whole suite inside the container,
+# so a green run means green on any machine
+podman build -f Dockerfile.test -t sikka-test .
+podman run --rm sikka-test
+```
+
+Useful container CLI (the image ships the `sikka` client, pre-pointed at
+the in-container node):
+
+```bash
+podman exec sikka sikka address
+podman exec sikka sikka balance --verify
+podman exec sikka sikka info
+podman exec sikka sikka validators
+podman exec sikka sikka send <to-address> 10 --wait
+podman exec sikka sikka bond 400
+```
+
+Stop / wipe:
+
+```bash
+podman stop sikka && podman rm sikka
+podman volume rm sikka-data   # deletes chain state + keys
+```
+
+---
+
+## Testing
+
+| What | Command | Notes |
+| --- | --- | --- |
+| Unit + integration (host) | `cargo test --workspace --locked` | Same command CI runs; `Cargo.toml` already raises test `opt-level` because ML-DSA-87 is too slow in debug |
+| Full suite (container) | `podman build -f Dockerfile.test -t sikka-test . && podman run --rm sikka-test` | Unit tests + ledger/consensus integration + 4-node HTTP testnet on loopback; never touches the host |
+| Lint / format | `cargo fmt --all -- --check` then `cargo clippy --workspace --all-targets --locked -- -D warnings` | Both enforced in CI |
+| Local Tor mesh (2 validators) | `./docker/test-tor-mesh.sh` | Needs `.env` with `validator1=` / `validator2=` 32-byte seeds; script auto-uses `podman` if `docker` is absent |
+
+Tor mesh details:
+
+```bash
+# With podman-compose (or docker compose — same file):
+podman-compose -f docker-compose.tor.yml --env-file .env up --build
+# Without any compose plugin — plain Podman, equivalent:
+podman network create sikka-mesh 2>/dev/null || true
+podman run -d --name sikka-validator1 --network sikka-mesh \
+  -p 64553:64552 -v v1-data:/data:Z -e SIKKA_PRIVATE_KEY=$validator1 \
+  ghcr.io/sikkalabs/sikka:latest
+podman run -d --name sikka-validator2 --network sikka-mesh \
+  -p 64554:64552 -v v2-data:/data:Z -e SIKKA_PRIVATE_KEY=$validator2 \
+  ghcr.io/sikkalabs/sikka:latest
+curl -s http://127.0.0.1:64553/api/health
+curl -s http://127.0.0.1:64554/api/health
+```
+
+Full onion-to-onion discovery needs outbound Tor access; where Tor relays
+are blocked the script still verifies boot, HS key derivation, SOCKS, and
+local health. See [`docs/docker.md`](docs/docker.md#local-tor-mesh-test-two-validators).
+
+---
+
 ## Features
 
 - **Zero fees** — send any amount without paying gas. Validators earn from
@@ -36,7 +150,8 @@ every transfer ever made.
 - **Efficient mempool sync** — nodes exchange compact Bloom filters during peer reconciliation to request only missing transactions, minimizing network bandwidth.
 - **Pure-Rust storage** — built on `redb` (ACID key-value store) with 3 fixed tables (`accounts`, `validators`, `meta`), requiring zero C/C++ database dependencies.
 - **Simple ops** — one container, one published port, set `SIKKA_PRIVATE_KEY`.
-  Tor onion advertise is derived automatically. Docker is the production path.
+  Tor onion advertise is derived automatically. Containers (Podman first,
+  Docker compatible) are the production path.
 
 ---
 
@@ -48,6 +163,7 @@ every transfer ever made.
 | Consensus | Checkpoint voting · ≥2/3 bonded stake · round-robin proposer |
 | Spam control | Battery (+1/min, cap 10, 1 per tx) |
 | Transport | Signed JSON over HTTP · Tor-only peer mesh (optional clearnet for wallets) |
+| Containers | Podman (Docker-compatible) · `ghcr.io/sikkalabs/sikka:latest` |
 | Repo | [github.com/sikkalabs/sikka](https://github.com/sikkalabs/sikka) |
 
 ---
@@ -55,7 +171,7 @@ every transfer ever made.
 ## Docs
 
 - Whitepaper: [`docs/whitepaper.md`](docs/whitepaper.md)
-- Run a node: [`docs/docker.md`](docs/docker.md)
+- Run a node: [`docs/docker.md`](docs/docker.md) (Podman commands work 1:1)
 - Stake a node: [`docs/staking.md`](docs/staking.md)
 - Wallets: [`docs/wallets.md`](docs/wallets.md)
 - HTTP + JSON-RPC: [`docs/api.md`](docs/api.md)
