@@ -43,7 +43,8 @@ JSON-RPC errors use `{ "jsonrpc":"2.0", "error":{ "code", "message" }, "id" }`.
 | `GET` | `/wallet.html` | humans |
 | `GET` | `/address.html` | humans |
 | `GET` | `/api/` | discovery JSON |
-| `GET` | `/api/health` | ops / probes |
+| `GET` | `/api/health` | ops / liveness |
+| `GET` | `/api/readyz` | ops / readiness |
 | `GET` | `/api/address/random` | landing teaser |
 | `POST` | `/api/rpc` | wallets / CLI |
 | `POST` | `/api/tx` | peers / clients |
@@ -104,12 +105,26 @@ curl -s https://1.sikkalabs.com/api/
 
 ### `GET /api/health`
 
-Lightweight readiness probe.
+Lightweight liveness probe — only says the RPC listener is up.
 
 **Response:** `chain_id`, `height`, `state_root`, `mempool`, `peers`, `validator`.
 
 ```bash
 curl -s https://1.sikkalabs.com/api/health
+```
+
+### `GET /api/readyz`
+
+Readiness probe — 200 once the node can do its job on the peer mesh (Tor
+reachability `ok`, or `disabled` for nodes that don't need Tor), 503 while
+the onion is still publishing or unreachable. Peer count is informational:
+a lone genesis validator is ready with zero peers.
+
+**Response:** `ready`, `tor` (`status` + `detail`), `peers`, `height`,
+`validator`, `uptime_secs`, `software`.
+
+```bash
+curl -s https://1.sikkalabs.com/api/readyz
 ```
 
 ---

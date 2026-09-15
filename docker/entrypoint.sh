@@ -76,7 +76,21 @@ restart_tor() {
 }
 
 echo "sikka: preparing Tor hidden service keys"
-ADVERTISE="$(/usr/local/bin/sikka-node --prepare-tor 2>/dev/null | tail -n1)"
+# Keep --prepare-tor's stderr visible: it carries the real error (bad
+# SIKKA_PRIVATE_KEY, read-only /data). Fail fast instead of booting Tor
+# with an empty advertise and failing cryptically later.
+prepare_log="$(mktemp)"
+set +e
+ADVERTISE="$(/usr/local/bin/sikka-node --prepare-tor 2>"${prepare_log}" | tail -n1)"
+prepare_code="${PIPESTATUS[0]:-$?}"
+set -e
+if (( prepare_code != 0 )) || [[ -z "${ADVERTISE}" ]]; then
+  echo "sikka: --prepare-tor failed (code ${prepare_code})" >&2
+  cat "${prepare_log}" >&2 || true
+  rm -f "${prepare_log}"
+  exit 1
+fi
+rm -f "${prepare_log}"
 echo "sikka: advertising ${ADVERTISE}"
 
 mkdir -p "${DATA_DIR}/tor-data"

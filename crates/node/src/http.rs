@@ -50,6 +50,7 @@ pub fn router(state: AppState) -> Router {
     let api = Router::new()
         .route("/", get(api_index))
         .route("/health", get(health))
+        .route("/readyz", get(readyz))
         .route("/address/random", get(random_address))
         .route("/tx", post(submit_transaction))
         .route("/tx/{id}", get(has_transaction))
@@ -175,7 +176,7 @@ async fn api_index(State(state): State<AppState>) -> HttpResult<Json<Value>> {
         "address": "/address.html",
         "proof": "/proof.js",
         "endpoints": [
-            "/api/health", "/api/address/random", "/api/rpc", "/api/tx", "/api/tx/sync", "/api/vote",
+            "/api/health", "/api/readyz", "/api/address/random", "/api/rpc", "/api/tx", "/api/tx/sync", "/api/vote",
             "/api/checkpoint/proposal", "/api/checkpoint/finalized",
             "/api/checkpoint/latest", "/api/checkpoint/pending",
             "/api/checkpoint/{height}",
@@ -201,6 +202,32 @@ async fn random_address(State(state): State<AppState>) -> HttpResult<Json<Value>
 
 async fn health(State(state): State<AppState>) -> Json<sikka_p2p::wire::Health> {
     Json(state.node.health())
+}
+
+/// Readiness: `/api/health` only says the RPC listener is up (liveness).
+/// `/api/readyz` reports whether this node can actually do its job on the
+/// peer mesh — 200 once Tor reachability is confirmed (or Tor is disabled
+/// for the node), 503 while the onion is still publishing or unreachable.
+/// Peer count is informational: a lone genesis validator is ready with zero
+/// peers, so it never gates readiness.
+async fn readyz(State(state): State<AppState>) -> impl IntoResponse {
+    let tor = state.node.tor_status();
+    let ready = tor.status == "ok" || tor.status == "disabled";
+    let body = Json(json!({
+        "ready": ready,
+        "tor": tor,
+        "peers": state.node.peers().len(),
+        "height": state.node.height(),
+        "validator": state.node.is_active_validator(),
+        "uptime_secs": state.node.uptime(),
+        "software": concat!("sikka-node/", env!("CARGO_PKG_VERSION")),
+    }));
+    let status = if ready {
+        StatusCode::OK
+    } else {
+        StatusCode::SERVICE_UNAVAILABLE
+    };
+    (status, body)
 }
 
 async fn submit_transaction(
