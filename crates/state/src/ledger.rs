@@ -270,7 +270,11 @@ impl<'a> Overlay<'a> {
 /// Current state, the trees that commit to it, and the rules that change it.
 pub struct Ledger {
     store: Arc<StateStore>,
+    /// The working tree used while a checkpoint is being replayed.
     accounts: Smt,
+    /// The pre-stage tree, retained only while a speculative checkpoint is
+    /// pending so finalized account proofs keep pointing at the last commit.
+    committed_accounts: Option<Smt>,
     validators: Smt,
     meta: LedgerMeta,
 }
@@ -330,6 +334,7 @@ impl Ledger {
             let ledger = Self {
                 store,
                 accounts,
+                committed_accounts: None,
                 validators,
                 meta,
             };
@@ -339,6 +344,7 @@ impl Ledger {
         let mut ledger = Self {
             store,
             accounts: Smt::new(),
+            committed_accounts: None,
             validators: Smt::new(),
             meta: LedgerMeta {
                 chain_id: genesis.chain_id.clone(),
@@ -526,10 +532,15 @@ impl Ledger {
         self.active_validators_at(self.meta.height + 1)
     }
 
-    /// An account with a Merkle proof against the current state root.
+    /// An account with a Merkle proof against the last committed state root.
+    ///
+    /// While a checkpoint is being replayed, `accounts` contains speculative
+    /// state. The pre-stage snapshot is used instead so the account and proof
+    /// continue to describe the same finalized checkpoint exposed by the RPC.
     pub fn account_proof(&self, address: &Address) -> Result<(Option<Account>, Proof)> {
+        let accounts = self.committed_accounts.as_ref().unwrap_or(&self.accounts);
         let account = self.store.account(address)?;
-        Ok((account, self.accounts.proof(&address.to_array())))
+        Ok((account, accounts.proof(&address.to_array())))
     }
 
     /// Sum of every balance and every bond.
@@ -928,6 +939,10 @@ impl Ledger {
 
     /// Fold an outcome into the Merkle trees and report the resulting roots.
     pub fn stage(&mut self, outcome: ExecutionOutcome) -> Staged {
+        // Keep a snapshot of the committed tree. The live tree is updated in
+        // place below, but account proofs exposed while this checkpoint is
+        // pending must still describe the last finalized checkpoint.
+        self.committed_accounts = Some(self.accounts.clone());
         let account_updates: Vec<(crate::smt::Key, Option<Hash>)> = outcome
             .accounts
             .iter()
@@ -960,6 +975,7 @@ impl Ledger {
     pub fn rollback(&mut self, staged: Staged) -> ExecutionOutcome {
         self.validators.revert(staged.validators_undo);
         self.accounts.revert(staged.accounts_undo);
+        self.committed_accounts = None;
         debug_assert_eq!(self.accounts.root(), self.meta.state_root);
         debug_assert_eq!(self.validators.root(), self.meta.validator_root);
         staged.outcome
@@ -1010,6 +1026,7 @@ impl Ledger {
         match self.store.write(&batch) {
             Ok(()) => {
                 self.meta = meta;
+                self.committed_accounts = None;
                 Ok(())
             }
             Err(e) => {
@@ -1131,6 +1148,7 @@ impl Ledger {
         Ok(Self {
             store,
             accounts,
+            committed_accounts: None,
             validators,
             meta,
         })
@@ -1189,6 +1207,7 @@ impl Ledger {
                 .iter()
                 .map(|v| (v.address.to_array(), v.leaf_hash())),
         );
+        self.committed_accounts = None;
         self.meta = meta;
         Ok(())
     }

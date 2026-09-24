@@ -333,7 +333,7 @@ impl Node {
         Health {
             chain_id: chain.ledger.meta().chain_id.clone(),
             height: chain.ledger.height(),
-            state_root: chain.ledger.state_root(),
+            state_root: chain.ledger.meta().state_root,
             mempool: self.mempool.lock().len(),
             peers: self.peers.lock().len(),
             validator: chain
@@ -397,17 +397,22 @@ impl Node {
     /// An account plus the Merkle path and signed checkpoint that prove it.
     pub fn account_proof(&self, address: &Address) -> Result<AccountProof> {
         let chain = self.chain();
-        let (account, proof) = chain.ledger.account_proof(address)?;
         let height = chain.ledger.height();
         let checkpoint = chain
             .checkpoints
             .get(height)?
             .ok_or(Error::CheckpointNotFound(height))?;
+
+        // A pending proposal has already changed the in-memory account tree,
+        // while the store and checkpoint still describe the last finalized
+        // state. `Ledger::account_proof` retains the pre-stage tree for this
+        // window, so the account, Merkle path, and checkpoint all name one root.
+        let (account, proof) = chain.ledger.account_proof(address)?;
         Ok(AccountProof {
             address: *address,
             account,
             proof,
-            state_root: chain.ledger.state_root(),
+            state_root: checkpoint.header.state_root,
             checkpoint,
         })
     }
@@ -1616,9 +1621,9 @@ impl Node {
     /// Only the *staged state* is released, never the vote: the vote is a
     /// signed commitment, and forgetting it would let this node sign a second
     /// checkpoint at the same height and slash itself. Releasing the staging
-    /// lets a later round be replayed and applied if it wins instead, and keeps
-    /// the ledger's Merkle roots equal to the last committed checkpoint while
-    /// the height stays open.
+    /// lets a later round be replayed and applied if it wins instead, and
+    /// restores the live Merkle roots to the last committed checkpoint. While
+    /// a round is pending, finalized account proofs use the pre-stage snapshot.
     ///
     /// The proposal is kept, because the vote by itself is a commitment with
     /// nothing left to commit: this node may not sign a rival, so unless it can
@@ -2395,6 +2400,59 @@ mod tests {
         let observer = Node::open(config).unwrap();
         assert!(!observer.is_active_validator());
         assert!(observer.try_propose().unwrap().is_none());
+    }
+
+    #[test]
+    fn account_proof_uses_the_committed_state_while_a_checkpoint_is_pending() {
+        let f = solo_node();
+        let bob = Address([7u8; 32]);
+        f.node
+            .submit_transaction(transfer(
+                &f.alice,
+                bob,
+                700,
+                0,
+                &f.chain_id(),
+                f.genesis_fingerprint(),
+            ))
+            .unwrap();
+        f.node
+            .submit_transaction(transfer(
+                &f.alice,
+                bob,
+                300,
+                1,
+                &f.chain_id(),
+                f.genesis_fingerprint(),
+            ))
+            .unwrap();
+
+        // `try_propose` stages height 1, but the last finalized checkpoint is
+        // still genesis. The proof must describe genesis, not the speculative
+        // transfer state in memory.
+        let (_proposal, _vote) = f.node.try_propose().unwrap().unwrap();
+        assert_eq!(
+            f.node.health().state_root,
+            f.node.chain_info().unwrap().state_root
+        );
+
+        let bob_proof = f.node.account_proof(&bob).unwrap();
+        assert_eq!(bob_proof.checkpoint.header.height, 0);
+        assert_eq!(bob_proof.state_root, bob_proof.checkpoint.header.state_root);
+        assert!(bob_proof.account.is_none());
+        assert!(bob_proof
+            .proof
+            .verify_absent(&bob_proof.state_root, &bob.to_array()));
+
+        let alice = Address(f.alice.address_bytes());
+        let alice_proof = f.node.account_proof(&alice).unwrap();
+        let account = alice_proof.account.unwrap();
+        assert_eq!(account.balance, 1_000 * CHILLAR_PER_SIKKA);
+        assert!(alice_proof.proof.verify(
+            &alice_proof.state_root,
+            &alice.to_array(),
+            &account.leaf_hash(&alice),
+        ));
     }
 
     #[test]
